@@ -1,0 +1,142 @@
+name: Build and Release Binaries
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      skip: ${{ steps.check_tag.outputs.skip }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Read version from pyproject.toml (uv)
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=$(uv version | awk '{print $2}')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists on remote
+        id: check_tag
+        shell: bash
+        run: |
+          TAG="v${{ steps.get_version.outputs.version }}"
+          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG exists on remote. Skipping release/build."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Git tag if not exists
+        id: tag
+        shell: bash
+        if: steps.check_tag.outputs.skip != 'true'
+        run: |
+          TAG="v${{ steps.get_version.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Local tag $TAG exists; pushing to remote if needed."
+          else
+            git tag "$TAG"
+          fi
+          git push origin "$TAG" || true
+
+      - name: Ensure GitHub Release exists
+        uses: softprops/action-gh-release@v2
+        if: steps.check_tag.outputs.skip != 'true'
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: v${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: false
+
+  build-windows:
+    runs-on: windows-latest
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install project dependencies (uv sync)
+        shell: bash
+        run: |
+          uv sync
+
+      - name: Install PyInstaller
+        shell: bash
+        run: |
+          uv pip install pyinstaller
+
+      - name: Build executable with PyInstaller (Windows)
+        shell: bash
+        run: |
+          uv run pyinstaller --onefile main.py --name DatasphereAutomation --icon datasphere.ico
+
+      - name: Package artifact with version
+        shell: bash
+        run: |
+          mkdir -p dist_out
+          cp "dist/DatasphereAutomation.exe" "dist_out/DatasphereAutomation-${{ needs.prepare.outputs.version }}-windows.exe"
+
+      - name: Upload asset to Release (Windows)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          files: |
+            dist_out/DatasphereAutomation-${{ needs.prepare.outputs.version }}-windows.exe
+
+  build-macos:
+    runs-on: macos-latest
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install project dependencies (uv sync)
+        shell: bash
+        run: |
+          uv sync
+
+      - name: Install PyInstaller
+        shell: bash
+        run: |
+          uv pip install pyinstaller
+
+      - name: Build CLI binary with PyInstaller (macOS)
+        shell: bash
+        run: |
+          uv run pyinstaller --onefile --name DatasphereAutomation main.py
+
+      - name: Package CLI binary with version
+        shell: bash
+        run: |
+          mkdir -p dist_out
+          cp "dist/DatasphereAutomation" "dist_out/DatasphereAutomation-${{ needs.prepare.outputs.version }}-macos"
+
+      - name: Upload CLI binary to Release (macOS)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          files: |
+            dist_out/DatasphereAutomation-${{ needs.prepare.outputs.version }}-macos
+
+
