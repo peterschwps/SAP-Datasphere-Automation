@@ -4,12 +4,12 @@ CLI tool for automating various tasks in SAP Datasphere, including managing anal
 
 ## 📋 Table of Contents
 
-- [Overview](#overview)
-- [Features](#features)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
+- [Overview](#-overview)
+- [Features](#-features)
+- [Prerequisites](#-prerequisites)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [Usage](#-usage)
 - [Detailed Function Overview](#-detailed-function-overview)
 - [Development](#-development)
 - [Notes](#-notes)
@@ -49,7 +49,7 @@ This program enables the automation of recurring tasks in SAP Datasphere. It pro
 - **Python**: Version 3.12 or 3.13 (see `pyproject.toml`)
 - **uv** for package management
 - **Browser** for authentication (optional, if browser method is used):
-  - Chrome/Chromium
+  - Chrome
   - Edge
   - Playwright
 
