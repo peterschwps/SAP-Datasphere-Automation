@@ -1,6 +1,6 @@
 # SAP Datasphere Automation
 
-CLI tool for automating various tasks in SAP Datasphere, including managing analytical models, remote tables and views.
+Unofficial CLI for SAP Datasphere that automates various tasks such as managing analytical models, remote tables, and views.
 
 ## 📋 Table of Contents
 
