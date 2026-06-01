@@ -10,6 +10,7 @@ from rich.text import Text
 
 from datasphere.analytical_models import AnalyticalModels
 from datasphere.remote_tables import RemoteTables
+from datasphere.task_chains import TaskChains
 from datasphere.views import Views
 
 
@@ -51,6 +52,7 @@ class Menu:
         self.classes = {
             "Analytical Models": AnalyticalModels,
             "Remote Tables": RemoteTables,
+            "Task Chains": TaskChains,
             "Views": Views,
         }
 
@@ -66,6 +68,9 @@ class Menu:
             "Remote Tables": {
                 "Create statistics for all tables": RemoteTables.create_statistics,  # noqa: E501
                 "Refresh statistics for all tables": RemoteTables.refresh_statistics,  # noqa: E501
+            },
+            "Task Chains": {
+                "Run task chain": TaskChains.run_task_chains,
             },
             "Views": {
                 "Export all views with persistence score 10": Views.create_view_analytics,  # noqa: E501
