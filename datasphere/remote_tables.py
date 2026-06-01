@@ -12,11 +12,8 @@ from utils.types import (
     StatisticsType,
 )
 
-# Important conditions from settings
-URL_TO_USE: str = settings["Setup"]["URL_TO_USE"]
-
 # Important URLs from settings
-DATASPHERE_URL: str = settings["URLs"][URL_TO_USE]
+DATASPHERE_URL: str = settings["Setup"]["DATASPHERE_URL"]
 
 
 class RemoteTables(DatasphereAutomation):
