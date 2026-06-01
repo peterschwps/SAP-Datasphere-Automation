@@ -16,7 +16,7 @@ _PROJECT_NAME = "Datasphere"
 _PROJECT_PATH = os.getcwd()
 DATA_DIR = Path(user_data_dir(_PROJECT_NAME))
 _CONFIG_DIR = Path(user_config_dir(_PROJECT_NAME))
-COOKIES_FILE = os.path.join(_CONFIG_DIR, ".cookies.json")
+SESSION_FILE = os.path.join(DATA_DIR, "session.json")
 _SETTINGS_FILE = os.path.join(_CONFIG_DIR, "settings.ini")
 
 # Create directories if they don't exist
@@ -39,19 +39,21 @@ def create_settings_file(is_wrong: bool = False) -> None:
     """
     if is_wrong:
         logger.error("Corrupt settings file. Generating a new file...")
-    settings["URLs"] = {
-        # System > Administration > Tenant Links: SAP Datasphere URL
-        "DATASPHERE_TEST_URL": "https://example-test.eu10.hcs.cloud.sap",
-        # System > Administration > Tenant Links: SAP Datasphere URL
-        "DATASPHERE_PROD_URL": "https://example-prod.eu10.hcs.cloud.sap",
-    }
     settings["Setup"] = {
-        # DATASPHERE_TEST_URL or DATASPHERE_PROD_URL
-        "URL_TO_USE": "DATASPHERE_PROD_URL",
-        # REQUESTS or BROWSER
-        "AUTHENTICATION_METHOD": "REQUESTS",
-        # CHROME, EDGE or PLAYWRIGHT
+        # System > Administration > Tenant Links > SAP Datasphere URL
+        "DATASPHERE_URL": "https://example.eu10.hcs.cloud.sap",
+        # System > Administration > App Integration > Authorization URL
+        "AUTHORIZATION_URL": "https://example.authentication.eu10.hana.ondemand.com/oauth/authorize",
+        # System > Administration > App Integration > Token URL
+        "TOKEN_URL": "https://example.authentication.eu10.hana.ondemand.com/oauth/token",
+        # Browser to use for initial authentication (Chrome or Edge)
         "BROWSER_TO_USE": "CHROME",
+    }
+    settings["Credentials"] = {
+        # System > Administration > App Integration > Configured Clients > OAuth Client ID
+        "CLIENT_ID": "",
+        # System > Administration > App Integration > Configured Clients > Redirect URI
+        "REDIRECT_URI": "http://localhost:8080",
     }
     with open(_SETTINGS_FILE, "w") as settings_file:
         settings.write(settings_file)
@@ -74,18 +76,15 @@ else:
 # Check required values in settings file
 try:
     # Categories
-    _ = settings["URLs"]
-    _ = settings["Setup"]
+    _ = settings["Setup"], settings["Credentials"]
 
     # Keys
-    url = settings["Setup"]["URL_TO_USE"]
-    _ = settings["URLs"][url]
-    auth_method = settings["Setup"]["AUTHENTICATION_METHOD"]
-    if auth_method.upper() not in ["REQUESTS", "BROWSER"]:
-        raise KeyError
-    browser = settings["Setup"]["BROWSER_TO_USE"]
-    if browser.upper() not in ["CHROME", "EDGE", "PLAYWRIGHT"]:
-        raise KeyError
+    _ = settings["Setup"]["DATASPHERE_URL"]
+    _ = settings["Setup"]["AUTHORIZATION_URL"]
+    _ = settings["Setup"]["TOKEN_URL"]
+    _ = settings["Setup"]["BROWSER_TO_USE"]
+    _ = settings["Credentials"]["CLIENT_ID"]
+    _ = settings["Credentials"]["REDIRECT_URI"]
 
 except KeyError:
     settings.clear()  # to delete invalid entries
@@ -101,6 +100,16 @@ ALL_PATHS = {
 
 # Files
 ALL_FILES = {
+    "TASK_CHAIN_RUN": {
+        "name": "task_chains_to_run.csv",
+        "path": ALL_PATHS["TASKS"],
+        "columns": ["entity", "space"],
+    },
+    "TASK_CHAIN_RUN_RESULT": {
+        "name": "task_chains_completed.csv",
+        "path": ALL_PATHS["RESULTS"],
+        "columns": ["entity", "space", "isCompleted", "runtime"],
+    },
     "VIEW_ANALYSE": {
         "name": "best_views_to_persist.csv",
         "path": ALL_PATHS["EXPORTS"],
