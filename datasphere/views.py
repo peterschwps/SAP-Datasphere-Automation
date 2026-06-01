@@ -41,9 +41,6 @@ class Views(DatasphereAutomation):
                                    names ("name") and further details.
         """
         # Update headers
-        for header in ("X-Csrf-Token", "X-Requested-With", "Priority"):
-            with contextlib.suppress(KeyError):
-                self.session.headers.pop(header)
         self.session.headers.update(
             {
                 "Accept": "application/json",
@@ -93,7 +90,6 @@ class Views(DatasphereAutomation):
 
         # Remove unnecessary headers for next requests
         for header in (
-            "Origin",
             "UI5-Timezone",
             "UI5-Timepattern",
             "UI5-Datepattern",
@@ -452,8 +448,6 @@ class Views(DatasphereAutomation):
             views_to_partition = list(reader)[1:]
 
         # Update headers
-        self.session.headers.pop("Origin")
-        self.session.headers.pop("Priority")
         self.session.headers.update({"Accept": "*/*"})
 
         # Function to check if a view has an existing partition
@@ -643,8 +637,6 @@ class Views(DatasphereAutomation):
             views_to_delete_partition = list(reader)[1:]
 
         # Update headers
-        self.session.headers.pop("Origin")
-        self.session.headers.pop("Priority")
         self.session.headers.update({"Accept": "*/*"})
 
         # Function to remove partitions for a view
@@ -758,8 +750,6 @@ class Views(DatasphereAutomation):
                 writer.writerow(values)
 
         # Update headers
-        self.session.headers.pop("Priority")
-        self.session.headers.pop("Origin")
         self.session.headers.update(
             {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
         )
@@ -953,8 +943,6 @@ class Views(DatasphereAutomation):
                 writer.writerow(values)
 
         # Update headers
-        self.session.headers.pop("Priority")
-        self.session.headers.pop("Origin")
         self.session.headers.update(
             {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
         )
@@ -1143,8 +1131,6 @@ class Views(DatasphereAutomation):
             views_to_lock = list(reader)[1:]
 
         # Update headers
-        self.session.headers.pop("Origin")
-        self.session.headers.pop("Priority")
         self.session.headers.update({"Accept": "*/*"})
 
         # Function to lock partitions for a view
@@ -1269,8 +1255,6 @@ class Views(DatasphereAutomation):
             views_to_unlock = list(reader)[1:]
 
         # Update headers
-        self.session.headers.pop("Origin")
-        self.session.headers.pop("Priority")
         self.session.headers.update({"Accept": "*/*"})
 
         # Function to unlock all partitions for a view

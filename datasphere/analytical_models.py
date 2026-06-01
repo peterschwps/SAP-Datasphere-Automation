@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import csv
 import json
 from copy import deepcopy
@@ -44,9 +45,6 @@ class AnalyticalModels(DatasphereAutomation):
         """
 
         # Update headers
-        self.session.headers.pop("X-Csrf-Token")
-        self.session.headers.pop("X-Requested-With")
-        self.session.headers.pop("Priority")
         self.session.headers.update(
             {
                 "Accept": "application/json",
@@ -94,11 +92,14 @@ class AnalyticalModels(DatasphereAutomation):
         )
 
         # Remove unnecessary headers for next requests
-        self.session.headers.pop("Origin")
-        self.session.headers.pop("UI5-Timezone")
-        self.session.headers.pop("UI5-Timepattern")
-        self.session.headers.pop("UI5-Datepattern")
-        self.session.headers.pop("Cache-Control")
+        for header in (
+            "UI5-Timezone",
+            "UI5-Timepattern",
+            "UI5-Datepattern",
+            "Cache-Control",
+        ):
+            with contextlib.suppress(KeyError):
+                self.session.headers.pop(header)
 
         return all_analytical_models
 
