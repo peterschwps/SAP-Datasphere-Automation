@@ -70,7 +70,7 @@ class Menu:
                 "Refresh statistics for all tables": RemoteTables.refresh_statistics,  # noqa: E501
             },
             "Task Chains": {
-                "Run task chain": TaskChains.run_task_chains,
+                "Run task chains": TaskChains.run_task_chains,
             },
             "Views": {
                 "Export all views with persistence score 10": Views.create_view_analytics,  # noqa: E501
