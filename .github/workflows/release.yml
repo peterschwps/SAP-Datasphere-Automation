@@ -85,7 +85,7 @@ jobs:
       - name: Build executable with PyInstaller (Windows)
         shell: bash
         run: |
-          uv run pyinstaller --onefile main.py --name DatasphereAutomation --icon datasphere.ico
+          uv run pyinstaller --onefile main.py --name DatasphereAutomation --icon static/datasphere.ico
 
       - name: Package artifact with version
         shell: bash
