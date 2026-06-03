@@ -58,10 +58,6 @@ provides scripts for managing:
 
 - **Python**: Version 3.12 or 3.13 (see `pyproject.toml`)
 - **uv** for package management
-- **Browser** for authentication (optional, if browser method is used):
-  - Chrome
-  - Edge
-  - Playwright
 
 ## 📦 Installation
 
