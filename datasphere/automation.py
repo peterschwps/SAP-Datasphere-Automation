@@ -21,14 +21,24 @@ AUTHORIZATION_URL: str = settings["Setup"]["AUTHORIZATION_URL"]
 TOKEN_URL: str = settings["Setup"]["TOKEN_URL"]
 BROWSER_TO_USE: str = settings["Setup"]["BROWSER_TO_USE"].upper()
 CLIENT_ID: str = settings["Credentials"]["CLIENT_ID"]
-REDIRECT_URI: str = settings['Credentials']['REDIRECT_URI']
+CLIENT_SECRET: str = settings["Credentials"]["SECRET"]
+REDIRECT_URI: str = "http://localhost:8080"
+
+# Fetch CLIENT_SECRET from environment variable if not set in settings file
+if not CLIENT_SECRET:
+    CLIENT_SECRET = os.environ.get("SECRET", "")
+    if not CLIENT_SECRET:
+        logger.critical(
+            "Client secret not found. Please set the 'SECRET' environment "
+            "variable or add the secret to the settings file."
+        )
+        sys.exit(1)
 
 # Mapping of BROWSER_TO_USE to webdriver classes
 BROWSER_MAPPING = {
     "CHROME": "chrome",
     "EDGE": "msedge",
 }
-
 
 class DatasphereAutomation:
     def __init__(self):
@@ -79,7 +89,7 @@ class DatasphereAutomation:
                 # Refresh tokens
                 auth = httpx.BasicAuth(
                     username=CLIENT_ID,
-                    password=os.environ.get("SECRET", ""),
+                    password=CLIENT_SECRET,
                 )
                 response = await self.session.post(
                     url=TOKEN_URL,
@@ -202,7 +212,7 @@ class DatasphereAutomation:
         # Send callback code to token endpoint to receive access tokens
         auth = httpx.BasicAuth(
             username=CLIENT_ID,
-            password=os.environ.get("SECRET", ""),
+            password=CLIENT_SECRET,
         )
         response = await self.session.post(
             url=TOKEN_URL,

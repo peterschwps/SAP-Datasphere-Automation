@@ -50,10 +50,12 @@ def create_settings_file(is_wrong: bool = False) -> None:
         "BROWSER_TO_USE": "CHROME",
     }
     settings["Credentials"] = {
-        # System > Administration > App Integration > Configured Clients > OAuth Client ID
+        # System > Administration > App Integration > Configured Clients 
+        # > OAuth Client ID
         "CLIENT_ID": "",
-        # System > Administration > App Integration > Configured Clients > Redirect URI
-        "REDIRECT_URI": "http://localhost:8080",
+        # System > Administration > App Integration > Configured Clients 
+        # > Secret
+        "SECRET": ""
     }
     with open(_SETTINGS_FILE, "w") as settings_file:
         settings.write(settings_file)
@@ -84,7 +86,7 @@ try:
     _ = settings["Setup"]["TOKEN_URL"]
     _ = settings["Setup"]["BROWSER_TO_USE"]
     _ = settings["Credentials"]["CLIENT_ID"]
-    _ = settings["Credentials"]["REDIRECT_URI"]
+    _ = settings["Credentials"]["SECRET"]
 
 except KeyError:
     settings.clear()  # to delete invalid entries
