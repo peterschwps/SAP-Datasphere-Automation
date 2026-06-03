@@ -205,11 +205,11 @@ uv run python main.py
 .\DatasphereAutomation.exe
 ```
 
-### First Run
+### First Run / Expired Tokens
 
-On first execution, the CLI will open a browser window. After logging in the
-site will automatically redirect to `http://localhost:8080`, fetch the callback
-code and close the browser window.
+On first execution (or if your refresh token has expired), the CLI will open a
+browser window. After logging in the site will automatically redirect to
+`http://localhost:8080`, fetch the callback code and close the browser window.
 
 This will create a login session which can be refreshed automatically in the
 future.
