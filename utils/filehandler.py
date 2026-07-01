@@ -17,7 +17,7 @@ _PROJECT_PATH = os.getcwd()
 DATA_DIR = Path(user_data_dir(_PROJECT_NAME))
 _CONFIG_DIR = Path(user_config_dir(_PROJECT_NAME))
 SESSION_FILE = os.path.join(DATA_DIR, "session.json")
-_SETTINGS_FILE = os.path.join(_CONFIG_DIR, "settings.ini")
+SETTINGS_FILE = os.path.join(_CONFIG_DIR, "settings.ini")
 
 # Create directories if they don't exist
 _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,23 +57,23 @@ def create_settings_file(is_wrong: bool = False) -> None:
         # > Secret
         "SECRET": ""
     }
-    with open(_SETTINGS_FILE, "w") as settings_file:
+    with open(SETTINGS_FILE, "w") as settings_file:
         settings.write(settings_file)
-    logger.info("Created new settings file at '%s'.", _SETTINGS_FILE)
+    logger.info("Created new settings file at '%s'.", SETTINGS_FILE)
     logger.debug("Opening file...")
     logger.debug("Please fill it and restart the program.")
     with contextlib.suppress(Exception):
-        webbrowser.open(f"file://{_SETTINGS_FILE}")
+        webbrowser.open(f"file://{SETTINGS_FILE}")
     sys.exit()
 
 
 # Create settings if file doesn't exist
-if not os.path.isfile(_SETTINGS_FILE):
+if not os.path.isfile(SETTINGS_FILE):
     create_settings_file()
 
 # Otherwise load settings
 else:
-    settings.read(_SETTINGS_FILE)
+    settings.read(SETTINGS_FILE)
 
 # Check required values in settings file
 try:

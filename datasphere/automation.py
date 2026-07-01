@@ -15,26 +15,9 @@ from playwright.async_api import async_playwright
 from utils.filehandler import DATA_DIR, SESSION_FILE, settings
 from utils.logging import logger
 
-# Settings
-DATASPHERE_URL: str = settings["Setup"]["DATASPHERE_URL"]
-AUTHORIZATION_URL: str = settings["Setup"]["AUTHORIZATION_URL"]
-TOKEN_URL: str = settings["Setup"]["TOKEN_URL"]
-BROWSER_TO_USE: str = settings["Setup"]["BROWSER_TO_USE"].upper()
-CLIENT_ID: str = settings["Credentials"]["CLIENT_ID"]
-CLIENT_SECRET: str = settings["Credentials"]["SECRET"]
 REDIRECT_URI: str = "http://localhost:8080"
 
-# Fetch CLIENT_SECRET from environment variable if not set in settings file
-if not CLIENT_SECRET:
-    CLIENT_SECRET = os.environ.get("SECRET", "")
-    if not CLIENT_SECRET:
-        logger.critical(
-            "Client secret not found. Please set the 'SECRET' environment "
-            "variable or add the secret to the settings file."
-        )
-        sys.exit(1)
-
-# Mapping of BROWSER_TO_USE to webdriver classes
+# Mapping of browser names to Playwright channel identifiers
 BROWSER_MAPPING = {
     "CHROME": "chrome",
     "EDGE": "msedge",
@@ -42,6 +25,21 @@ BROWSER_MAPPING = {
 
 class DatasphereAutomation:
     def __init__(self):
+        self.datasphere_url = settings["Setup"]["DATASPHERE_URL"]
+        self.authorization_url = settings["Setup"]["AUTHORIZATION_URL"]
+        self.token_url = settings["Setup"]["TOKEN_URL"]
+        self.browser_to_use = settings["Setup"]["BROWSER_TO_USE"].upper()
+        self.client_id = settings["Credentials"]["CLIENT_ID"]
+        self.client_secret = settings["Credentials"]["SECRET"]
+        if not self.client_secret:
+            self.client_secret = os.environ.get("SECRET", "")
+            if not self.client_secret:
+                logger.critical(
+                    "Client secret not found. Please set the 'SECRET' "
+                    "environment variable or add the secret to the settings "
+                    "file."
+                )
+                sys.exit(1)
         self.session: httpx.AsyncClient = httpx.AsyncClient(
             timeout=60.0,
             follow_redirects=True,
@@ -88,11 +86,11 @@ class DatasphereAutomation:
 
                 # Refresh tokens
                 auth = httpx.BasicAuth(
-                    username=CLIENT_ID,
-                    password=CLIENT_SECRET,
+                    username=self.client_id,
+                    password=self.client_secret,
                 )
                 response = await self.session.post(
-                    url=TOKEN_URL,
+                    url=self.token_url,
                     data={
                         "grant_type": "refresh_token",
                         "refresh_token": tokens["refresh_token"],
@@ -113,6 +111,7 @@ class DatasphereAutomation:
         # If no cookies were found
         else:
             logger.debug("No cookies found.")
+            logger.debug("Opening browser window to log in...")
 
         # Start authentication/refresh
         await self._start_authentication()
@@ -195,14 +194,14 @@ class DatasphereAutomation:
         with callback_server():
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
-                    channel=BROWSER_MAPPING[BROWSER_TO_USE],
+                    channel=BROWSER_MAPPING[self.browser_to_use],
                     headless=False,
                 )
                 page = await browser.new_page()
                 await page.goto(
-                    f"{AUTHORIZATION_URL}"
+                    f"{self.authorization_url}"
                     f"?response_type=code"
-                    f"&client_id={quote(CLIENT_ID)}"
+                    f"&client_id={quote(self.client_id)}"
                     f"&redirect_uri={quote(REDIRECT_URI)}"
                 )
 
@@ -211,11 +210,11 @@ class DatasphereAutomation:
 
         # Send callback code to token endpoint to receive access tokens
         auth = httpx.BasicAuth(
-            username=CLIENT_ID,
-            password=CLIENT_SECRET,
+            username=self.client_id,
+            password=self.client_secret,
         )
         response = await self.session.post(
-            url=TOKEN_URL,
+            url=self.token_url,
             data={
                 "grant_type": "authorization_code",
                 "code": callback["code"],

@@ -21,11 +21,11 @@ if not os.path.exists(DIRECTORY_LOGS):
 
 # Mapping of the logging levels to the rich colors
 FORMATS = {
-    logging.DEBUG: "blue",
-    logging.INFO: "green",
-    logging.WARNING: "yellow",
-    logging.ERROR: "red",
-    logging.CRITICAL: "bold red",
+    logging.DEBUG: "#223548",
+    logging.INFO: "#188918",
+    logging.WARNING: "#C35500",
+    logging.ERROR: "#D20A0A",
+    logging.CRITICAL: "bold #AA0808",
 }
 
 # Set up the logger
