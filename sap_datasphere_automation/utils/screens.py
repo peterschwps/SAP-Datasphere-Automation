@@ -26,13 +26,13 @@ try:
 except PackageNotFoundError:
     _APP_VERSION = "dev"
 
-from datasphere.analytical_models import AnalyticalModels
-from datasphere.remote_tables import RemoteTables
-from datasphere.task_chains import TaskChains
-from datasphere.views import Views
-from static.logo import ASCII_LOGO
-from utils.filehandler import SETTINGS_FILE, settings
-from utils.logging import STREAM_FORMAT, logger
+from sap_datasphere_automation.datasphere.analytical_models import AnalyticalModels
+from sap_datasphere_automation.datasphere.remote_tables import RemoteTables
+from sap_datasphere_automation.datasphere.task_chains import TaskChains
+from sap_datasphere_automation.datasphere.views import Views
+from sap_datasphere_automation.static.logo import ASCII_LOGO
+from sap_datasphere_automation.utils.filehandler import SETTINGS_FILE, settings
+from sap_datasphere_automation.utils.logging import STREAM_FORMAT, logger
 
 # Mapping of all categories
 CATEGORIES: dict[str, type] = {

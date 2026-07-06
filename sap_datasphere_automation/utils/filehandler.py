@@ -9,7 +9,7 @@ from pathlib import Path
 
 from platformdirs import user_config_dir, user_data_dir
 
-from utils.logging import logger
+from sap_datasphere_automation.utils.logging import logger
 
 # Paths
 _PROJECT_NAME = "Datasphere"
@@ -50,10 +50,10 @@ def create_settings_file(is_wrong: bool = False) -> None:
         "BROWSER_TO_USE": "CHROME",
     }
     settings["Credentials"] = {
-        # System > Administration > App Integration > Configured Clients 
+        # System > Administration > App Integration > Configured Clients
         # > OAuth Client ID
         "CLIENT_ID": "",
-        # System > Administration > App Integration > Configured Clients 
+        # System > Administration > App Integration > Configured Clients
         # > Secret
         "SECRET": ""
     }

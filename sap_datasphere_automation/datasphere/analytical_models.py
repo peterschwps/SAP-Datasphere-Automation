@@ -8,11 +8,11 @@ from uuid import uuid4
 
 import httpx
 
-from datasphere.automation import DatasphereAutomation
-from datasphere.views import Views
-from utils.filehandler import ALL_FILES, settings
-from utils.logging import logger
-from utils.types import AnalyticalModelsDetailsDict
+from sap_datasphere_automation.datasphere.automation import DatasphereAutomation
+from sap_datasphere_automation.datasphere.views import Views
+from sap_datasphere_automation.utils.filehandler import ALL_FILES, settings
+from sap_datasphere_automation.utils.logging import logger
+from sap_datasphere_automation.utils.types import AnalyticalModelsDetailsDict
 
 # Important URLs from settings
 DATASPHERE_URL: str = settings["Setup"]["DATASPHERE_URL"]

@@ -12,8 +12,12 @@ from urllib.parse import parse_qs, quote, urlparse
 import httpx
 from playwright.async_api import async_playwright
 
-from utils.filehandler import DATA_DIR, SESSION_FILE, settings
-from utils.logging import logger
+from sap_datasphere_automation.utils.filehandler import (
+    DATA_DIR,
+    SESSION_FILE,
+    settings,
+)
+from sap_datasphere_automation.utils.logging import logger
 
 REDIRECT_URI: str = "http://localhost:8080"
 
@@ -117,16 +121,16 @@ class DatasphereAutomation:
         await self._start_authentication()
         return self.session
 
-    
+
     async def _start_authentication(self):
 
         class ReusableServer(socketserver.TCPServer):
             allow_reuse_address = True  # to allow immediate reuse of the port
 
-        # Mutable container to store the callback code and access it from 
+        # Mutable container to store the callback code and access it from
         # different threads
         callback: dict[str, str | None] = {"code": None}
-        
+
         # Async handling of the callback server using an event to signal when
         # the code is received
         loop = asyncio.get_running_loop()
@@ -150,7 +154,7 @@ class DatasphereAutomation:
             class Handler(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
                     """
-                    Checks the query params of an incoming GET-request for a 
+                    Checks the query params of an incoming GET-request for a
                     'code' parameter. Assigns the value to the 'code' key in
                     the callback dict amd displays a short confirmation in the
                     browser.

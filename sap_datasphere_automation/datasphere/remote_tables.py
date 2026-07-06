@@ -3,10 +3,10 @@ from datetime import datetime
 import httpx
 from dateutil import tz
 
-from datasphere.automation import DatasphereAutomation
-from utils.filehandler import settings
-from utils.logging import logger
-from utils.types import (
+from sap_datasphere_automation.datasphere.automation import DatasphereAutomation
+from sap_datasphere_automation.utils.filehandler import settings
+from sap_datasphere_automation.utils.logging import logger
+from sap_datasphere_automation.utils.types import (
     StatisticsDict,
     StatisticsInformationDict,
     StatisticsType,
