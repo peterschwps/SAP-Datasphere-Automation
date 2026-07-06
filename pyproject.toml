@@ -11,7 +11,7 @@ name = "sap-datasphere-automation"
 version = "0.2.0"
 description = "Unofficial TUI for automating recurring tasks in SAP Datasphere"
 authors = [
-    { name = "Peter Schwips", email = "REMOVED" }
+    { name = "Peter Schwips" }
 ]
 readme = "README.md"
 license = { file = "LICENSE.txt" }
