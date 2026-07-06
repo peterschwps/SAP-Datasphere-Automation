@@ -26,7 +26,9 @@ try:
 except PackageNotFoundError:
     _APP_VERSION = "dev"
 
-from sap_datasphere_automation.datasphere.analytical_models import AnalyticalModels
+from sap_datasphere_automation.datasphere.analytical_models import (
+    AnalyticalModels,
+)
 from sap_datasphere_automation.datasphere.remote_tables import RemoteTables
 from sap_datasphere_automation.datasphere.task_chains import TaskChains
 from sap_datasphere_automation.datasphere.views import Views

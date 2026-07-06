@@ -8,7 +8,9 @@ from uuid import uuid4
 
 import httpx
 
-from sap_datasphere_automation.datasphere.automation import DatasphereAutomation
+from sap_datasphere_automation.datasphere.automation import (
+    DatasphereAutomation,
+)
 from sap_datasphere_automation.datasphere.views import Views
 from sap_datasphere_automation.utils.filehandler import ALL_FILES, settings
 from sap_datasphere_automation.utils.logging import logger

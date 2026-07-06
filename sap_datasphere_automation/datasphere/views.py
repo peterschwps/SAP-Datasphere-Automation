@@ -8,7 +8,9 @@ from uuid import uuid4
 import httpx
 import pandas as pd
 
-from sap_datasphere_automation.datasphere.automation import DatasphereAutomation
+from sap_datasphere_automation.datasphere.automation import (
+    DatasphereAutomation,
+)
 from sap_datasphere_automation.utils.filehandler import ALL_FILES, settings
 from sap_datasphere_automation.utils.logging import logger
 from sap_datasphere_automation.utils.types import ViewDetailsDict
