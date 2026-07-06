@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sap-datasphere-automation"
-version = "0.2.0"
+version = "0.2.1"
 description = "Unofficial TUI for automating recurring tasks in SAP Datasphere"
 authors = [
     { name = "Peter Schwips" }
