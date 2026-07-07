@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/peterschwps/SAP-Datasphere-API/compare/v0.1.0...v0.1.1) (2026-07-07)
+
+
+### Documentation
+
+* added readme badges ([7a96367](https://github.com/peterschwps/SAP-Datasphere-API/commit/7a96367516c011ad859063ef2aab9c37ee53a44e))
+
 ## 0.1.0 (2026-07-07)
 
 
