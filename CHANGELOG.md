@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.2](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.3.1...v0.3.2) (2026-07-07)
+
+
+### Features
+
+* added support for python 3.14 ([#17](https://github.com/peterschwps/SAP-Datasphere-CLI/issues/17)) ([97971ce](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/97971ce78b1888fdad99452a30960a3c89317f70))
+* packaged the macos release as a dmg ([#15](https://github.com/peterschwps/SAP-Datasphere-CLI/issues/15)) ([32c0f3d](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/32c0f3db8faf531d977a978aeba0f87893c9267c))
+
+
+### Documentation
+
+* adjusted readme badges ([be538b5](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/be538b582e152e470ffbbcf8600b7bba616692b1))
+
 ## [0.3.1](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.3.0...v0.3.1) (2026-07-07)
 
 
