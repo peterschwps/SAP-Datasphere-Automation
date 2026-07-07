@@ -1,6 +1,5 @@
 # Directories
 __pycache__/
-.vscode/
 .chrome/
 .edge/
 .logs/
