@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.3.0...v0.3.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* ran pyinstaller without local sources in release builds ([8c83302](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/8c83302ec3985bc863c210fb28ad8355bbd6485a))
+
+
+### Documentation
+
+* added readme badges and updated title ([b26e339](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/b26e3391148402d049683d091388a91557fee157))
+
 ## [0.3.0](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.2.1...v0.3.0) (2026-07-07)
 
 
