@@ -30,8 +30,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/peterschwps/SAP-Datasphere-Automation"
-Repository = "https://github.com/peterschwps/SAP-Datasphere-Automation"
+Homepage = "https://github.com/peterschwps/SAP-Datasphere-CLI"
+Repository = "https://github.com/peterschwps/SAP-Datasphere-CLI"
 
 [project.scripts]
 sap-datasphere-cli = "sap_datasphere_automation.cli:main"

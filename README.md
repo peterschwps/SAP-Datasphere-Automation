@@ -101,8 +101,8 @@ provides scripts for managing:
 1. Clone the repository:
 
     ```bash
-    git clone https://github.com/peterschwps/SAP-Datasphere-Automation.git
-    cd sap-datasphere
+    git clone https://github.com/peterschwps/SAP-Datasphere-CLI.git
+    cd SAP-Datasphere-CLI
     ```
 
 2. Install with uv (recommended):
