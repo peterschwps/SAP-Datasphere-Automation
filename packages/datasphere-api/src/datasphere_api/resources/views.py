@@ -88,7 +88,10 @@ class Views(BaseResource):
         return all_views
 
     async def get_all_views_where_attribute_contains(
-        self, word: str, thread_count: int = 1
+        self,
+        word: str,
+        thread_count: int = 1,
+        on_result: Callable[[ViewAttributeMatch], None] | None = None,
     ) -> list[ViewAttributeMatch]:
         """
         Retrieves all views with an attribute that contains the search
@@ -99,6 +102,11 @@ class Views(BaseResource):
             thread_count (int, optional): Amount of concurrent
                                           asynchronous requests.
                                           Default is 1.
+            on_result (Callable | None, optional): Callback that is
+                                                   invoked with each
+                                                   match as soon as it
+                                                   is found.
+                                                   Defaults to None.
 
         Returns:
             list[ViewAttributeMatch]: All matches of views and their
@@ -189,14 +197,15 @@ class Views(BaseResource):
                         view["space_name"],
                         attribute,
                     )
-                    matches.append(
-                        {
-                            "entity": view["name"],
-                            "space": view["space_name"],
-                            "businessName": view["business_name"],
-                            "attribute": attribute,
-                        }
-                    )
+                    match: ViewAttributeMatch = {
+                        "entity": view["name"],
+                        "space": view["space_name"],
+                        "businessName": view["business_name"],
+                        "attribute": attribute,
+                    }
+                    matches.append(match)
+                    if on_result is not None:
+                        on_result(match)
 
         # Start tasks
         await self._client.run_async_tasks(
@@ -205,7 +214,9 @@ class Views(BaseResource):
         return matches
 
     async def create_view_analytics(
-        self, thread_count: int = 1
+        self,
+        thread_count: int = 1,
+        on_result: Callable[[PersistenceCandidate], None] | None = None,
     ) -> list[PersistenceCandidate]:
         """
         Creates view analytics for all views. Threads can be used in small
@@ -216,6 +227,11 @@ class Views(BaseResource):
             thread_count (int, optional): Amount of concurrent
                                           asynchronous requests.
                                           Default is 1.
+            on_result (Callable | None, optional): Callback that is
+                                                   invoked with each
+                                                   candidate as soon as
+                                                   it is found.
+                                                   Defaults to None.
 
         Returns:
             list[PersistenceCandidate]: All views that received a
@@ -370,14 +386,15 @@ class Views(BaseResource):
                     best_view[0]["entity"],
                     best_view[0]["space"],
                 )
-                candidates.append(
-                    {
-                        "entity": best_view[0]["entity"],
-                        "space": best_view[0]["space"],
-                        "businessName": best_view[0]["businessName"],
-                        "isPersisted": best_view[0]["isPersisted"],
-                    }
-                )
+                candidate: PersistenceCandidate = {
+                    "entity": best_view[0]["entity"],
+                    "space": best_view[0]["space"],
+                    "businessName": best_view[0]["businessName"],
+                    "isPersisted": best_view[0]["isPersisted"],
+                }
+                candidates.append(candidate)
+                if on_result is not None:
+                    on_result(candidate)
             else:
                 logger.debug("No view with a persistence score of 10 found.")
 
@@ -393,6 +410,7 @@ class Views(BaseResource):
         partitions: list[str],
         overwrite_existing_partitions: bool = False,
         thread_count: int = 1,
+        on_result: Callable[[PartitionCreateResult], None] | None = None,
     ) -> list[PartitionCreateResult]:
         """
         Creates partitions for the given views.
@@ -424,6 +442,11 @@ class Views(BaseResource):
             thread_count (int, optional): Amount of concurrent
                                           asynchronous requests.
                                           Default is 1.
+            on_result (Callable | None, optional): Callback that is
+                                                   invoked with each
+                                                   result as soon as it
+                                                   is available.
+                                                   Defaults to None.
 
         Returns:
             list[PartitionCreateResult]: Outcome for each view.
@@ -432,6 +455,12 @@ class Views(BaseResource):
         # Update headers
         self.session.headers.update({"Accept": "*/*"})
         results: list[PartitionCreateResult] = []
+
+        # Function to save a result and notify the caller
+        def save_result(result: PartitionCreateResult) -> None:
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
 
         # Function to create partitions for a view
         async def create_partitioning_for_view(view) -> None:
@@ -459,7 +488,7 @@ class Views(BaseResource):
                     view["entity"],
                     view["space"],
                 )
-                results.append(
+                save_result(
                     {
                         "entity": view["entity"],
                         "space": view["space"],
@@ -477,7 +506,7 @@ class Views(BaseResource):
                     view["entity"],
                     view["space"],
                 )
-                results.append(
+                save_result(
                     {
                         "entity": view["entity"],
                         "space": view["space"],
@@ -537,7 +566,7 @@ class Views(BaseResource):
                     view["space"],
                 )
                 logger.debug("Response: %s\n", response.text)
-            results.append(
+            save_result(
                 {
                     "entity": view["entity"],
                     "space": view["space"],
@@ -556,6 +585,7 @@ class Views(BaseResource):
         self,
         views: list[ViewRef],
         thread_count: int = 1,
+        on_result: Callable[[PartitionDeleteResult], None] | None = None,
     ) -> list[PartitionDeleteResult]:
         """
         Removes partitions for the given views.
@@ -565,6 +595,11 @@ class Views(BaseResource):
             thread_count (int, optional): Amount of concurrent
                                           asynchronous requests.
                                           Default is 1.
+            on_result (Callable | None, optional): Callback that is
+                                                   invoked with each
+                                                   result as soon as it
+                                                   is available.
+                                                   Defaults to None.
 
         Returns:
             list[PartitionDeleteResult]: Outcome for each view.
@@ -573,6 +608,12 @@ class Views(BaseResource):
         # Update headers
         self.session.headers.update({"Accept": "*/*"})
         results: list[PartitionDeleteResult] = []
+
+        # Function to save a result and notify the caller
+        def save_result(result: PartitionDeleteResult) -> None:
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
 
         # Function to remove partitions for a view
         async def remove_partitioning_for_view(view) -> None:
@@ -596,7 +637,7 @@ class Views(BaseResource):
                     view["entity"],
                     view["space"],
                 )
-                results.append(
+                save_result(
                     {
                         "entity": view["entity"],
                         "space": view["space"],
@@ -611,7 +652,7 @@ class Views(BaseResource):
                 view["entity"],
                 view["space"],
             )
-            results.append(
+            save_result(
                 {
                     "entity": view["entity"],
                     "space": view["space"],
@@ -971,6 +1012,7 @@ class Views(BaseResource):
         views: list[ViewRef],
         year: int,
         thread_count: int = 1,
+        on_result: Callable[[PartitionLockResult], None] | None = None,
     ) -> list[PartitionLockResult]:
         """
         Locks partitions for the given views. Skips views without
@@ -984,6 +1026,11 @@ class Views(BaseResource):
             thread_count (int, optional): Amount of concurrent
                                           asynchronous requests.
                                           Default is 1.
+            on_result (Callable | None, optional): Callback that is
+                                                   invoked with each
+                                                   result as soon as it
+                                                   is available.
+                                                   Defaults to None.
 
         Returns:
             list[PartitionLockResult]: Outcome for each view with
@@ -994,6 +1041,12 @@ class Views(BaseResource):
         # Update headers
         self.session.headers.update({"Accept": "*/*"})
         results: list[PartitionLockResult] = []
+
+        # Function to save a result and notify the caller
+        def save_result(result: PartitionLockResult) -> None:
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
 
         # Function to lock partitions for a view
         async def lock_partitions_for_view(view) -> None:
@@ -1065,7 +1118,7 @@ class Views(BaseResource):
                     view["space"],
                 )
                 logger.debug("Response: %s\n", response.text)
-            results.append(
+            save_result(
                 {
                     "entity": view["entity"],
                     "space": view["space"],
@@ -1083,6 +1136,7 @@ class Views(BaseResource):
         self,
         views: list[ViewRef],
         thread_count: int = 1,
+        on_result: Callable[[PartitionUnlockResult], None] | None = None,
     ) -> list[PartitionUnlockResult]:
         """
         Unlocks all partitions for the given views.
@@ -1092,6 +1146,11 @@ class Views(BaseResource):
             thread_count (int, optional): Amount of concurrent
                                           asynchronous requests.
                                           Default is 1.
+            on_result (Callable | None, optional): Callback that is
+                                                   invoked with each
+                                                   result as soon as it
+                                                   is available.
+                                                   Defaults to None.
 
         Returns:
             list[PartitionUnlockResult]: Outcome for each view with
@@ -1102,6 +1161,12 @@ class Views(BaseResource):
         # Update headers
         self.session.headers.update({"Accept": "*/*"})
         results: list[PartitionUnlockResult] = []
+
+        # Function to save a result and notify the caller
+        def save_result(result: PartitionUnlockResult) -> None:
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
 
         # Function to unlock all partitions for a view
         async def unlock_partitions_for_view(view) -> None:
@@ -1168,7 +1233,7 @@ class Views(BaseResource):
                     view["space"],
                 )
                 logger.debug("Response: %s\n", response.text)
-            results.append(
+            save_result(
                 {
                     "entity": view["entity"],
                     "space": view["space"],
