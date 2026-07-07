@@ -1,4 +1,8 @@
-# SAP Datasphere Automation
+# SAP Datasphere CLI
+
+[![CI](https://github.com/peterschwps/SAP-Datasphere-CLI/actions/workflows/ci.yml/badge.svg)](https://github.com/peterschwps/SAP-Datasphere-CLI/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/Datasphere-CLI)](https://pypi.org/project/Datasphere-CLI/)
+[![Python](https://img.shields.io/pypi/pyversions/Datasphere-CLI)](https://pypi.org/project/Datasphere-CLI/)
 
 **Retro-styled CLI for SAP Datasphere** that automates various tasks such as managing
 analytical models, remote tables, task chains and views.
