@@ -189,12 +189,12 @@ BROWSER_TO_USE = EDGE
 [Credentials]
 # OAuth Client ID of your Configured Client
 # (System > Administration > App Integration: Configured Clients: OAuth Client ID)
-CLIENT_ID = 
+CLIENT_ID =
 
 # Secret of your Configured Client
 # (System > Administration > App Integration: Configured Clients: Secret)
 # NOTE: This value can be left empty and be set with an environment variable 'SECRET'.
-SECRET = 
+SECRET =
 ```
 
 ## 🚀 Usage
@@ -383,7 +383,7 @@ the task file.
             }
         }
     }
-}       
+}
 ```
 
 **Note:** A `runtime` value of `null` indicates an error occurred (or the
@@ -484,7 +484,7 @@ persistence score of 10.
 
 ```csv
 entity,space,businessName,isPersisted
-Sales2025,SALES_DEPARTMENT,Sales (2025),True 
+Sales2025,SALES_DEPARTMENT,Sales (2025),True
 ```
 
 </details>
