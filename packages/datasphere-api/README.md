@@ -1,5 +1,9 @@
 # Datasphere-API
 
+[![CI](https://github.com/peterschwps/SAP-Datasphere-API/actions/workflows/ci.yml/badge.svg)](https://github.com/peterschwps/SAP-Datasphere-API/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/Datasphere-API)](https://pypi.org/project/Datasphere-API/)
+[![Python](https://img.shields.io/pypi/pyversions/Datasphere-API)](https://pypi.org/project/Datasphere-API/)
+
 Unofficial async Python client for the SAP Datasphere automation APIs.
 This library powers the
 [SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI)
