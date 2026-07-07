@@ -26,23 +26,20 @@ try:
 except PackageNotFoundError:
     _APP_VERSION = "dev"
 
-from sap_datasphere_automation.datasphere.analytical_models import (
-    AnalyticalModels,
-)
-from sap_datasphere_automation.datasphere.remote_tables import RemoteTables
-from sap_datasphere_automation.datasphere.task_chains import TaskChains
-from sap_datasphere_automation.datasphere.views import Views
-from sap_datasphere_automation.static.logo import ASCII_LOGO
-from sap_datasphere_automation.utils.filehandler import SETTINGS_FILE, settings
-from sap_datasphere_automation.utils.logging import STREAM_FORMAT, logger
+from datasphere_api import DatasphereClient
 
-# Mapping of all categories
-CATEGORIES: dict[str, type] = {
-    "Analytical Models": AnalyticalModels,
-    "Remote Tables": RemoteTables,
-    "Task Chains": TaskChains,
-    "Views": Views,
-}
+from sap_datasphere_automation import actions
+from sap_datasphere_automation.static.logo import ASCII_LOGO
+from sap_datasphere_automation.utils.filehandler import (
+    SETTINGS_FILE,
+    build_config,
+    settings,
+)
+from sap_datasphere_automation.utils.logging import (
+    LIBRARY_LOGGER_NAME,
+    STREAM_FORMAT,
+    logger,
+)
 
 # Mapping of all menu categories, sub-categories and its options
 type MenuOption = dict[str, Callable]
@@ -50,42 +47,48 @@ type SubCategory = dict[str, MenuOption]
 MENU_OPTIONS: dict[str, MenuOption | SubCategory] = {
     "Analytical Models": {
         "Export all models with views": (
-            AnalyticalModels.get_all_views_for_analytical_models
+            actions.get_all_views_for_analytical_models
         ),
         "Export all models with views (by space)": (
-            AnalyticalModels.get_all_views_for_analytical_models_in_space
+            actions.get_all_views_for_analytical_models_in_space
         ),
         "Save runtime of all views of models": (
-            AnalyticalModels.check_runtime_for_all_views_of_analytical_models
+            actions.check_runtime_for_all_views_of_analytical_models
         ),
     },
     "Remote Tables": {
-        "Create statistics for all tables": RemoteTables.create_statistics,
-        "Refresh statistics for all tables": RemoteTables.refresh_statistics,
+        "Create statistics for all tables": actions.create_statistics,
+        "Refresh statistics for all tables": actions.refresh_statistics,
     },
     "Task Chains": {
-        "Run task chains": TaskChains.run_task_chains,
+        "Run task chains": actions.run_task_chains,
     },
     "Views": {
         "Analytics": {
             "Export views with persistence score 10": (
-                Views.create_view_analytics
+                actions.create_view_analytics
             ),
             "Export views where attribute contains": (
-                Views.get_all_views_where_attribute_contains
+                actions.get_all_views_where_attribute_contains
             ),
         },
         "Partitions": {
-            "Create Partitions": Views.create_partitioning_for_views,
-            "Remove Partitions": Views.remove_partitioning_for_views,
-            "Lock Partitions until Year": Views.lock_partitions_until_year,
-            "Unlock All Partitions": Views.unlock_all_partitions,
+            "Create Partitions": actions.create_partitioning_for_views,
+            "Remove Partitions": actions.remove_partitioning_for_views,
+            "Lock Partitions until Year": actions.lock_partitions_until_year,
+            "Unlock All Partitions": actions.unlock_all_partitions,
         },
         "Persistence": {
-            "Persist Views": Views.persist_views,
-            "Unpersist Views": Views.unpersist_views,
+            "Persist Views": actions.persist_views,
+            "Unpersist Views": actions.unpersist_views,
         },
     },
+}
+
+# Default thread count per action (all others default to 1)
+DEFAULT_THREAD_COUNTS: dict[Callable, int] = {
+    actions.create_statistics: 5,
+    actions.refresh_statistics: 5,
 }
 
 # Method-specific parameter definitions
@@ -97,7 +100,7 @@ MENU_OPTIONS: dict[str, MenuOption | SubCategory] = {
 #   choices  – list of strings (only for type "choice")
 #   default  – optional default value
 PARAM_DEFINITIONS: dict[Callable, list[dict]] = {
-    AnalyticalModels.get_all_views_for_analytical_models: [
+    actions.get_all_views_for_analytical_models: [
         {
             "name": "skip_duplicates",
             "label": "Skip duplicates?",
@@ -105,7 +108,7 @@ PARAM_DEFINITIONS: dict[Callable, list[dict]] = {
             "default": False,
         },
     ],
-    AnalyticalModels.get_all_views_for_analytical_models_in_space: [
+    actions.get_all_views_for_analytical_models_in_space: [
         {
             "name": "space_name",
             "label": "Space name (e.g. CENTRAL_IT):",
@@ -118,23 +121,23 @@ PARAM_DEFINITIONS: dict[Callable, list[dict]] = {
             "default": False,
         },
     ],
-    RemoteTables.create_statistics: [
+    actions.create_statistics: [
         {
-            "name": "type",
+            "name": "statistics_type",
             "label": "Statistics type",
             "type": "choice",
             "choices": ["RECORD_COUNT", "SIMPLE", "HISTOGRAM"],
             "default": "HISTOGRAM",
         },
     ],
-    Views.get_all_views_where_attribute_contains: [
+    actions.get_all_views_where_attribute_contains: [
         {
             "name": "word",
             "label": "Search word:",
             "type": "str",
         },
     ],
-    Views.create_partitioning_for_views: [
+    actions.create_partitioning_for_views: [
         {
             "name": "partition_start",
             "label": "Lower bound of first partition (>=):",
@@ -152,14 +155,14 @@ PARAM_DEFINITIONS: dict[Callable, list[dict]] = {
             "default": False,
         },
     ],
-    Views.lock_partitions_until_year: [
+    actions.lock_partitions_until_year: [
         {
             "name": "year",
             "label": "Year (locked up to and including):",
             "type": "int",
         },
     ],
-    Views.persist_views: [
+    actions.persist_views: [
         {
             "name": "timer",
             "label": "Save runtime?",
@@ -368,7 +371,7 @@ class EntryScreen(BaseScreen):
                 method = subcontent[subcat][action]
             else:
                 return
-            self.app.push_screen(ParamScreen(method, CATEGORIES[category]))
+            self.app.push_screen(ParamScreen(method))
 
 
 class ParamScreen(BaseScreen):
@@ -377,10 +380,9 @@ class ParamScreen(BaseScreen):
     Shows one question at a time (wizard-style).
     """
 
-    def __init__(self, action: Callable, action_class: type) -> None:
+    def __init__(self, action: Callable) -> None:
         super().__init__()
         self._action = action
-        self._action_class = action_class
         self._step: int = 0
         self._answers: dict[str, Any] = {}
 
@@ -392,7 +394,7 @@ class ParamScreen(BaseScreen):
                 "name": "thread_count",
                 "label": "Number of threads:",
                 "type": "int",
-                "default": 5 if isinstance(self._action, RemoteTables) else 1,
+                "default": DEFAULT_THREAD_COUNTS.get(action, 1),
             }
         )
 
@@ -572,7 +574,7 @@ class ParamScreen(BaseScreen):
 
             # Start ExecutionScreen to execute method
             self.app.push_screen(
-                ExecutionScreen(self._action, self._action_class, params)
+                ExecutionScreen(self._action, params)
             )
 
         # On any other steps: increase step count and display next step
@@ -623,12 +625,10 @@ class ExecutionScreen(BaseScreen):
     def __init__(
         self,
         action: Callable,
-        action_class: type,
         params: dict[str, Any],
     ) -> None:
         super().__init__()
         self._action = action
-        self._action_class = action_class
         self._params = params
         self._done = False
 
@@ -654,22 +654,26 @@ class ExecutionScreen(BaseScreen):
 
     async def _run_action(self) -> None:
         """
-        Instantiates the class, initializes the session and executes the
-        selected action. Captures log output to the RichLog widget.
+        Creates the Datasphere client, logs in and executes the selected
+        action. Captures log output to the RichLog widget.
         """
         log_widget = self.query_one("#log", RichLog)
         status = self.query_one("#result-status", Static)
 
-        # Configure LogHandler for RichLog widget
+        # Configure LogHandler for RichLog widget (also captures the
+        # datasphere-api library logs)
         handler = LogHandler(log_widget)
         handler.setFormatter(STREAM_FORMAT)
+        library_logger = logging.getLogger(LIBRARY_LOGGER_NAME)
         logger.addHandler(handler)
+        library_logger.addHandler(handler)
 
-        # Initialize class and call method
+        # Create client, log in and call the action
+        client: DatasphereClient | None = None
         try:
-            instance = self._action_class()
-            await instance.initialize()
-            await self._action(instance, **self._params)
+            client = DatasphereClient(build_config())
+            await client.login()
+            await self._action(client, **self._params)
             status.update("Done. Press Enter or Escape to return to the menu.")
 
         # Stop on any unhandled exceptions
@@ -682,7 +686,10 @@ class ExecutionScreen(BaseScreen):
         # Remove handler to prevent multiple handlers co-existing if this
         # screen gets called more than once
         finally:
+            if client is not None:
+                await client.aclose()
             logger.removeHandler(handler)
+            library_logger.removeHandler(handler)
             self._done = True
 
     def on_key(self, event: events.Key) -> None:

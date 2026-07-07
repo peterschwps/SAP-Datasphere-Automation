@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sap-datasphere-automation"
-version = "0.2.1"
+version = "0.3.0"
 description = "Unofficial TUI for automating recurring tasks in SAP Datasphere"
 authors = [
     { name = "Peter Schwips" }
@@ -23,13 +23,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "beautifulsoup4>=4.13.4,<5.0.0",
-    "python-dateutil>=2.9.0.post0,<3.0.0",
+    "datasphere-api>=0.1.0",
     "rich>=14.0.0,<15.0.0",
-    "playwright>=1.54.0,<2.0.0",
-    "pandas>=2.3.1,<3.0.0",
     "platformdirs>=4.4.0",
-    "httpx>=0.28.1",
     "textual>=8.2.7",
 ]
 
@@ -46,6 +42,13 @@ datasphere = "sap_datasphere_automation.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["sap_datasphere_automation"]
+
+# ----- uv -----
+
+# Local development link to the Datasphere-API repository.
+# Remove once the library is published to PyPI.
+[tool.uv.sources]
+datasphere-api = { path = "../SAP-Datasphere-API", editable = true }
 
 # ----- Tools -----
 
@@ -66,9 +69,16 @@ select = [
 [tool.pyright]
 typeCheckingMode = "basic"
 
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
 [dependency-groups]
 dev = [
     "pyright>=1.1.405",
+    "pytest>=9.0.0",
+    "pytest-asyncio>=1.3.0",
     "ruff>=0.13.0",
     "textual-dev>=1.8.0",
 ]
