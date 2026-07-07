@@ -2,7 +2,7 @@
 
 Unofficial async Python client for the SAP Datasphere automation APIs.
 This library powers the
-[SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-Automation)
+[SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI)
 and can be used to build your own automations (e.g. MCP servers or
 scheduled jobs).
 
