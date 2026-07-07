@@ -1,143 +1,117 @@
-name: Build and Release Binaries
+name: Release
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  prepare:
+  build:
+    name: Build distributions
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-      skip: ${{ steps.check_tag.outputs.skip }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Read version from pyproject.toml (uv)
-        id: get_version
-        shell: bash
-        run: |
-          VERSION=$(uv version | awk '{print $2}')
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Check if tag already exists on remote
-        id: check_tag
-        shell: bash
-        run: |
-          TAG="v${{ steps.get_version.outputs.version }}"
-          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG exists on remote. Skipping release/build."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create Git tag if not exists
-        id: tag
-        shell: bash
-        if: steps.check_tag.outputs.skip != 'true'
-        run: |
-          TAG="v${{ steps.get_version.outputs.version }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Local tag $TAG exists; pushing to remote if needed."
-          else
-            git tag "$TAG"
-          fi
-          git push origin "$TAG" || true
-
-      - name: Ensure GitHub Release exists
-        uses: softprops/action-gh-release@v2
-        if: steps.check_tag.outputs.skip != 'true'
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ steps.get_version.outputs.version }}
-          name: v${{ steps.get_version.outputs.version }}
-          draft: false
-          prerelease: false
+          name: dist
+          path: dist/
+          if-no-files-found: error
 
-  build-windows:
-    runs-on: windows-latest
-    needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/Datasphere-CLI
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v3
+  github-release:
+    name: Upload distributions to GitHub Release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/*
 
-      - name: Install project dependencies (uv sync)
-        shell: bash
-        run: |
-          uv sync
+  binaries:
+    name: Build ${{ matrix.platform }} binary
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: macos-latest
+            platform: macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # --no-sources ignores the local path link to ../SAP-Datasphere-API
+      # and installs datasphere-api from PyPI instead
+      - name: Install project dependencies
+        run: uv sync --no-sources
 
       - name: Install PyInstaller
-        shell: bash
-        run: |
-          uv pip install pyinstaller
+        run: uv pip install pyinstaller
 
-      - name: Build executable with PyInstaller (Windows)
-        shell: bash
-        run: |
-          uv run pyinstaller --onefile main.py --name DatasphereAutomation --icon sap_datasphere_automation/static/datasphere.ico
+      - name: Build executable (Windows)
+        if: matrix.platform == 'windows'
+        run: >
+          uv run pyinstaller --onefile main.py
+          --name DatasphereAutomation
+          --icon sap_datasphere_automation/static/datasphere.ico
+
+      - name: Build executable (macOS)
+        if: matrix.platform == 'macos'
+        run: >
+          uv run pyinstaller --onefile main.py
+          --name DatasphereAutomation
 
       - name: Package artifact with version
         shell: bash
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist_out
-          cp "dist/DatasphereAutomation.exe" "dist_out/DatasphereAutomation-${{ needs.prepare.outputs.version }}-windows.exe"
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            cp "dist/DatasphereAutomation.exe" \
+              "dist_out/DatasphereAutomation-${VERSION}-windows.exe"
+          else
+            cp "dist/DatasphereAutomation" \
+              "dist_out/DatasphereAutomation-${VERSION}-macos"
+          fi
 
-      - name: Upload asset to Release (Windows)
+      - name: Upload binary to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.prepare.outputs.version }}
-          files: |
-            dist_out/DatasphereAutomation-${{ needs.prepare.outputs.version }}-windows.exe
-
-  build-macos:
-    runs-on: macos-latest
-    needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Install project dependencies (uv sync)
-        shell: bash
-        run: |
-          uv sync
-
-      - name: Install PyInstaller
-        shell: bash
-        run: |
-          uv pip install pyinstaller
-
-      - name: Build CLI binary with PyInstaller (macOS)
-        shell: bash
-        run: |
-          uv run pyinstaller --onefile --name DatasphereAutomation main.py
-
-      - name: Package CLI binary with version
-        shell: bash
-        run: |
-          mkdir -p dist_out
-          cp "dist/DatasphereAutomation" "dist_out/DatasphereAutomation-${{ needs.prepare.outputs.version }}-macos"
-
-      - name: Upload CLI binary to Release (macOS)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.prepare.outputs.version }}
-          files: |
-            dist_out/DatasphereAutomation-${{ needs.prepare.outputs.version }}-macos
-
-
+          tag_name: ${{ github.ref_name }}
+          files: dist_out/*

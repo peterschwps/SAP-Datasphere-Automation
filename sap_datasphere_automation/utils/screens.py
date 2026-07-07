@@ -22,7 +22,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 try:
-    _APP_VERSION = f"Version {pkg_version('sap-datasphere-automation')}"
+    _APP_VERSION = f"Version {pkg_version('Datasphere-CLI')}"
 except PackageNotFoundError:
     _APP_VERSION = "dev"
 

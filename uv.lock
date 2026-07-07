@@ -177,6 +177,43 @@ dev = [
 ]
 
 [[package]]
+name = "datasphere-cli"
+version = "0.2.1"
+source = { editable = "." }
+dependencies = [
+    { name = "datasphere-api" },
+    { name = "platformdirs" },
+    { name = "rich" },
+    { name = "textual" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "textual-dev" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "datasphere-api", editable = "../SAP-Datasphere-API" },
+    { name = "platformdirs", specifier = ">=4.4.0" },
+    { name = "rich", specifier = ">=14.0.0,<15.0.0" },
+    { name = "textual", specifier = ">=8.2.7" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright", specifier = ">=1.1.405" },
+    { name = "pytest", specifier = ">=9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "ruff", specifier = ">=0.13.0" },
+    { name = "textual-dev", specifier = ">=1.8.0" },
+]
+
+[[package]]
 name = "frozenlist"
 version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -729,43 +766,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/46/09/dca8df3d48e8b3f4202bf20b1658898e74b6442ac835bfe2c1816d926697/ruff-0.13.0-py3-none-win32.whl", hash = "sha256:4e473e8f0e6a04e4113f2e1de12a5039579892329ecc49958424e5568ef4f768", size = 12141613, upload-time = "2025-09-10T16:25:28.664Z" },
     { url = "https://files.pythonhosted.org/packages/61/21/0647eb71ed99b888ad50e44d8ec65d7148babc0e242d531a499a0bbcda5f/ruff-0.13.0-py3-none-win_amd64.whl", hash = "sha256:48e5c25c7a3713eea9ce755995767f4dcd1b0b9599b638b12946e892123d1efb", size = 13258250, upload-time = "2025-09-10T16:25:31.773Z" },
     { url = "https://files.pythonhosted.org/packages/e1/a3/03216a6a86c706df54422612981fb0f9041dbb452c3401501d4a22b942c9/ruff-0.13.0-py3-none-win_arm64.whl", hash = "sha256:ab80525317b1e1d38614addec8ac954f1b3e662de9d59114ecbf771d00cf613e", size = 12312357, upload-time = "2025-09-10T16:25:35.595Z" },
-]
-
-[[package]]
-name = "sap-datasphere-automation"
-version = "0.3.0"
-source = { editable = "." }
-dependencies = [
-    { name = "datasphere-api" },
-    { name = "platformdirs" },
-    { name = "rich" },
-    { name = "textual" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-    { name = "textual-dev" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "datasphere-api", editable = "../SAP-Datasphere-API" },
-    { name = "platformdirs", specifier = ">=4.4.0" },
-    { name = "rich", specifier = ">=14.0.0,<15.0.0" },
-    { name = "textual", specifier = ">=8.2.7" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pyright", specifier = ">=1.1.405" },
-    { name = "pytest", specifier = ">=9.0.0" },
-    { name = "pytest-asyncio", specifier = ">=1.3.0" },
-    { name = "ruff", specifier = ">=0.13.0" },
-    { name = "textual-dev", specifier = ">=1.8.0" },
 ]
 
 [[package]]
