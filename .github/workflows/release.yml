@@ -107,8 +107,12 @@ jobs:
             cp "dist/DatasphereAutomation.exe" \
               "dist_out/DatasphereAutomation-${VERSION}-windows.exe"
           else
-            cp "dist/DatasphereAutomation" \
-              "dist_out/DatasphereAutomation-${VERSION}-macos"
+            # Package the binary into a compressed DMG image
+            mkdir -p dmg_root
+            cp "dist/DatasphereAutomation" dmg_root/
+            hdiutil create -volname "Datasphere CLI" \
+              -srcfolder dmg_root -ov -format UDZO \
+              "dist_out/DatasphereAutomation-${VERSION}-macos.dmg"
           fi
 
       - name: Upload binary to GitHub Release

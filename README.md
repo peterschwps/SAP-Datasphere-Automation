@@ -79,21 +79,19 @@ provides scripts for managing:
 
 ----
 
-### Option B: macOS (Release, CLI)
+### Option B: macOS (Release, DMG)
 
-1. Download the latest release asset: `DatasphereAutomation-<version>-macos`.
+1. Download the latest release asset:
+   `DatasphereAutomation-<version>-macos.dmg`.
 
-2. Remove Gatekeeper quarantine and make it executable:
+2. Open the DMG and copy `DatasphereAutomation` to a location of your
+   choice (e.g. your home directory).
 
-    ```bash
-    xattr -d com.apple.quarantine DatasphereAutomation-<version>-macos
-    chmod +x DatasphereAutomation-<version>-macos
-    ```
-
-3. Run from the terminal:
+3. Remove Gatekeeper quarantine and run it from the terminal:
 
     ```bash
-    ./DatasphereAutomation-<version>-macos
+    xattr -d com.apple.quarantine DatasphereAutomation
+    ./DatasphereAutomation
     ```
 
 **Note:** The Mac app can't be opened via double-click.
