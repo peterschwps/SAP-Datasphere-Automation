@@ -16,8 +16,9 @@ LEVEL_STREAM = logging.DEBUG  # Logging level for output to stdout (console)
 # Configure path for logs
 PROJECT_PATH = os.getcwd()
 DIRECTORY_LOGS = os.path.join(PROJECT_PATH, ".logs")
-if not os.path.exists(DIRECTORY_LOGS):
-    os.makedirs(DIRECTORY_LOGS)
+
+# Name of the datasphere-api library logger to capture its output
+LIBRARY_LOGGER_NAME = "datasphere_api"
 
 # Mapping of the logging levels to the rich colors
 FORMATS = {
@@ -159,29 +160,41 @@ STREAM_FORMAT = MultiLineFormatter(
     style="{",
 )
 
-# Set up timed rotating file handler (creates one log file per day)
-file_handler = TimedRotatingFileHandler(
-    filename=(
-        f"{DIRECTORY_LOGS}/{datetime.now().year}{datetime.now().month:02}"
-        f"{datetime.now().day:02}.log"
-    ),
-    when="midnight",
-    encoding="utf-8",
-)
-file_handler.setFormatter(FILE_FORMAT)
-file_handler.setLevel(LEVEL_LOGS)
+def configure_logging() -> None:
+    """
+    Configures the application logger and the datasphere-api library
+    logger with the rich stream handler and the daily rotating file
+    handler. Creates the log directory if it doesn't exist yet.
+    """
+    # Create log directory if it doesn't exist
+    if not os.path.exists(DIRECTORY_LOGS):
+        os.makedirs(DIRECTORY_LOGS)
 
-# Set up stream handler
-stream_handler = RichPrintHandler()
-stream_handler.setFormatter(STREAM_FORMAT)
-stream_handler.setLevel(LEVEL_STREAM)
+    # Set up timed rotating file handler (creates one log file per day)
+    file_handler = TimedRotatingFileHandler(
+        filename=(
+            f"{DIRECTORY_LOGS}/{datetime.now().year}"
+            f"{datetime.now().month:02}"
+            f"{datetime.now().day:02}.log"
+        ),
+        when="midnight",
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(FILE_FORMAT)
+    file_handler.setLevel(LEVEL_LOGS)
 
-# Add handlers to logger
-logger.addHandler(file_handler)
-logger.addHandler(stream_handler)
+    # Set up stream handler
+    stream_handler = RichPrintHandler()
+    stream_handler.setFormatter(STREAM_FORMAT)
+    stream_handler.setLevel(LEVEL_STREAM)
 
-# Set level for logger (filtered by handlers)
-logger.setLevel(logging.DEBUG)
+    # Add handlers to the app logger and the library logger
+    library_logger = logging.getLogger(LIBRARY_LOGGER_NAME)
+    for log in (logger, library_logger):
+        log.addHandler(file_handler)
+        log.addHandler(stream_handler)
+        log.setLevel(logging.DEBUG)  # filtered by handlers
+        log.propagate = False
 
 
 # Wrapper to track execution time of a function

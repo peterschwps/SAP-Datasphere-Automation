@@ -2,25 +2,23 @@ import configparser
 import contextlib
 import csv
 import json
+import os
 import os.path
 import sys
 import webbrowser
 from pathlib import Path
+from typing import cast
 
-from platformdirs import user_config_dir, user_data_dir
+from datasphere_api import Browser, DatasphereConfig
+from platformdirs import user_config_dir
 
 from sap_datasphere_automation.utils.logging import logger
 
 # Paths
 _PROJECT_NAME = "Datasphere"
 _PROJECT_PATH = os.getcwd()
-DATA_DIR = Path(user_data_dir(_PROJECT_NAME))
 _CONFIG_DIR = Path(user_config_dir(_PROJECT_NAME))
-SESSION_FILE = os.path.join(DATA_DIR, "session.json")
 SETTINGS_FILE = os.path.join(_CONFIG_DIR, "settings.ini")
-
-# Create directories if they don't exist
-_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Settings file
 settings = configparser.ConfigParser()
@@ -67,30 +65,72 @@ def create_settings_file(is_wrong: bool = False) -> None:
     sys.exit()
 
 
-# Create settings if file doesn't exist
-if not os.path.isfile(SETTINGS_FILE):
-    create_settings_file()
+def load_settings() -> None:
+    """
+    Loads the settings file into the global settings object. Creates a
+    new settings file (and exits) if it doesn't exist or doesn't match
+    the required format.
+    """
+    # Create config directory if it doesn't exist
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Otherwise load settings
-else:
-    settings.read(SETTINGS_FILE)
+    # Create settings if file doesn't exist
+    if not os.path.isfile(SETTINGS_FILE):
+        create_settings_file()
 
-# Check required values in settings file
-try:
-    # Categories
-    _ = settings["Setup"], settings["Credentials"]
+    # Otherwise load settings
+    else:
+        settings.read(SETTINGS_FILE)
 
-    # Keys
-    _ = settings["Setup"]["DATASPHERE_URL"]
-    _ = settings["Setup"]["AUTHORIZATION_URL"]
-    _ = settings["Setup"]["TOKEN_URL"]
-    _ = settings["Setup"]["BROWSER_TO_USE"]
-    _ = settings["Credentials"]["CLIENT_ID"]
-    _ = settings["Credentials"]["SECRET"]
+    # Check required values in settings file
+    try:
+        # Categories
+        _ = settings["Setup"], settings["Credentials"]
 
-except KeyError:
-    settings.clear()  # to delete invalid entries
-    create_settings_file(is_wrong=True)
+        # Keys
+        _ = settings["Setup"]["DATASPHERE_URL"]
+        _ = settings["Setup"]["AUTHORIZATION_URL"]
+        _ = settings["Setup"]["TOKEN_URL"]
+        _ = settings["Setup"]["BROWSER_TO_USE"]
+        _ = settings["Credentials"]["CLIENT_ID"]
+        _ = settings["Credentials"]["SECRET"]
+
+    except KeyError:
+        settings.clear()  # to delete invalid entries
+        create_settings_file(is_wrong=True)
+
+
+def build_config() -> DatasphereConfig:
+    """
+    Builds the Datasphere configuration from the settings file. The
+    client secret can also be provided via the 'SECRET' environment
+    variable. Exits the program if no secret is found.
+
+    Returns:
+        DatasphereConfig: Configuration for the DatasphereClient.
+    """
+    # Read secret from settings or environment
+    client_secret = settings["Credentials"]["SECRET"]
+    if not client_secret:
+        client_secret = os.environ.get("SECRET", "")
+        if not client_secret:
+            logger.critical(
+                "Client secret not found. Please set the 'SECRET' "
+                "environment variable or add the secret to the settings "
+                "file."
+            )
+            sys.exit(1)
+
+    # Build config from settings
+    browser = settings["Setup"]["BROWSER_TO_USE"].upper()
+    return DatasphereConfig(
+        base_url=settings["Setup"]["DATASPHERE_URL"],
+        authorization_url=settings["Setup"]["AUTHORIZATION_URL"],
+        token_url=settings["Setup"]["TOKEN_URL"],
+        client_id=settings["Credentials"]["CLIENT_ID"],
+        client_secret=client_secret,
+        browser=cast(Browser, browser),
+    )
 
 
 # Directories
