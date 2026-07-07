@@ -88,14 +88,14 @@ jobs:
       - name: Build executable (Windows)
         if: matrix.platform == 'windows'
         run: >
-          uv run pyinstaller --onefile main.py
+          uv run --no-sources pyinstaller --onefile main.py
           --name DatasphereAutomation
           --icon sap_datasphere_automation/static/datasphere.ico
 
       - name: Build executable (macOS)
         if: matrix.platform == 'macos'
         run: >
-          uv run pyinstaller --onefile main.py
+          uv run --no-sources pyinstaller --onefile main.py
           --name DatasphereAutomation
 
       - name: Package artifact with version
