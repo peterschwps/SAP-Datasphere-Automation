@@ -24,7 +24,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "datasphere-api>=0.1.0",
+    "datasphere-api>=0.2.0",
+    "pydantic-settings>=2.6.0",
     "rich>=14.0.0,<15.0.0",
     "platformdirs>=4.4.0",
     "textual>=8.2.7",

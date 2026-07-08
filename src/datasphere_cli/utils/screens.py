@@ -3,9 +3,9 @@ from abc import abstractmethod
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
-from pathlib import Path
 from typing import Any, cast
 
+from pydantic import ValidationError
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
@@ -30,15 +30,15 @@ from datasphere_api import DatasphereClient
 
 from datasphere_cli import actions
 from datasphere_cli.static.logo import ASCII_LOGO
-from datasphere_cli.utils.filehandler import (
-    SETTINGS_FILE,
-    build_config,
-    settings,
-)
 from datasphere_cli.utils.logging import (
     LIBRARY_LOGGER_NAME,
     STREAM_FORMAT,
     logger,
+)
+from datasphere_cli.utils.settings import (
+    SETTINGS_FILE,
+    build_config,
+    reload_settings,
 )
 
 # Mapping of all menu categories, sub-categories and its options
@@ -704,7 +704,7 @@ class ExecutionScreen(BaseScreen):
 
 class SettingsScreen(BaseScreen):
     """
-    Screen to view and edit the settings.ini file.
+    Screen to view and edit the settings.toml file.
     Ctrl+S saves and reloads settings. Escape closes without saving.
     """
 
@@ -737,7 +737,7 @@ class SettingsScreen(BaseScreen):
         """
         Event handler called after widget was added to the CLI.
         """
-        content = Path(SETTINGS_FILE).read_text(encoding="utf-8")
+        content = SETTINGS_FILE.read_text(encoding="utf-8")
         self.query_one("#settings-editor", TextArea).load_text(content)
 
     def action_save(self) -> None:
@@ -745,11 +745,16 @@ class SettingsScreen(BaseScreen):
         Event handler called when settings are saved.
         """
         text = self.query_one("#settings-editor", TextArea).text
-        Path(SETTINGS_FILE).write_text(text, encoding="utf-8")
-        settings.read(SETTINGS_FILE)
-        self.query_one("#settings-status", Static).update(
-            "[green]Saved.[/green]"
-        )
+        SETTINGS_FILE.write_text(text, encoding="utf-8")
+        status = self.query_one("#settings-status", Static)
+        try:
+            reload_settings()
+            status.update("[green]Saved.[/green]")
+        except ValidationError as error:
+            status.update(
+                f"[red]Saved, but invalid: "
+                f"{error.error_count()} error(s).[/red]"
+            )
 
     async def on_key(self, event: events.Key) -> None:
         if event.key == "escape":

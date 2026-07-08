@@ -144,7 +144,7 @@ The configuration is quite similar to the
 [official SAP Datasphere CLI](Configuration). In Datasphere you need to create
 an [OAuth Client for Interactive Usage](https://help.sap.com/docs/SAP_DATASPHERE/c8a54ee704e94e15926551293243fd1d/3f92b46fe0314e8ba60720e409c219fc.html).
 This client will be used to authenticate and execute commands on SAP
-Datasphere. The full configuration of the settings file (`settings.ini`) is
+Datasphere. The full configuration of the settings file (`settings.toml`) is
 described down below.
 
 > [!IMPORTANT]
@@ -156,44 +156,48 @@ callback code.
 
 <img src="./src/datasphere_cli/static/setup.png" alt="example-setup" width="600"/>
 
-### Creating settings.ini
+### Creating settings.toml
 
 In order to create the settings file you need to run the CLI once. This will
-create a `settings.ini` in your user configuration directory:
+create a `settings.toml` in your user configuration directory:
 
-- **macOS/Linux**: `~/.config/Datasphere/settings.ini`
-- **Windows**: `%APPDATA%\Datasphere\settings.ini`
+- **macOS/Linux**: `~/.config/Datasphere/settings.toml`
+- **Windows**: `%APPDATA%\Datasphere\settings.toml`
 
-### Configuring settings.ini
+> [!NOTE]
+> Version 0.4.0 replaced the previous `settings.ini` with a validated
+> `settings.toml`. If you are upgrading, run the CLI once and copy your
+> values into the new file.
 
-Open the `settings.ini` file and configure the following settings:
+### Configuring settings.toml
 
-```ini
-[Setup]
+Open the `settings.toml` file and configure the following settings:
+
+```toml
+[setup]
 # Your SAP Datasphere URL
 # (System > Administration > Tenant Links: SAP Datasphere URL)
-DATASPHERE_URL = https://example.eu10.hcs.cloud.sap
+datasphere_url = "https://example.eu10.hcs.cloud.sap"
 
 # The Authorization URL for OAuth Clients
 # (System > Administration > App Integration: Authorization URL)
-AUTHORIZATION_URL = https://example.authentication.eu10.hana.ondemand.com/oauth/authorize
+authorization_url = "https://example.authentication.eu10.hana.ondemand.com/oauth/authorize"
 
-# The Token URL for OAuth CLients
+# The Token URL for OAuth Clients
 # (System > Administration > App Integration: Token URL)
-TOKEN_URL = https://example.authentication.eu10.hana.ondemand.com/oauth/token
+token_url = "https://example.authentication.eu10.hana.ondemand.com/oauth/token"
 
-# Browser to use for the initial Authentication: 'CHROME' or 'EDGE'
-BROWSER_TO_USE = EDGE
+# Browser to use for the initial authentication: 'CHROME' or 'EDGE'
+browser_to_use = "EDGE"
 
-[Credentials]
+[credentials]
 # OAuth Client ID of your Configured Client
-# (System > Administration > App Integration: Configured Clients: OAuth Client ID)
-CLIENT_ID =
+# (System > Administration > App Integration: Configured Clients)
+client_id = ""
 
 # Secret of your Configured Client
-# (System > Administration > App Integration: Configured Clients: Secret)
-# NOTE: This value can be left empty and be set with an environment variable 'SECRET'.
-SECRET =
+# NOTE: Can be left empty and set with the environment variable 'SECRET'.
+secret = ""
 ```
 
 ## 🚀 Usage
