@@ -1,25 +1,17 @@
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
 from json import JSONDecodeError
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 import httpx
 
+from datasphere_api.exceptions import UnexpectedResponse
 from datasphere_api.models import (
-    PartitionCreateResult,
-    PartitionDeleteResult,
-    PartitionLockResult,
-    PartitionTask,
-    PartitionUnlockResult,
-    PersistenceCandidate,
-    PersistResult,
-    UnpersistResult,
-    ViewAttributeMatch,
+    PartitionCreateOutcome,
+    PartitionLockOutcome,
     ViewDetailsDict,
-    ViewRef,
 )
 from datasphere_api.resources.base import BaseResource
 
@@ -27,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class Views(BaseResource):
+
+    # Endpoint methods (one HTTP call each)
 
     async def get_all_views(self) -> list[ViewDetailsDict]:
         """
@@ -87,162 +81,271 @@ class Views(BaseResource):
 
         return all_views
 
-    async def get_all_views_where_attribute_contains(
+    async def get_view_attributes(
         self,
-        word: str,
-        thread_count: int = 1,
-        on_result: Callable[[ViewAttributeMatch], None] | None = None,
-    ) -> list[ViewAttributeMatch]:
+        view_id: str,
+        view_name: str,
+        space: str,
+    ) -> list[str]:
         """
-        Retrieves all views with an attribute that contains the search
-        word.
+        Returns the attribute names of a view (from its design object
+        details).
 
         Args:
-            word (str): Search word (case-insensitive).
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 1.
-            on_result (Callable | None, optional): Callback that is
-                                                   invoked with each
-                                                   match as soon as it
-                                                   is found.
-                                                   Defaults to None.
+            view_id (str): ID of the view.
+            view_name (str): Name of the view.
+            space (str): Space of the view.
 
         Returns:
-            list[ViewAttributeMatch]: All matches of views and their
-                                      attributes containing the search
-                                      word.
+            list[str]: Attribute names of the view. Empty if the details
+                       cannot be fetched or parsed.
         """
-        # Fetch all views
-        all_views = await self.get_all_views()
-
         # Update headers
         self.session.headers.update(
             {
                 "Accept": "application/json, text/javascript, */*; q=0.01",
                 "X-Requested-With": "XMLHttpRequest",
+                "x-request-id": str(uuid4()).replace("-", ""),
             }
         )
 
         # Prepare request
-        logger.debug(
-            "Searching for views that have an attribute "
-            "containing the substring '%s'...",
-            word,
+        params = {
+            "ids": view_id,
+            "details": (
+                "id,#repairedCsn,#ownerBusinessName,#creatorBusinessName,"
+                "#repositoryPackage,@EnterpriseSearch.enabled,@remote.source,"
+                "@DataWarehouse.external.schema,#objectPathIdentifier,"
+                "#repositoryPackage,#repositoryValidationDate,hasPendingError,"
+                "#isI18nEnabled"
+            ),
+            "kinds": (
+                "entity,view,sap.dwc.ermodel,sap.dis.dataflow,"
+                "sap.dwc.taskChain,sap.dwc.analyticModel,"
+                "sap.dwc.dac,sap.repo.folder,sap.dis.replicationflow,"
+                "sap.dis.transformationflow,sap.dwc.perspective,"
+                "sap.dwc.consumptionModel,sap.dwc.factModel,"
+                "sap.dwc.businessEntity,sap.dwc.authscenario"
+            ),
+        }
+
+        # Send request and parse the attribute names from the CSN
+        response = await self.session.get(
+            url=f"{self._base_url}/deepsea/repository"
+            f"/{space}/designObjects",
+            params=params,
         )
-        matches: list[ViewAttributeMatch] = []
-
-        # Function to check if view has a matching attribute
-        async def check_view_for_attribute_with_substring(view) -> None:
-            # Update parameters
-            params = {
-                "ids": view["id"],
-                "details": (
-                    "id,#repairedCsn,#ownerBusinessName,#creatorBusinessName,"
-                    "#repositoryPackage,@EnterpriseSearch.enabled,@remote.source,"
-                    "@DataWarehouse.external.schema,#objectPathIdentifier,"
-                    "#repositoryPackage,#repositoryValidationDate,hasPendingError,"
-                    "#isI18nEnabled"
-                ),
-                "kinds": (
-                    "entity,view,sap.dwc.ermodel,sap.dis.dataflow,"
-                    "sap.dwc.taskChain,sap.dwc.analyticModel,"
-                    "sap.dwc.dac,sap.repo.folder,sap.dis.replicationflow,"
-                    "sap.dis.transformationflow,sap.dwc.perspective,"
-                    "sap.dwc.consumptionModel,sap.dwc.factModel,"
-                    "sap.dwc.businessEntity,sap.dwc.authscenario"
-                ),
-            }
-
-            # Update request ID
-            self.session.headers.update(
-                {
-                    "x-request-id": str(uuid4()).replace("-", ""),
-                }
+        try:
+            view_data = response.json()
+            return list(
+                view_data["results"][0]["#repairedCsn"]["definitions"][
+                    view_name
+                ]["elements"]
             )
-
-            # Send request
-            logger.debug(
-                "Checking view '%s' in '%s'...",
-                view["name"],
-                view["space_name"],
+        except (httpx.HTTPError, JSONDecodeError, KeyError, IndexError):
+            logger.error(
+                "Error fetching details of view '%s' in '%s'.",
+                view_name,
+                space,
             )
-            response = await self.session.get(
-                url=f"{self._base_url}/deepsea/repository"
-                f"/{view['space_name']}/designObjects",
-                params=params,
-            )
-            try:
-                view_data = response.json()
-            except (httpx.HTTPError, JSONDecodeError):
-                logger.error(
-                    "Error fetching details of view '%s' in '%s'.",
-                    view["name"],
-                    view["space_name"],
-                )
-                logger.debug(
-                    "View: %s\nResponse: %s\n", view, response.text.strip()
-                )
-                return
+            logger.debug("Response: %s\n", response.text.strip())
+            return []
 
-            # Save view if an attribute containing the search word is
-            # found
-            for attribute in view_data["results"][0]["#repairedCsn"][
-                "definitions"
-            ][view["name"]]["elements"]:
-                if word.lower() in attribute.lower():
-                    logger.info(
-                        "View '%s' in '%s' has attribute '%s'.",
-                        view["name"],
-                        view["space_name"],
-                        attribute,
-                    )
-                    match: ViewAttributeMatch = {
-                        "entity": view["name"],
-                        "space": view["space_name"],
-                        "businessName": view["business_name"],
-                        "attribute": attribute,
-                    }
-                    matches.append(match)
-                    if on_result is not None:
-                        on_result(match)
-
-        # Start tasks
-        await self._client.run_async_tasks(
-            all_views, check_view_for_attribute_with_substring, thread_count
-        )
-        return matches
-
-    async def create_view_analytics(
-        self,
-        thread_count: int = 1,
-        on_result: Callable[[PersistenceCandidate], None] | None = None,
-    ) -> list[PersistenceCandidate]:
+    async def get_partitioning(self, view: str, space: str) -> dict:
         """
-        Creates view analytics for all views. Threads can be used in small
-        amounts, otherwise rate limits may occur.
-        Five threads have been run successfully.
+        Returns the partitioning details of a persisted view.
 
         Args:
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 1.
-            on_result (Callable | None, optional): Callback that is
-                                                   invoked with each
-                                                   candidate as soon as
-                                                   it is found.
-                                                   Defaults to None.
+            view (str): Name of the view.
+            space (str): Space of the view.
 
         Returns:
-            list[PersistenceCandidate]: All views that received a
-                                        persistence score of 10 from the
-                                        view analyzer.
+            dict: Partitioning details (e.g. 'ranges',
+                  'partitioningColumns').
         """
+        self.session.headers.update(
+            {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
+        )
+        response = await self.session.get(
+            url=f"{self._base_url}/dwaas-core/partitioning"
+            f"/{space}/persistedViews/{view}"
+        )
+        return response.json()
 
-        # Fetch all views
-        all_views = await self.get_all_views()
+    async def set_partitioning(
+        self,
+        view: str,
+        space: str,
+        data: dict,
+    ) -> bool:
+        """
+        Creates or replaces the partitioning of a persisted view.
 
-        # Update headers
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+            data (dict): Full partitioning definition (as returned by
+                         get_partitioning()).
+
+        Returns:
+            bool: True if the partitioning was accepted, else False.
+        """
+        self.session.headers.update(
+            {"x-request-id": str(uuid4()).replace("-", "")}
+        )
+        response = await self.session.post(
+            url=f"{self._base_url}/dwaas-core/partitioning"
+            f"/{space}/persistedViews/{view}",
+            json=data,
+        )
+        if response.status_code != 201:
+            logger.debug("Response: %s\n", response.text)
+            return False
+        return True
+
+    async def delete_partitioning(self, view: str, space: str) -> bool:
+        """
+        Removes the partitioning of a persisted view.
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+
+        Returns:
+            bool: True if the partitioning was removed, else False.
+        """
+        self.session.headers.update(
+            {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
+        )
+        response = await self.session.delete(
+            url=f"{self._base_url}/dwaas-core/partitioning"
+            f"/{space}/persistedViews/{view}"
+        )
+        return response.status_code == 200
+
+    async def get_monitor_details(self, view: str, space: str) -> dict:
+        """
+        Returns the monitor details of a view (e.g. 'dataPersistency').
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+
+        Returns:
+            dict: Monitor details. Empty if the request fails.
+        """
+        response = await self.session.get(
+            url=f"{self._base_url}/dwaas-core/monitor/{space}"
+            f"/persistedViews/{view}"
+        )
+        if response.status_code != 200:
+            return {}
+        return response.json()
+
+    async def get_extended_log(self, log_id: int, space: str) -> dict:
+        """
+        Returns the extended log details of a task (e.g. a persistence
+        run).
+
+        Args:
+            log_id (int): Task log ID.
+            space (str): Space of the task.
+
+        Returns:
+            dict: Log details with 'status' and 'runTime'.
+        """
+        self.session.headers.update(
+            {"x-request-id": str(uuid4()).replace("-", "")}
+        )
+        response = await self.session.get(
+            url=(
+                f"{self._base_url}/dwaas-core/tf"
+                f"/{space}/extendedlogs/{log_id}"
+            )
+        )
+        return response.json()["logDetails"]
+
+    async def start_persistence(self, view: str, space: str) -> int | None:
+        """
+        Starts the persistence of a view.
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+
+        Returns:
+            int | None: Task log ID of the started run, or None if the
+                        start failed.
+        """
+        response = await self.session.post(
+            url=f"{self._base_url}/dwaas-core/tf/directexecute",
+            json={
+                "applicationId": "VIEWS",
+                "spaceId": space,
+                "objectId": view,
+                "activity": "PERSIST",
+            },
+        )
+        if response.status_code != 202:
+            logger.error(
+                "Error starting persistence for view '%s' in '%s'. "
+                "Skipping...",
+                view,
+                space,
+            )
+            return None
+        return response.json()["taskLogId"]
+
+    async def start_persistence_removal(
+        self,
+        view: str,
+        space: str,
+    ) -> int | None:
+        """
+        Starts the removal of the persisted data of a view.
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+
+        Returns:
+            int | None: Task log ID of the started run, or None if the
+                        start failed.
+        """
+        self.session.headers.update(
+            {"x-request-id": str(uuid4()).replace("-", "")}
+        )
+        response = await self.session.post(
+            url=f"{self._base_url}/dwaas-core/tf/directexecute",
+            json={
+                "applicationId": "VIEWS",
+                "spaceId": space,
+                "objectId": view,
+                "activity": "REMOVE_PERSISTED_DATA",
+            },
+        )
+        if response.status_code != 202:
+            logger.error(
+                "Error removing persistence for view '%s' in '%s'. "
+                "Skipping...",
+                view,
+                space,
+            )
+            return None
+        return response.json()["taskLogId"]
+
+    async def start_view_analyzer(self, view: str, space: str) -> bool:
+        """
+        Starts the view analyzer for a view.
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+
+        Returns:
+            bool: True if the analyzer was started (or is already
+                  running), else False.
+        """
         self.session.headers.update(
             {
                 "x-request-id": str(uuid4()).replace("-", ""),
@@ -250,493 +353,90 @@ class Views(BaseResource):
                 "X-Requested-With": "XMLHttpRequest",
             }
         )
-        candidates: list[PersistenceCandidate] = []
-
-        async def analyze_view(
-            view: ViewDetailsDict,
-            filter_out_own_view: bool = False,
-        ) -> None:
-            """
-            Runs the view analyzer and saves all views with a persistence
-            score of 10.
-
-            Args:
-                view (ViewDetailsDict): View to analyze.
-                filter_out_own_view (bool, optional): If True, the
-                                                      own view is excluded
-                                                      from the analysis
-                                                      (meaning only other
-                                                      views will be saved
-                                                      if they have a
-                                                      persistence score of
-                                                      10).
-                                                      Default is False.
-            """
-
-            # Prepare request
-            logger.debug(
-                "Starting view analyzer for view '%s' in '%s'...",
-                view["name"],
-                view["space_name"],
-            )
-            space_name = view["space_name"]
-            view_name = view["name"]
-            url = (
-                f"{self._base_url}/dwaas-core/advisor/{space_name}"
-                f"/execute/{view_name}"
-            )
-            data = {
+        response = await self.session.post(
+            url=(
+                f"{self._base_url}/dwaas-core/advisor/{space}"
+                f"/execute/{view}"
+            ),
+            json={
                 "withMemoryAnalysis": False,
                 "maximumMemoryConsumptionInGiB": 1,
-            }
-            response = await self.session.post(url=url, json=data)
-
-            # Check for errors
-            if not (
-                response.status_code == 409
-                and "taskAlreadyRunning" in response.text
-            ) and not (
-                response.status_code == 202 and "Running" in response.text
-            ):
-                logger.error(
-                    "Error starting view analyzer for view '%s' in '%s'.",
-                    view_name,
-                    space_name,
-                )
-                return
-            logger.info(
-                "Started view analyzer for view '%s' in '%s'.",
-                view_name,
-                space_name,
-            )
-
-            # Update request ID
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-
-            # Fetch logs of previous runs
-            async def fetch_logs() -> list[dict]:
-                response = await self.session.get(
-                    url=f"{self._base_url}/dwaas-core/tf/{space_name}/logs",
-                    params={"objectId": view_name, "getLocks": True},
-                )
-                return response.json()["logs"]
-
-            # Wait for results
-            latest_status = None
-            while latest_status != "COMPLETED":
-                logs = await fetch_logs()
-                latest_status = logs[0]["status"]
-                if latest_status == "FAILED":
-                    logger.error(
-                        "Error generating view analysis "
-                        "for view '%s' in '%s'.",
-                        view_name,
-                        space_name,
-                    )
-                    return
-                logger.debug(
-                    "Waiting for results for view '%s' in '%s'...",
-                    view_name,
-                    space_name,
-                )
-                await asyncio.sleep(1)
-
-            # Fetch logId of lastest run
-            log_id: int = (await fetch_logs())[0]["logId"]
-
-            # Update request ID
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-
-            # Fetch results
-            response = await self.session.get(
-                url=(
-                    f"{self._base_url}/dwaas-core/advisor"
-                    f"/{space_name}/result/{log_id}"
-                )
-            )
-
-            # Filter out view with best persistence score
-            # (only one view can have score 10)
-            # Filter out own view if needed
-            # (else small views always receive a score of 10)
-            entity_stats = response.json()["entityStats"]
-            if filter_out_own_view:
-                entity_stats = list(
-                    filter(
-                        lambda entity: entity["entity"] != view_name,
-                        entity_stats,
-                    )
-                )
-            best_view = list(
-                filter(
-                    lambda entity: entity.get("persistencyCandidateScore", 0)
-                    == 10,
-                    entity_stats,
-                )
-            )
-
-            # Save view with score of 10, if found
-            if best_view:
-                logger.info(
-                    "View '%s' in '%s' has a persistence score of 10.",
-                    best_view[0]["entity"],
-                    best_view[0]["space"],
-                )
-                candidate: PersistenceCandidate = {
-                    "entity": best_view[0]["entity"],
-                    "space": best_view[0]["space"],
-                    "businessName": best_view[0]["businessName"],
-                    "isPersisted": best_view[0]["isPersisted"],
-                }
-                candidates.append(candidate)
-                if on_result is not None:
-                    on_result(candidate)
-            else:
-                logger.debug("No view with a persistence score of 10 found.")
-
-        # Start tasks
-        await self._client.run_async_tasks(
-            all_views, analyze_view, thread_count
+            },
         )
-        return candidates
 
-    async def create_partitioning_for_views(
+        # The analyzer counts as started if it is already running
+        if not (
+            response.status_code == 409
+            and "taskAlreadyRunning" in response.text
+        ) and not (
+            response.status_code == 202 and "Running" in response.text
+        ):
+            logger.error(
+                "Error starting view analyzer for view '%s' in '%s'.",
+                view,
+                space,
+            )
+            return False
+        return True
+
+    async def get_task_logs(
         self,
-        views: list[PartitionTask],
-        partitions: list[str],
-        overwrite_existing_partitions: bool = False,
-        thread_count: int = 1,
-        on_result: Callable[[PartitionCreateResult], None] | None = None,
-    ) -> list[PartitionCreateResult]:
+        object_id: str,
+        space: str,
+    ) -> list[dict]:
         """
-        Creates partitions for the given views.
+        Returns the task logs of an object (newest first).
 
         Args:
-            views (list[PartitionTask]): Views to create partitions for,
-                                         each with the attribute to
-                                         partition by.
-            partitions (list[str]): List of all partitions to be created
-                                    in the correct order.
-                                    Example: ['0000', '2001', '2002', ...]
-                                    Last value is the upper limit of the
-                                    last partition (example:
-                                    FISCYEAR < 2025). Therefore has to
-                                    have at least two values.
-            overwrite_existing_partitions (bool, optional): If True,
-                                                            existing
-                                                            partitions
-                                                            will get
-                                                            overwritten.
-                                                            Otherwise
-                                                            views with
-                                                            existing
-                                                            partitions
-                                                            will be
-                                                            skipped.
-                                                            Default is
-                                                            False.
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 1.
-            on_result (Callable | None, optional): Callback that is
-                                                   invoked with each
-                                                   result as soon as it
-                                                   is available.
-                                                   Defaults to None.
+            object_id (str): ID/name of the object (e.g. a view).
+            space (str): Space of the object.
 
         Returns:
-            list[PartitionCreateResult]: Outcome for each view.
+            list[dict]: Log entries with 'status' and 'logId'.
         """
-
-        # Update headers
-        self.session.headers.update({"Accept": "*/*"})
-        results: list[PartitionCreateResult] = []
-
-        # Function to save a result and notify the caller
-        def save_result(result: PartitionCreateResult) -> None:
-            results.append(result)
-            if on_result is not None:
-                on_result(result)
-
-        # Function to create partitions for a view
-        async def create_partitioning_for_view(view) -> None:
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            response = await self.session.get(
-                url=f"{self._base_url}/dwaas-core/partitioning"
-                f"/{view['space']}/persistedViews/{view['entity']}"
-            )
-            partition_exists = len(response.json()["ranges"]) > 0
-            format_check = (
-                response.json()["partitioningColumns"][view["attribute"]][
-                    "type"
-                ]
-                == "cds.String"
-            )
-
-            # Check if column used for the partition is of type string
-            if not format_check:
-                logger.error(
-                    "Attribute '%s' of view '%s' in '%s' is not of type "
-                    "string. Skipping...",
-                    view["attribute"],
-                    view["entity"],
-                    view["space"],
-                )
-                save_result(
-                    {
-                        "entity": view["entity"],
-                        "space": view["space"],
-                        "attribute": view["attribute"],
-                        "createdPartition": False,
-                    }
-                )
-                return
-
-            # Save result and skip if partition already exists and should
-            # not be overwritten
-            if partition_exists and not overwrite_existing_partitions:
-                logger.debug(
-                    "View '%s' in '%s' is already partitioned. Skipping...",
-                    view["entity"],
-                    view["space"],
-                )
-                save_result(
-                    {
-                        "entity": view["entity"],
-                        "space": view["space"],
-                        "attribute": view["attribute"],
-                        "createdPartition": True,
-                    }
-                )
-                return
-
-            # Create partitions
-            logger.debug(
-                "Creating partitions for view '%s' in '%s'...",
-                view["entity"],
-                view["space"],
-            )
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            url = (
-                f"{self._base_url}/dwaas-core/partitioning/{view['space']}"
-                f"/persistedViews/{view['entity']}"
-            )
-            data = {
-                "remoteSourceName": "",
-                "objectName": view["entity"],
-                "numParallelPartitions": 1,
-                "ranges": [
-                    {
-                        "id": index + 1,
-                        "low": {"include": True, "value": partitions[index]},
-                        "high": {
-                            "include": False,
-                            "value": partitions[index + 1],
-                        },
-                        "locked": False,
-                    }
-                    for index in range(len(partitions) - 1)
-                ],
-                "column": view["attribute"],
-                "columnType": "cds.String",
-                "runtimeDataCalculation": "designtime",
-                "type": "range",
-            }
-            response = await self.session.post(url=url, json=data)
-
-            # Save result
-            if response.status_code == 201:
-                logger.info(
-                    "Created partitions for view '%s' in '%s'.",
-                    view["entity"],
-                    view["space"],
-                )
-            else:
-                logger.error(
-                    "Error creating partitions for view '%s' in '%s'.",
-                    view["entity"],
-                    view["space"],
-                )
-                logger.debug("Response: %s\n", response.text)
-            save_result(
-                {
-                    "entity": view["entity"],
-                    "space": view["space"],
-                    "attribute": view["attribute"],
-                    "createdPartition": response.status_code == 201,
-                }
-            )
-
-        # Start tasks
-        await self._client.run_async_tasks(
-            views, create_partitioning_for_view, thread_count
-        )
-        return results
-
-    async def remove_partitioning_for_views(
-        self,
-        views: list[ViewRef],
-        thread_count: int = 1,
-        on_result: Callable[[PartitionDeleteResult], None] | None = None,
-    ) -> list[PartitionDeleteResult]:
-        """
-        Removes partitions for the given views.
-
-        Args:
-            views (list[ViewRef]): Views to remove partitions for.
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 1.
-            on_result (Callable | None, optional): Callback that is
-                                                   invoked with each
-                                                   result as soon as it
-                                                   is available.
-                                                   Defaults to None.
-
-        Returns:
-            list[PartitionDeleteResult]: Outcome for each view.
-        """
-
-        # Update headers
-        self.session.headers.update({"Accept": "*/*"})
-        results: list[PartitionDeleteResult] = []
-
-        # Function to save a result and notify the caller
-        def save_result(result: PartitionDeleteResult) -> None:
-            results.append(result)
-            if on_result is not None:
-                on_result(result)
-
-        # Function to remove partitions for a view
-        async def remove_partitioning_for_view(view) -> None:
-            logger.debug(
-                "Removing partitions for view '%s' in '%s'...",
-                view["entity"],
-                view["space"],
-            )
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            response = await self.session.delete(
-                url=f"{self._base_url}/dwaas-core/partitioning"
-                f"/{view['space']}/persistedViews/{view['entity']}"
-            )
-
-            # Check for errors
-            if response.status_code != 200:
-                logger.error(
-                    "Error removing partitions for view '%s' in '%s'.",
-                    view["entity"],
-                    view["space"],
-                )
-                save_result(
-                    {
-                        "entity": view["entity"],
-                        "space": view["space"],
-                        "removedPartition": False,
-                    }
-                )
-                return
-
-            # Save result
-            logger.info(
-                "Removed partitions for view '%s' in '%s'.",
-                view["entity"],
-                view["space"],
-            )
-            save_result(
-                {
-                    "entity": view["entity"],
-                    "space": view["space"],
-                    "removedPartition": True,
-                }
-            )
-
-        # Start tasks
-        await self._client.run_async_tasks(
-            views,
-            remove_partitioning_for_view,
-            thread_count,
-        )
-        return results
-
-    async def persist_views(
-        self,
-        views: list[ViewRef],
-        thread_count: int = 1,
-        timer: bool = False,
-        on_result: Callable[[PersistResult], None] | None = None,
-    ) -> list[PersistResult]:
-        """
-        Persists views. Threads can be used in small amounts, otherwise
-        rate limits may occur. Five threads have been run successfully.
-
-        Args:
-            views (list[ViewRef]): Views to persist.
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 1.
-            timer (bool, optional): If True, the duration of the
-                                    persistence run is saved.
-                                    Default is False.
-            on_result (Callable | None, optional): Callback that is
-                                                   invoked with each
-                                                   result as soon as it
-                                                   is available (e.g. to
-                                                   save results
-                                                   incrementally during
-                                                   long runs).
-                                                   Defaults to None.
-
-        Returns:
-            list[PersistResult]: Outcome for each view.
-        """
-
-        # Update headers
         self.session.headers.update(
-            {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
+            {"x-request-id": str(uuid4()).replace("-", "")}
         )
-        results: list[PersistResult] = []
+        response = await self.session.get(
+            url=f"{self._base_url}/dwaas-core/tf/{space}/logs",
+            params={"objectId": object_id, "getLocks": True},
+        )
+        return response.json()["logs"]
 
-        # Function to persist a view
-        async def persist_one(view) -> None:
-            success, log_details = await self.persist_view(
-                view["entity"], view["space"]
+    async def get_view_analyzer_result(
+        self,
+        log_id: int,
+        space: str,
+    ) -> dict:
+        """
+        Returns the result of a completed view analyzer run.
+
+        Args:
+            log_id (int): Log ID of the analyzer run.
+            space (str): Space of the analyzed view.
+
+        Returns:
+            dict: Analyzer result (e.g. 'entityStats').
+        """
+        self.session.headers.update(
+            {"x-request-id": str(uuid4()).replace("-", "")}
+        )
+        response = await self.session.get(
+            url=(
+                f"{self._base_url}/dwaas-core/advisor"
+                f"/{space}/result/{log_id}"
             )
-            runtime = round(log_details.get("runTime", 0) / 1000)
-
-            # Save result and notify caller
-            result: PersistResult = {
-                "entity": view["entity"],
-                "space": view["space"],
-                "isPersisted": success,
-                "runtime": (
-                    runtime if timer and success and runtime > 0 else None
-                ),
-            }
-            results.append(result)
-            if on_result is not None:
-                on_result(result)
-
-        # Start tasks
-        await self._client.run_async_tasks(
-            views, persist_one, thread_count
         )
-        return results
+        return response.json()
+
+    # Single-view workflows (compositions of the endpoint methods)
 
     async def persist_view(
         self, view_name: str, view_space: str
     ) -> tuple[bool, dict]:
         """
-        Persists a view. Does not check if the view is already persisted.
+        Persists a view and waits for the run to finish. Does not check
+        if the view is already persisted.
 
         Args:
             view_name (str): Name of the view.
@@ -746,56 +446,24 @@ class Views(BaseResource):
             tuple[bool, dict]: True if persistence was successful,
                                otherwise False. Dict with log details.
         """
-
         # Start persistence
         logger.debug(
             "Starting persistence of view '%s' in '%s'...",
             view_name,
             view_space,
         )
-        url = f"{self._base_url}/dwaas-core/tf/directexecute"
-        data = {
-            "applicationId": "VIEWS",
-            "spaceId": view_space,
-            "objectId": view_name,
-            "activity": "PERSIST",
-        }
-        response = await self.session.post(url=url, json=data)
-
-        # Check for errors and parse taskLogId
-        if response.status_code != 202:
-            logger.error(
-                "Error starting persistence for view '%s' in '%s'. "
-                "Skipping...",
-                view_name,
-                view_space,
-            )
+        log_id = await self.start_persistence(view_name, view_space)
+        if log_id is None:
             return False, {}
-        log_id = response.json()["taskLogId"]
-
-        # Function to fetch log details
-        async def fetch_log_details() -> dict:
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            response = await self.session.get(
-                url=(
-                    f"{self._base_url}/dwaas-core/tf"
-                    f"/{view_space}/extendedlogs/{log_id}"
-                )
-            )
-            return response.json()["logDetails"]
 
         # Wait for results
         log_details = {}
         while True:
-            log_details = await fetch_log_details()
+            log_details = await self.get_extended_log(log_id, view_space)
             latest_status = log_details["status"]
             if latest_status == "COMPLETED":
                 break
-            if latest_status == "FAILED" or (
-                latest_status != "COMPLETED" and latest_status != "RUNNING"
-            ):
+            if latest_status != "RUNNING":
                 logger.error(
                     "Error persisting view '%s' in '%s'.",
                     view_name,
@@ -827,66 +495,12 @@ class Views(BaseResource):
         )
         return True, log_details
 
-    async def unpersist_views(
-        self,
-        views: list[ViewRef],
-        thread_count: int = 1,
-        on_result: Callable[[UnpersistResult], None] | None = None,
-    ) -> list[UnpersistResult]:
-        """
-        Removes persistences for views. Threads can be used in small
-        amounts, otherwise rate limits may occur.
-        Five threads have been run successfully.
-
-        Args:
-            views (list[ViewRef]): Views to unpersist.
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 1.
-            on_result (Callable | None, optional): Callback that is
-                                                   invoked with each
-                                                   result as soon as it
-                                                   is available.
-                                                   Defaults to None.
-
-        Returns:
-            list[UnpersistResult]: Outcome for each view.
-        """
-
-        # Update headers
-        self.session.headers.update(
-            {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
-        )
-        results: list[UnpersistResult] = []
-
-        # Function to unpersist a view
-        async def unpersist_one(view) -> None:
-            success, _ = await self.unpersist_view(
-                view["entity"], view["space"]
-            )
-
-            # Save result and notify caller
-            result: UnpersistResult = {
-                "entity": view["entity"],
-                "space": view["space"],
-                "isRemoved": success,
-            }
-            results.append(result)
-            if on_result is not None:
-                on_result(result)
-
-        # Start tasks
-        await self._client.run_async_tasks(
-            views, unpersist_one, thread_count
-        )
-        return results
-
     async def unpersist_view(
         self, view_name: str, view_space: str
     ) -> tuple[bool, dict]:
         """
-        Removes the persistence for a view. Checks if view is already
-        persisted.
+        Removes the persistence for a view and waits for the run to
+        finish. Checks if the view is persisted at all.
 
         Args:
             view_name (str): Name of the view.
@@ -897,26 +511,19 @@ class Views(BaseResource):
                                successfully, otherwise False. Dictionary
                                with log details.
         """
-
         # Check if view is persisted
-        url = (
-            f"{self._base_url}/dwaas-core/monitor/{view_space}"
-            f"/persistedViews/{view_name}"
+        monitor_details = await self.get_monitor_details(
+            view_name, view_space
         )
-        response = await self.session.get(url=url)
-        if (
-            response.status_code != 200
-            or "dataPersistency" not in response.json()
-        ):
+        if "dataPersistency" not in monitor_details:
             logger.error(
                 "Error checking if view '%s' in '%s' is persisted. "
-                "Status code: %s. Skipping...",
+                "Skipping...",
                 view_name,
                 view_space,
-                response.status_code,
             )
             return False, {}
-        if response.json()["dataPersistency"] != "Persisted":
+        if monitor_details["dataPersistency"] != "Persisted":
             logger.debug(
                 "View '%s' in '%s' is not persisted. Skipping...",
                 view_name,
@@ -924,58 +531,24 @@ class Views(BaseResource):
             )
             return True, {}
 
-        # Remove persistence
+        # Start removal
         logger.debug(
             "Removing persistence for view '%s' in '%s'...",
             view_name,
             view_space,
         )
-        self.session.headers.update(
-            {"x-request-id": str(uuid4()).replace("-", "")}
-        )
-        url = f"{self._base_url}/dwaas-core/tf/directexecute"
-        data = {
-            "applicationId": "VIEWS",
-            "spaceId": view_space,
-            "objectId": view_name,
-            "activity": "REMOVE_PERSISTED_DATA",
-        }
-        response = await self.session.post(url=url, json=data)
-
-        # Check for errors and parse taskLogId
-        if response.status_code != 202:
-            logger.error(
-                "Error removing persistence for view '%s' in '%s'. "
-                "Skipping...",
-                view_name,
-                view_space,
-            )
+        log_id = await self.start_persistence_removal(view_name, view_space)
+        if log_id is None:
             return False, {}
-        log_id = response.json()["taskLogId"]
-
-        # Function to fetch log details
-        async def fetch_log_details() -> dict:
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            response = await self.session.get(
-                url=(
-                    f"{self._base_url}/dwaas-core/tf"
-                    f"/{view_space}/extendedlogs/{log_id}"
-                )
-            )
-            return response.json()["logDetails"]
 
         # Wait for results
         log_details = {}
         while True:
-            log_details = await fetch_log_details()
+            log_details = await self.get_extended_log(log_id, view_space)
             latest_status = log_details["status"]
             if latest_status == "COMPLETED":
                 break
-            if latest_status == "FAILED" or (
-                latest_status != "COMPLETED" and latest_status != "RUNNING"
-            ):
+            if latest_status != "RUNNING":
                 logger.error(
                     "Error removing persistence for view '%s' in '%s'.",
                     view_name,
@@ -1007,242 +580,311 @@ class Views(BaseResource):
         )
         return True, log_details
 
-    async def lock_partitions_until_year(
-        self,
-        views: list[ViewRef],
-        year: int,
-        thread_count: int = 1,
-        on_result: Callable[[PartitionLockResult], None] | None = None,
-    ) -> list[PartitionLockResult]:
+    async def is_persisted(self, view: str, space: str) -> bool:
         """
-        Locks partitions for the given views. Skips views without
-        partitions.
-        All partitions have to be integers!!
+        Checks if a view is currently persisted. Retries up to three
+        times if the monitor endpoint doesn't answer.
 
         Args:
-            views (list[ViewRef]): Views to lock partitions for.
-            year (int): Year up to which partitions should be locked
-                        (including the year itself).
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 1.
-            on_result (Callable | None, optional): Callback that is
-                                                   invoked with each
-                                                   result as soon as it
-                                                   is available.
-                                                   Defaults to None.
+            view (str): Name of the view.
+            space (str): Space of the view.
+
+        Raises:
+            UnexpectedResponse: If the persistence state cannot be
+                                checked after three attempts.
 
         Returns:
-            list[PartitionLockResult]: Outcome for each view with
-                                       partitions. Views without
-                                       partitions are skipped.
+            bool: True if the view is persisted, else False.
         """
-
-        # Update headers
-        self.session.headers.update({"Accept": "*/*"})
-        results: list[PartitionLockResult] = []
-
-        # Function to save a result and notify the caller
-        def save_result(result: PartitionLockResult) -> None:
-            results.append(result)
-            if on_result is not None:
-                on_result(result)
-
-        # Function to lock partitions for a view
-        async def lock_partitions_for_view(view) -> None:
-            # Check if partition already exists
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            response = await self.session.get(
-                url=f"{self._base_url}/dwaas-core/partitioning"
-                f"/{view['space']}/persistedViews/{view['entity']}"
-            )
-            partition_exists = len(response.json()["ranges"]) > 0
-
-            # Check for errors
-            if not partition_exists:
-                logger.error(
-                    "View %s in %s has no partitions. Skipping...",
-                    view["entity"],
-                    view["space"],
-                )
-                return
-
-            # Fetch details of the view
-            view_data = response.json()
-
-            # Lock partitions
-            logger.debug(
-                "Locking partitions for view '%s' in '%s' up to (including) "
-                "year %s...",
-                view["entity"],
-                view["space"],
-                year,
-            )
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            url = (
-                f"{self._base_url}/dwaas-core/partitioning/{view['space']}"
-                f"/persistedViews/{view['entity']}"
-            )
-            data = {
-                "remoteSourceName": view_data["remoteSourceName"],
-                "objectName": view_data["objectName"],
-                "numParallelPartitions": view_data["numParallelPartitions"],
-                "ranges": view_data["ranges"],
-                "column": view_data["column"],
-                "columnType": view_data["columnType"],
-                "runtimeDataCalculation": view_data["runtimeDataCalculation"],
-                "type": view_data["type"],
-            }
-            for partition in data["ranges"]:
-                if int(partition["low"]["value"]) <= year:
-                    partition["locked"] = True
-            response = await self.session.post(url=url, json=data)
-
-            # Save result
-            if response.status_code == 201:
-                logger.info(
-                    "Locked partitions for view '%s' in '%s' "
-                    "up to (and including) year %s.",
-                    view["entity"],
-                    view["space"],
-                    year,
-                )
-            else:
-                logger.error(
-                    "Error locking partitions for view '%s' in '%s'.",
-                    view["entity"],
-                    view["space"],
-                )
-                logger.debug("Response: %s\n", response.text)
-            save_result(
-                {
-                    "entity": view["entity"],
-                    "space": view["space"],
-                    "lockedPartitions": response.status_code == 201,
-                }
-            )
-
-        # Start tasks
-        await self._client.run_async_tasks(
-            views, lock_partitions_for_view, thread_count
+        for _ in range(3):
+            monitor_details = await self.get_monitor_details(view, space)
+            if not monitor_details:
+                await asyncio.sleep(3)
+                continue
+            return monitor_details.get("dataPersistency", "") == "Persisted"
+        raise UnexpectedResponse(
+            f"Failed to check persistence of view '{view}' in '{space}'."
         )
-        return results
 
-    async def unlock_all_partitions(
-        self,
-        views: list[ViewRef],
-        thread_count: int = 1,
-        on_result: Callable[[PartitionUnlockResult], None] | None = None,
-    ) -> list[PartitionUnlockResult]:
+    async def analyze_view(self, view: str, space: str) -> list[dict]:
         """
-        Unlocks all partitions for the given views.
+        Runs the view analyzer for a view, waits for the run to finish
+        and returns the entity statistics (including the persistency
+        candidate scores).
 
         Args:
-            views (list[ViewRef]): Views to unlock partitions for.
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 1.
-            on_result (Callable | None, optional): Callback that is
-                                                   invoked with each
-                                                   result as soon as it
-                                                   is available.
-                                                   Defaults to None.
+            view (str): Name of the view.
+            space (str): Space of the view.
 
         Returns:
-            list[PartitionUnlockResult]: Outcome for each view with
-                                         partitions. Views without
-                                         partitions are skipped.
+            list[dict]: Entity statistics of the analyzer run. Empty if
+                        the run could not be started or failed.
         """
-
-        # Update headers
-        self.session.headers.update({"Accept": "*/*"})
-        results: list[PartitionUnlockResult] = []
-
-        # Function to save a result and notify the caller
-        def save_result(result: PartitionUnlockResult) -> None:
-            results.append(result)
-            if on_result is not None:
-                on_result(result)
-
-        # Function to unlock all partitions for a view
-        async def unlock_partitions_for_view(view) -> None:
-            # Check if view has partitions
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            response = await self.session.get(
-                url=f"{self._base_url}/dwaas-core/partitioning"
-                f"/{view['space']}/persistedViews/{view['entity']}"
-            )
-            partition_exists = len(response.json()["ranges"]) > 0
-
-            # Check for errors
-            if not partition_exists:
-                logger.error(
-                    "View '%s' in '%s' has no partitions. Skipping...",
-                    view["entity"],
-                    view["space"],
-                )
-                return
-
-            # Fetch view data
-            view_data = response.json()
-
-            # Unlock partitions
-            logger.debug(
-                "Unlocking all partitions of view '%s' in '%s'...",
-                view["entity"],
-                view["space"],
-            )
-            self.session.headers.update(
-                {"x-request-id": str(uuid4()).replace("-", "")}
-            )
-            url = (
-                f"{self._base_url}/dwaas-core/partitioning/{view['space']}"
-                f"/persistedViews/{view['entity']}"
-            )
-            data = {
-                "remoteSourceName": view_data["remoteSourceName"],
-                "objectName": view_data["objectName"],
-                "numParallelPartitions": view_data["numParallelPartitions"],
-                "ranges": view_data["ranges"],
-                "column": view_data["column"],
-                "columnType": view_data["columnType"],
-                "runtimeDataCalculation": view_data["runtimeDataCalculation"],
-                "type": view_data["type"],
-            }
-            for partition in data["ranges"]:
-                partition["locked"] = False
-            response = await self.session.post(url=url, json=data)
-
-            # Save result
-            if response.status_code == 201:
-                logger.info(
-                    "Unlocked all partitions for view '%s' in '%s'.",
-                    view["entity"],
-                    view["space"],
-                )
-            else:
-                logger.error(
-                    "Error unlocking partitions for view '%s' in '%s'.",
-                    view["entity"],
-                    view["space"],
-                )
-                logger.debug("Response: %s\n", response.text)
-            save_result(
-                {
-                    "entity": view["entity"],
-                    "space": view["space"],
-                    "unlockedPartitions": response.status_code == 201,
-                }
-            )
-
-        # Start tasks
-        await self._client.run_async_tasks(
-            views, unlock_partitions_for_view, thread_count
+        # Start the analyzer
+        logger.debug(
+            "Starting view analyzer for view '%s' in '%s'...",
+            view,
+            space,
         )
-        return results
+        if not await self.start_view_analyzer(view, space):
+            return []
+        logger.info(
+            "Started view analyzer for view '%s' in '%s'.",
+            view,
+            space,
+        )
+
+        # Wait for results
+        latest_status = None
+        while latest_status != "COMPLETED":
+            logs = await self.get_task_logs(view, space)
+            latest_status = logs[0]["status"]
+            if latest_status == "FAILED":
+                logger.error(
+                    "Error generating view analysis for view '%s' in '%s'.",
+                    view,
+                    space,
+                )
+                return []
+            logger.debug(
+                "Waiting for results for view '%s' in '%s'...",
+                view,
+                space,
+            )
+            await asyncio.sleep(1)
+
+        # Fetch the result of the latest run
+        log_id: int = (await self.get_task_logs(view, space))[0]["logId"]
+        result = await self.get_view_analyzer_result(log_id, space)
+        return result["entityStats"]
+
+    async def create_partitioning(
+        self,
+        view: str,
+        space: str,
+        attribute: str,
+        partitions: list[str],
+        overwrite_existing: bool = False,
+    ) -> PartitionCreateOutcome:
+        """
+        Creates range partitions for a persisted view.
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+            attribute (str): Attribute to partition by (has to be of
+                             type string).
+            partitions (list[str]): List of all partitions to be created
+                                    in the correct order.
+                                    Example: ['0000', '2001', '2002', ...]
+                                    Last value is the upper limit of the
+                                    last partition (example:
+                                    FISCYEAR < 2025). Therefore has to
+                                    have at least two values.
+            overwrite_existing (bool, optional): If True, existing
+                                                 partitions will get
+                                                 overwritten. Otherwise
+                                                 views with existing
+                                                 partitions are skipped.
+                                                 Defaults to False.
+
+        Returns:
+            PartitionCreateOutcome: 'created', 'exists' (skipped),
+                                    'invalid_column' or 'failed'.
+        """
+        # Fetch current partitioning
+        partitioning = await self.get_partitioning(view, space)
+        partition_exists = len(partitioning["ranges"]) > 0
+
+        # Check if the column used for the partition is of type string
+        column_type = partitioning["partitioningColumns"][attribute]["type"]
+        if column_type != "cds.String":
+            logger.error(
+                "Attribute '%s' of view '%s' in '%s' is not of type "
+                "string. Skipping...",
+                attribute,
+                view,
+                space,
+            )
+            return "invalid_column"
+
+        # Skip if a partitioning exists and should not be overwritten
+        if partition_exists and not overwrite_existing:
+            logger.debug(
+                "View '%s' in '%s' is already partitioned. Skipping...",
+                view,
+                space,
+            )
+            return "exists"
+
+        # Create partitions
+        logger.debug(
+            "Creating partitions for view '%s' in '%s'...",
+            view,
+            space,
+        )
+        data = {
+            "remoteSourceName": "",
+            "objectName": view,
+            "numParallelPartitions": 1,
+            "ranges": [
+                {
+                    "id": index + 1,
+                    "low": {"include": True, "value": partitions[index]},
+                    "high": {
+                        "include": False,
+                        "value": partitions[index + 1],
+                    },
+                    "locked": False,
+                }
+                for index in range(len(partitions) - 1)
+            ],
+            "column": attribute,
+            "columnType": "cds.String",
+            "runtimeDataCalculation": "designtime",
+            "type": "range",
+        }
+        if await self.set_partitioning(view, space, data):
+            logger.info(
+                "Created partitions for view '%s' in '%s'.",
+                view,
+                space,
+            )
+            return "created"
+        logger.error(
+            "Error creating partitions for view '%s' in '%s'.",
+            view,
+            space,
+        )
+        return "failed"
+
+    async def lock_partitions(
+        self,
+        view: str,
+        space: str,
+        until_year: int,
+    ) -> PartitionLockOutcome:
+        """
+        Locks all partitions of a view up to (and including) the given
+        year. All partitions have to be integers!!
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+            until_year (int): Year up to which partitions should be
+                              locked (including the year itself).
+
+        Returns:
+            PartitionLockOutcome: 'locked', 'no_partitions' or 'failed'.
+        """
+        # Fetch current partitioning
+        partitioning = await self.get_partitioning(view, space)
+        if len(partitioning["ranges"]) == 0:
+            logger.error(
+                "View '%s' in '%s' has no partitions. Skipping...",
+                view,
+                space,
+            )
+            return "no_partitions"
+
+        # Lock all partitions up to the given year
+        logger.debug(
+            "Locking partitions for view '%s' in '%s' up to (including) "
+            "year %s...",
+            view,
+            space,
+            until_year,
+        )
+        data = self._build_partitioning_payload(partitioning)
+        for partition in data["ranges"]:
+            if int(partition["low"]["value"]) <= until_year:
+                partition["locked"] = True
+        if await self.set_partitioning(view, space, data):
+            logger.info(
+                "Locked partitions for view '%s' in '%s' "
+                "up to (and including) year %s.",
+                view,
+                space,
+                until_year,
+            )
+            return "locked"
+        logger.error(
+            "Error locking partitions for view '%s' in '%s'.",
+            view,
+            space,
+        )
+        return "failed"
+
+    async def unlock_partitions(
+        self,
+        view: str,
+        space: str,
+    ) -> PartitionLockOutcome:
+        """
+        Unlocks all partitions of a view.
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+
+        Returns:
+            PartitionLockOutcome: 'unlocked', 'no_partitions' or
+                                  'failed'.
+        """
+        # Fetch current partitioning
+        partitioning = await self.get_partitioning(view, space)
+        if len(partitioning["ranges"]) == 0:
+            logger.error(
+                "View '%s' in '%s' has no partitions. Skipping...",
+                view,
+                space,
+            )
+            return "no_partitions"
+
+        # Unlock all partitions
+        logger.debug(
+            "Unlocking all partitions of view '%s' in '%s'...",
+            view,
+            space,
+        )
+        data = self._build_partitioning_payload(partitioning)
+        for partition in data["ranges"]:
+            partition["locked"] = False
+        if await self.set_partitioning(view, space, data):
+            logger.info(
+                "Unlocked all partitions for view '%s' in '%s'.",
+                view,
+                space,
+            )
+            return "unlocked"
+        logger.error(
+            "Error unlocking partitions for view '%s' in '%s'.",
+            view,
+            space,
+        )
+        return "failed"
+
+    def _build_partitioning_payload(self, partitioning: dict) -> dict:
+        """
+        Builds the payload for set_partitioning() from an existing
+        partitioning definition.
+
+        Args:
+            partitioning (dict): Partitioning details as returned by
+                                 get_partitioning().
+
+        Returns:
+            dict: Payload with all fields required by the endpoint.
+        """
+        return {
+            "remoteSourceName": partitioning["remoteSourceName"],
+            "objectName": partitioning["objectName"],
+            "numParallelPartitions": partitioning["numParallelPartitions"],
+            "ranges": partitioning["ranges"],
+            "column": partitioning["column"],
+            "columnType": partitioning["columnType"],
+            "runtimeDataCalculation": partitioning[
+                "runtimeDataCalculation"
+            ],
+            "type": partitioning["type"],
+        }

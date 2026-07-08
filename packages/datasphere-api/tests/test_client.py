@@ -1,4 +1,3 @@
-import asyncio
 import json
 
 import httpx
@@ -63,35 +62,6 @@ async def test_login_falls_back_to_interactive(
         "access_token": "browser-access",
         "refresh_token": "ref",
     }
-
-
-async def test_run_async_tasks_respects_semaphore(
-    client: DatasphereClient,
-) -> None:
-    running = 0
-    max_running = 0
-
-    async def task(item: int) -> None:
-        nonlocal running, max_running
-        running += 1
-        max_running = max(max_running, running)
-        await asyncio.sleep(0.01)
-        running -= 1
-
-    await client.run_async_tasks(range(10), task, thread_count=3)
-    assert max_running <= 3
-
-
-async def test_run_async_tasks_unpacks_tuples(
-    client: DatasphereClient,
-) -> None:
-    received = []
-
-    async def task(first: str, second: int) -> None:
-        received.append((first, second))
-
-    await client.run_async_tasks([("a", 1), ("b", 2)], task)
-    assert received == [("a", 1), ("b", 2)]
 
 
 def test_resources_are_cached(client: DatasphereClient) -> None:

@@ -43,6 +43,41 @@ def dependency_payload(view_ids: list[tuple[str, str]]) -> list[dict]:
 
 
 @respx.mock
+async def test_get_all_analytical_models(client: DatasphereClient) -> None:
+    respx.get(path=SEARCH_PATH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "value": [{"id": "m1", "name": "Model1", "space_name": "SP"}]
+            },
+        )
+    )
+    models = await client.analytical_models.get_all_analytical_models()
+    assert models == [{"id": "m1", "name": "Model1", "space_name": "SP"}]
+
+
+@respx.mock
+async def test_get_analytical_models_in_space(
+    client: DatasphereClient,
+) -> None:
+    respx.get(path=SEARCH_PATH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "value": [
+                    {"id": "m1", "name": "Model1", "space_name": "SP"},
+                    {"id": "m2", "name": "Model2", "space_name": "OTHER"},
+                ]
+            },
+        )
+    )
+    models = await client.analytical_models.get_analytical_models_in_space(
+        "SP"
+    )
+    assert [model["id"] for model in models] == ["m1"]
+
+
+@respx.mock
 async def test_get_views_for_analytical_model(
     client: DatasphereClient,
 ) -> None:
@@ -58,52 +93,3 @@ async def test_get_views_for_analytical_model(
 
     # Views are mapped bottom-up
     assert mapping == {"model-id": {"v2": "View2", "v1": "View1"}}
-
-
-@respx.mock
-async def test_get_all_views_for_analytical_models(
-    client: DatasphereClient,
-) -> None:
-    # First search returns the models, second one the views
-    respx.get(path=SEARCH_PATH).mock(
-        side_effect=[
-            httpx.Response(
-                200,
-                json={
-                    "value": [
-                        {"id": "m1", "name": "Model1", "space_name": "SP"}
-                    ]
-                },
-            ),
-            httpx.Response(
-                200,
-                json={
-                    "value": [
-                        {"id": "v1", "name": "View1", "space_name": "SP_V"}
-                    ]
-                },
-            ),
-        ]
-    )
-    respx.get(path=DEPENDENCIES_PATH).mock(
-        return_value=httpx.Response(
-            200,
-            json=dependency_payload([("v1", "View1"), ("v2", "View2")]),
-        )
-    )
-
-    models = (
-        await client.analytical_models.get_all_views_for_analytical_models()
-    )
-
-    # Resolved views become (space, name) tuples, unresolved views keep
-    # their plain name
-    assert models == {
-        "m1": {
-            "name": "Model1",
-            "dependencies": {
-                "v1": ("SP_V", "View1"),
-                "v2": "View2",
-            },
-        }
-    }

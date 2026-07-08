@@ -2,10 +2,11 @@ import logging
 from datetime import UTC, datetime
 
 from datasphere_api.models import (
+    StatisticsCreateOutcome,
     StatisticsDict,
     StatisticsInformationDict,
-    StatisticsResult,
     StatisticsType,
+    StatisticsUpdateOutcome,
 )
 from datasphere_api.resources.base import BaseResource
 
@@ -28,7 +29,6 @@ class RemoteTables(BaseResource):
             StatisticsDict: Dictionary mapping table names to another
                             dictionary with information about the table.
         """
-
         # Fetch all table names
         logger.debug("Loading all remote tables...")
         response = await self.session.get(
@@ -66,148 +66,115 @@ class RemoteTables(BaseResource):
 
     async def create_statistics(
         self,
+        table: str,
         statistics_type: StatisticsType = "HISTOGRAM",
         space: str = "BWBRIDGESPACE",
-        thread_count: int = 5,
-    ) -> list[StatisticsResult]:
+    ) -> StatisticsCreateOutcome:
         """
-        Creates statistics for all tables of a space. Tables that don't
-        support statistics or already have statistics of the given type
-        are skipped.
+        Creates statistics for a single remote table. Does not check if
+        the table supports statistics or already has some.
 
         Args:
+            table (str): Name of the remote table.
             statistics_type (StatisticsType): Type of the statistic.
                                               Default is 'HISTOGRAM'.
-            space (str, optional): Space of the remote tables.
+            space (str, optional): Space of the remote table.
                                    Defaults to "BWBRIDGESPACE".
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 5.
 
         Returns:
-            list[StatisticsResult]: Outcome for each table.
+            StatisticsCreateOutcome: 'created', 'already_exists' or
+                                     'failed'.
         """
-
-        # Read all table names
-        all_tables = await self.get_all_tables(space)
-        results: list[StatisticsResult] = []
-
-        # Function to create statistics
-        async def create_statistics_for_table(table: str) -> None:
-            # Only create statistics for tables that support them
-            # and don't have statistics of the given type yet
-            if not (
-                all_tables[table]["statisticsSupported"]
-                and all_tables[table]["statisticsType"] != statistics_type
-            ):
-                results.append({"tableName": table, "status": "skipped"})
-                return
-
-            # Create new statistics or update the existing type
-            if all_tables[table]["statisticsType"] is None:
-                status = "created"
-                response = await self.session.post(
-                    url=f"{self._base_url}/dwaas-core/statistics"
-                    f"/{space}/remoteTables/{table}"
-                    f"?type={statistics_type}",
-                    json={"type": statistics_type},
-                )
-            else:
-                status = "updated"
-                response = await self.session.put(
-                    url=f"{self._base_url}/dwaas-core/statistics"
-                    f"/{space}/remoteTables/{table}"
-                    f"?type={statistics_type}",
-                    json={"type": statistics_type},
-                )
-
-            # Evaluate response
-            if (
-                response.status_code == 500
-                and "STATISTICS_ALREADY_EXISTS" in response.text
-            ):
-                logger.debug(
-                    "Statistics for table '%s' already exists. "
-                    "Skipping...",
-                    table,
-                )
-                results.append(
-                    {"tableName": table, "status": "already_exists"}
-                )
-            elif response.status_code == 202:
-                logger.info("Created statistics for table '%s'.", table)
-                results.append({"tableName": table, "status": status})
-            else:
-                logger.error(
-                    "Error creating statistics for table '%s'. "
-                    "Status code: %s",
-                    table,
-                    response.status_code,
-                )
-                logger.debug("Response: %s\n", response.text)
-                results.append({"tableName": table, "status": "failed"})
-
-        # Iterate over all table names and create statistics
-        await self._client.run_async_tasks(
-            all_tables, create_statistics_for_table, thread_count
+        response = await self.session.post(
+            url=f"{self._base_url}/dwaas-core/statistics"
+            f"/{space}/remoteTables/{table}"
+            f"?type={statistics_type}",
+            json={"type": statistics_type},
         )
-        return results
+        if (
+            response.status_code == 500
+            and "STATISTICS_ALREADY_EXISTS" in response.text
+        ):
+            return "already_exists"
+        if response.status_code == 202:
+            return "created"
+        logger.error(
+            "Error creating statistics for table '%s'. Status code: %s",
+            table,
+            response.status_code,
+        )
+        logger.debug("Response: %s\n", response.text)
+        return "failed"
+
+    async def update_statistics(
+        self,
+        table: str,
+        statistics_type: StatisticsType = "HISTOGRAM",
+        space: str = "BWBRIDGESPACE",
+    ) -> StatisticsUpdateOutcome:
+        """
+        Changes the statistics type of a single remote table that
+        already has statistics.
+
+        Args:
+            table (str): Name of the remote table.
+            statistics_type (StatisticsType): New type of the statistic.
+                                              Default is 'HISTOGRAM'.
+            space (str, optional): Space of the remote table.
+                                   Defaults to "BWBRIDGESPACE".
+
+        Returns:
+            StatisticsUpdateOutcome: 'updated', 'already_exists' or
+                                     'failed'.
+        """
+        response = await self.session.put(
+            url=f"{self._base_url}/dwaas-core/statistics"
+            f"/{space}/remoteTables/{table}"
+            f"?type={statistics_type}",
+            json={"type": statistics_type},
+        )
+        if (
+            response.status_code == 500
+            and "STATISTICS_ALREADY_EXISTS" in response.text
+        ):
+            return "already_exists"
+        if response.status_code == 202:
+            return "updated"
+        logger.error(
+            "Error updating statistics for table '%s'. Status code: %s",
+            table,
+            response.status_code,
+        )
+        logger.debug("Response: %s\n", response.text)
+        return "failed"
 
     async def refresh_statistics(
         self,
+        table: str,
         space: str = "BWBRIDGESPACE",
-        thread_count: int = 5,
-    ) -> list[StatisticsResult]:
+    ) -> bool:
         """
-        Refreshes statistics for all tables of a space. Tables that don't
-        support statistics or don't have statistics are skipped.
+        Refreshes the statistics of a single remote table.
 
         Args:
-            space (str, optional): Space of the remote tables.
+            table (str): Name of the remote table.
+            space (str, optional): Space of the remote table.
                                    Defaults to "BWBRIDGESPACE".
-            thread_count (int, optional): Amount of concurrent
-                                          asynchronous requests.
-                                          Default is 5.
 
         Returns:
-            list[StatisticsResult]: Outcome for each table.
+            bool: True if the refresh was started, else False.
         """
-
-        # Read all table names
-        all_tables = await self.get_all_tables(space)
-        results: list[StatisticsResult] = []
-
-        # Function to refresh statistics
-        # Only refresh statistics for tables that support them
-        # and have statistics
-        async def refresh_statistics_for_table(table: str) -> None:
-            if not (
-                all_tables[table]["statisticsSupported"]
-                and all_tables[table]["statisticsType"] is not None
-            ):
-                results.append({"tableName": table, "status": "skipped"})
-                return
-
-            # Send refresh request
-            response = await self.session.post(
-                url=f"{self._base_url}/dwaas-core/statistics/"
-                f"{space}/remoteTables/{table}/refresh"
-            )
-            if response.status_code == 202:
-                logger.info("Refreshed statistics for table '%s'.", table)
-                results.append({"tableName": table, "status": "refreshed"})
-            else:
-                logger.error(
-                    "Error refreshing statistics for table '%s'. "
-                    "Status code: %s",
-                    table,
-                    response.status_code,
-                )
-                logger.debug("Response: %s\n", response.text)
-                results.append({"tableName": table, "status": "failed"})
-
-        # Iterate over all table names and refresh statistics
-        await self._client.run_async_tasks(
-            all_tables, refresh_statistics_for_table, thread_count
+        response = await self.session.post(
+            url=f"{self._base_url}/dwaas-core/statistics/"
+            f"{space}/remoteTables/{table}/refresh"
         )
-        return results
+        if response.status_code != 202:
+            logger.error(
+                "Error refreshing statistics for table '%s'. "
+                "Status code: %s",
+                table,
+                response.status_code,
+            )
+            logger.debug("Response: %s\n", response.text)
+            return False
+        return True

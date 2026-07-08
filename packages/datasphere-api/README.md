@@ -68,10 +68,10 @@ async def main() -> None:
     client = DatasphereClient(config)
     try:
         await client.login()
-        results = await client.task_chains.run(
-            chains=[{"entity": "MY_CHAIN", "space": "MY_SPACE"}],
+        success, log_details = await client.task_chains.run(
+            "MY_CHAIN", "MY_SPACE"
         )
-        print(results)
+        print(success, log_details.get("runTime"))
     finally:
         await client.aclose()
 
@@ -94,21 +94,24 @@ cache, so a login in one tool also benefits the others.
 
 ## Layered results
 
-The library returns data on two levels:
+The library is deliberately thin and works on two levels:
 
-- **Curated results** (recommended): high-level operations like
-  `views.persist_views()` or `remote_tables.create_statistics()` return
-  small, typed result structures (see `datasphere_api.models`). Their
-  keys intentionally match the CSV/JSON exports of the CLI.
-- **Raw payloads**: low-level fetchers like `views.get_all_views()` or
-  `remote_tables.get_all_tables()` return the parsed API payload, typed
-  with broad TypedDicts. For anything not covered, `client.session` is
-  the authenticated `httpx.AsyncClient` — you can call any endpoint
-  directly.
+- **Endpoint methods**: one method = one HTTP call, acting as an
+  unofficial documentation of the internal Datasphere API (e.g.
+  `views.get_partitioning()`, `views.start_persistence()`,
+  `remote_tables.create_statistics()`). They return the parsed
+  payload or a small typed outcome.
+- **Single-entity workflows**: minimal compositions of endpoint calls
+  that every consumer needs identically — mostly start-and-poll flows
+  like `views.persist_view()`, `views.analyze_view()` or
+  `task_chains.run()`.
 
-Long-running batch operations accept an `on_result`/`on_update`
-callback that is invoked after every finished item, so consumers can
-save intermediate results during runs that take hours.
+Batching, concurrency, retries across many entities and file output
+are intentionally **not** part of this library — consumers like the
+[SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI)
+implement their own loops on top. For anything not covered,
+`client.session` is the authenticated `httpx.AsyncClient` — you can
+call any endpoint directly.
 
 ## Development
 

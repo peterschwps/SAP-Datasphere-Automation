@@ -40,7 +40,6 @@ class DatasphereConfig:
         timeout (float, optional): Timeout for HTTP requests in seconds.
                                    Defaults to 60 seconds.
     """
-
     base_url: str
     authorization_url: str
     token_url: str
