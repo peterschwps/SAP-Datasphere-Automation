@@ -80,22 +80,22 @@ provides scripts for managing:
 
 ----
 
-### Option B: macOS (Release, DMG)
+### Option B: macOS (PyPI)
 
-1. Download the latest release asset:
-   `DatasphereAutomation-<version>-macos.dmg`.
-
-2. Open the DMG and copy `DatasphereAutomation` to a location of your
-   choice (e.g. your home directory).
-
-3. Remove Gatekeeper quarantine and run it from the terminal:
+1. Install the CLI as a tool with [uv](https://docs.astral.sh/uv/)
+   (or use pipx):
 
     ```bash
-    xattr -d com.apple.quarantine DatasphereAutomation
-    ./DatasphereAutomation
+    uv tool install datasphere-cli
     ```
 
-**Note:** The Mac app can't be opened via double-click.
+2. Run it from the terminal:
+
+    ```bash
+    datasphere
+    ```
+
+Update to the latest release with `uv tool upgrade datasphere-cli`.
 
 ----
 
