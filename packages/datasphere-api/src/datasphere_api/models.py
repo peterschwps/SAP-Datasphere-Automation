@@ -5,7 +5,7 @@ from typing import Literal, TypedDict
 # formats (Datasphere API payloads and the CSV/JSON exports of consumers).
 
 
-# ----------------------------- Input types ------------------------------
+# Input types
 
 class ViewRef(TypedDict):
     """Reference to a view, task chain or other entity in a space."""
@@ -29,7 +29,7 @@ class ModelRef(TypedDict):
     space: str
 
 
-# --------------------------- For RemoteTables ---------------------------
+# For RemoteTables
 
 StatisticsType = Literal["RECORD_COUNT", "SIMPLE", "HISTOGRAM"]
 
@@ -61,7 +61,7 @@ class StatisticsResult(TypedDict):
     status: StatisticsResultStatus
 
 
-# ------------------------------ For Views -------------------------------
+# For Views
 
 class ViewAttributeMatch(TypedDict):
     """View with an attribute that matched the search word."""
@@ -119,7 +119,7 @@ class UnpersistResult(TypedDict):
     isRemoved: bool
 
 
-# --------------------------- For TaskChains -----------------------------
+# For TaskChains
 
 class TaskChainRunResult(TypedDict):
     entity: str
@@ -128,7 +128,7 @@ class TaskChainRunResult(TypedDict):
     runtime: int | None
 
 
-# ------------------------- For AnalyticalModels -------------------------
+# For AnalyticalModels
 
 class ModelWithViews(TypedDict):
     """Analytical model with all views it depends on. The dependencies
