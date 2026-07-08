@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/peterschwps/SAP-Datasphere-API/compare/v0.1.1...v0.2.0) (2026-07-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* restructured the client into endpoint and workflow layers ([#10](https://github.com/peterschwps/SAP-Datasphere-API/issues/10))
+
+### Features
+
+* declared support for python 3.14 ([#9](https://github.com/peterschwps/SAP-Datasphere-API/issues/9)) ([53807f9](https://github.com/peterschwps/SAP-Datasphere-API/commit/53807f9dff3bc63cdfd8e2403cf2c08bca8c0808))
+* restructured the client into endpoint and workflow layers ([#10](https://github.com/peterschwps/SAP-Datasphere-API/issues/10)) ([f2df622](https://github.com/peterschwps/SAP-Datasphere-API/commit/f2df6229df204534abdb9afeffd6ffb59b1b6425))
+
+
+### Documentation
+
+* adjusted readme badges ([ae9ae52](https://github.com/peterschwps/SAP-Datasphere-API/commit/ae9ae525a0587bb27944e1172f74f41da7ca6ddf))
+
 ## [0.1.1](https://github.com/peterschwps/SAP-Datasphere-API/compare/v0.1.0...v0.1.1) (2026-07-07)
 
 
