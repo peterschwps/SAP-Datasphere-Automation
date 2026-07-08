@@ -28,14 +28,14 @@ except PackageNotFoundError:
 
 from datasphere_api import DatasphereClient
 
-from sap_datasphere_automation import actions
-from sap_datasphere_automation.static.logo import ASCII_LOGO
-from sap_datasphere_automation.utils.filehandler import (
+from datasphere_cli import actions
+from datasphere_cli.static.logo import ASCII_LOGO
+from datasphere_cli.utils.filehandler import (
     SETTINGS_FILE,
     build_config,
     settings,
 )
-from sap_datasphere_automation.utils.logging import (
+from datasphere_cli.utils.logging import (
     LIBRARY_LOGGER_NAME,
     STREAM_FORMAT,
     logger,

@@ -3,8 +3,8 @@ def test_imports_do_not_require_settings() -> None:
     Importing the package must not read a settings file, exit the
     program or create directories.
     """
-    from sap_datasphere_automation import actions, cli
-    from sap_datasphere_automation.utils import (
+    from datasphere_cli import actions, cli
+    from datasphere_cli.utils import (
         filehandler,
         logging,
         screens,

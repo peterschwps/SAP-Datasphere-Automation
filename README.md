@@ -8,7 +8,7 @@
 **Retro-styled CLI for SAP Datasphere** that automates various tasks such as managing
 analytical models, remote tables, task chains and views.
 
-![Preview of the CLI](./sap_datasphere_automation//static/cli.png)
+![Preview of the CLI](./src/datasphere_cli/static/cli.png)
 
 ## 📋 Table of Contents
 
@@ -63,7 +63,7 @@ provides scripts for managing:
 
 ## 🔧 Prerequisites
 
-- **Python**: Version 3.12 or 3.13 (see `pyproject.toml`)
+- **Python**: Version 3.12 or newer
 - **uv** for package management
 
 ## 📦 Installation
@@ -154,7 +154,7 @@ callback code.
 
 **This is how your OAuth Client should look like:**
 
-<img src="./sap_datasphere_automation/static/setup.png" alt="example-setup" width="600"/>
+<img src="./src/datasphere_cli/static/setup.png" alt="example-setup" width="600"/>
 
 ### Creating settings.ini
 

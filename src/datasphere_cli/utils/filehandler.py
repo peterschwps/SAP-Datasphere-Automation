@@ -12,7 +12,7 @@ from typing import cast
 from datasphere_api import Browser, DatasphereConfig
 from platformdirs import user_config_dir
 
-from sap_datasphere_automation.utils.logging import logger
+from datasphere_cli.utils.logging import logger
 
 # Paths
 _PROJECT_NAME = "Datasphere"

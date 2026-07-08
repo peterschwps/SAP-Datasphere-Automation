@@ -90,7 +90,7 @@ jobs:
         run: >
           uv run --no-sources pyinstaller --onefile main.py
           --name DatasphereAutomation
-          --icon sap_datasphere_automation/static/datasphere.ico
+          --icon src/datasphere_cli/static/datasphere.ico
 
       - name: Build executable (macOS)
         if: matrix.platform == 'macos'

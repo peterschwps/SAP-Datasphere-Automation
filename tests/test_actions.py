@@ -7,8 +7,8 @@ from typing import cast
 import pytest
 from datasphere_api import DatasphereClient
 
-from sap_datasphere_automation import actions
-from sap_datasphere_automation.utils.filehandler import ALL_FILES
+from datasphere_cli import actions
+from datasphere_cli.utils.filehandler import ALL_FILES
 
 
 @pytest.fixture

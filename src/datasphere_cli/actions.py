@@ -1,11 +1,3 @@
-"""File-backed wrappers around the datasphere-api client.
-
-Each function in this module backs one menu entry of the TUI: it reads
-the task files, calls the datasphere-api library and writes the results
-to the export/result files. All file handling lives here — the library
-itself only returns data.
-"""
-
 import csv
 import json
 from collections.abc import Mapping
@@ -19,10 +11,10 @@ from datasphere_api.models import (
     ViewRef,
 )
 
-from sap_datasphere_automation.utils.filehandler import ALL_FILES
-from sap_datasphere_automation.utils.logging import logger
+from datasphere_cli.utils.filehandler import ALL_FILES
+from datasphere_cli.utils.logging import logger
 
-# ------------------------------ Helpers ---------------------------------
+# Helpers
 
 def _read_task_csv(file_key: str) -> list[dict[str, str]]:
     """
@@ -165,7 +157,7 @@ def _log_results_saved(file_key: str) -> None:
     )
 
 
-# -------------------------- Analytical Models ---------------------------
+# Analytical Models
 
 async def get_all_views_for_analytical_models(
     client: DatasphereClient,
@@ -256,7 +248,7 @@ async def check_runtime_for_all_views_of_analytical_models(
     _log_results_saved(result_key)
 
 
-# ----------------------------- Remote Tables ----------------------------
+# Remote Tables
 
 async def create_statistics(
     client: DatasphereClient,
@@ -293,7 +285,7 @@ async def refresh_statistics(
     )
 
 
-# ------------------------------ Task Chains -----------------------------
+# Task Chains
 
 async def run_task_chains(
     client: DatasphereClient,
@@ -329,7 +321,7 @@ async def run_task_chains(
     _log_results_saved("TASK_CHAIN_RUN_RESULT")
 
 
-# -------------------------------- Views ---------------------------------
+# Views
 
 async def create_view_analytics(
     client: DatasphereClient,

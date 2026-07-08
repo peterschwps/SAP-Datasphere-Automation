@@ -35,19 +35,19 @@ Homepage = "https://github.com/peterschwps/SAP-Datasphere-CLI"
 Repository = "https://github.com/peterschwps/SAP-Datasphere-CLI"
 
 [project.scripts]
-sap-datasphere-cli = "sap_datasphere_automation.cli:main"
-datasphere-cli = "sap_datasphere_automation.cli:main"
-datasphere = "sap_datasphere_automation.cli:main"
+sap-datasphere-cli = "datasphere_cli.cli:main"
+datasphere-cli = "datasphere_cli.cli:main"
+datasphere = "datasphere_cli.cli:main"
 
 # ----- Hatch -----
 
 [tool.hatch.build.targets.wheel]
-packages = ["sap_datasphere_automation"]
+packages = ["src/datasphere_cli"]
 
 # ----- uv -----
 
-# Local development link to the Datasphere-API repository.
-# Remove once the library is published to PyPI.
+# Permanent local development link to the Datasphere-API repository
+# (CI and release builds use --no-sources to resolve it from PyPI).
 [tool.uv.sources]
 datasphere-api = { path = "../SAP-Datasphere-API", editable = true }
 
