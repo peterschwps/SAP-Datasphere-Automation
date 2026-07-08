@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.3.2...v0.4.0) (2026-07-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* moved batch orchestration into the cli ([#21](https://github.com/peterschwps/SAP-Datasphere-CLI/issues/21))
+
+### Features
+
+* moved batch orchestration into the cli ([#21](https://github.com/peterschwps/SAP-Datasphere-CLI/issues/21)) ([fbecbd1](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/fbecbd1fc9e586761ed206739f640f8c8929d340))
+* replaced the macos binary with a pypi installation ([#20](https://github.com/peterschwps/SAP-Datasphere-CLI/issues/20)) ([2677839](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/26778392580e6b07f9ea3b4a0f47bb928c405361))
+
+
+### Refactoring
+
+* moved the package to src layout as datasphere_cli ([#18](https://github.com/peterschwps/SAP-Datasphere-CLI/issues/18)) ([db9215d](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/db9215d558630e9db8938a2e284a628cd2246969))
+
 ## [0.3.2](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.3.1...v0.3.2) (2026-07-07)
 
 
