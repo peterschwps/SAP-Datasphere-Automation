@@ -1,6 +1,6 @@
 import logging
 
-from datasphere_api.auth import TokenStore
+from datasphere_api.auth import TokenDict
 from datasphere_api.client import DatasphereClient
 from datasphere_api.config import Browser, DatasphereConfig
 from datasphere_api.exceptions import (
@@ -22,6 +22,6 @@ __all__ = [
     "DatasphereException",
     "InvalidConfiguration",
     "MissingCredentials",
-    "TokenStore",
+    "TokenDict",
     "UnexpectedResponse",
 ]

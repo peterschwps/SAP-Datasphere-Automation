@@ -1,5 +1,4 @@
 from collections.abc import AsyncIterator
-from pathlib import Path
 
 import pytest
 
@@ -10,14 +9,13 @@ TOKEN_URL = "https://auth.example/oauth/token"
 
 
 @pytest.fixture
-def config(tmp_path: Path) -> DatasphereConfig:
+def config() -> DatasphereConfig:
     return DatasphereConfig(
         base_url=BASE_URL,
         authorization_url="https://auth.example/oauth/authorize",
         token_url=TOKEN_URL,
         client_id="client-id",
         client_secret="client-secret",
-        session_file=tmp_path / "session.json",
     )
 
 

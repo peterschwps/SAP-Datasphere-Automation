@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 # Browsers supported for the interactive OAuth login
@@ -28,12 +27,6 @@ class DatasphereConfig:
         browser (Browser, optional): Browser to use for the interactive
                                      login. Has to be installed on the
                                      system. Defaults to "CHROME".
-        session_file (Path | None, optional): Path of the file used to
-                                              cache the OAuth tokens.
-                                              Defaults to None, which
-                                              resolves to 'session.json'
-                                              in the user data directory
-                                              of 'Datasphere'.
         redirect_uri (str, optional): Redirect URI configured for the
                                       OAuth client. Defaults to
                                       "http://localhost:8080".
@@ -46,6 +39,5 @@ class DatasphereConfig:
     client_id: str
     client_secret: str
     browser: Browser = "CHROME"
-    session_file: Path | None = None
     redirect_uri: str = "http://localhost:8080"
     timeout: float = 60.0

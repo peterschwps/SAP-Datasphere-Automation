@@ -86,11 +86,14 @@ client has to be of type "Interactive Usage" with the redirect URI
 
 ## Authentication
 
-`client.login()` first tries to refresh cached tokens from the token
-store (`session.json` in the user data directory of `Datasphere`). If no
-tokens are cached or the refresh fails, a browser window opens for the
-interactive login. All consumers of this library share the same token
-cache, so a login in one tool also benefits the others.
+`client.login(tokens)` tries to refresh the given tokens of a previous
+login. If no tokens are given or the refresh fails, a browser window
+opens for the interactive login. The new tokens are returned — the
+client itself doesn't persist anything. Consumers are responsible for
+caching the tokens between runs (the
+[SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI)
+for example stores them as `session.json` in the user data directory
+of `Datasphere`).
 
 ## Layered results
 

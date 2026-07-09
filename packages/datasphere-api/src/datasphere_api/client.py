@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from datasphere_api.auth import (
-    TokenStore,
+    TokenDict,
     authenticate_interactively,
     refresh_tokens,
 )
@@ -47,13 +47,12 @@ class DatasphereClient:
                 f"browsers are: {', '.join(BROWSER_MAPPING)}."
             )
 
-        # Initialize session and token store
+        # Initialize session
         self.config = config
         self.session: httpx.AsyncClient = httpx.AsyncClient(
             timeout=config.timeout,
             follow_redirects=True,
         )
-        self.token_store = TokenStore(config.session_file)
 
         # Lazily created resource instances
         self._analytical_models: AnalyticalModels | None = None
@@ -61,15 +60,24 @@ class DatasphereClient:
         self._task_chains: TaskChains | None = None
         self._views: Views | None = None
 
-    async def login(self) -> None:
+    async def login(self, tokens: TokenDict | None = None) -> TokenDict:
         """
-        Authenticates the session against the Datasphere tenant. Refreshes
-        cached tokens from the token store if they exist. Falls back to
-        the interactive browser login if no tokens are cached or the
-        refresh fails.
+        Authenticates the session against the Datasphere tenant. Tries
+        to refresh the given tokens if they contain a refresh token.
+        Falls back to the interactive browser login if no tokens are
+        given or the refresh fails. Doesn't persist anything — the
+        caller is responsible for caching the returned tokens.
+
+        Args:
+            tokens (TokenDict | None, optional): Tokens of a previous
+                                                 login to refresh.
+                                                 Defaults to None.
 
         Raises:
             AuthenticationFailed: If the interactive login fails.
+
+        Returns:
+            TokenDict: Tokens returned by the token endpoint.
         """
         # Set default headers
         self.session.headers.update(
@@ -85,10 +93,9 @@ class DatasphereClient:
             }
         )
 
-        # Try to refresh cached tokens
-        tokens = self.token_store.load()
+        # Try to refresh the given tokens
         if tokens is not None and "refresh_token" in tokens:
-            logger.info("Loading session tokens...")
+            logger.info("Refreshing session tokens...")
             new_tokens = await refresh_tokens(
                 config=self.config,
                 session=self.session,
@@ -96,32 +103,30 @@ class DatasphereClient:
             )
             if new_tokens is not None:
                 self._apply_tokens(new_tokens)
-                return
+                return new_tokens
             logger.warning("Starting a new login...")
-            self.token_store.delete()
         else:
-            logger.debug("No session tokens found.")
+            logger.debug("No session tokens given.")
 
         # Start interactive login
         logger.debug("Opening browser window to log in...")
-        tokens = await authenticate_interactively(
+        new_tokens = await authenticate_interactively(
             config=self.config,
             session=self.session,
         )
-        self._apply_tokens(tokens)
+        self._apply_tokens(new_tokens)
+        return new_tokens
 
-    def _apply_tokens(self, tokens: dict) -> None:
+    def _apply_tokens(self, tokens: TokenDict) -> None:
         """
-        Adds the access token to the session headers and persists the
-        tokens in the token store.
+        Adds the access token to the session headers.
 
         Args:
-            tokens (dict): Tokens returned by the token endpoint.
+            tokens (TokenDict): Tokens returned by the token endpoint.
         """
         self.session.headers.update(
             {"Authorization": f"Bearer {tokens['access_token']}"}
         )
-        self.token_store.save(tokens)
 
     async def aclose(self) -> None:
         """
