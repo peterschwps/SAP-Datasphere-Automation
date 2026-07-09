@@ -221,7 +221,10 @@ browser window. After logging in the site will automatically redirect to
 `http://localhost:8080`, fetch the callback code and close the browser window.
 
 This will create a login session which can be refreshed automatically in the
-future.
+future. The session tokens are stored as `session.json` in the user data
+directory of `Datasphere`, so other tools built on the
+[Datasphere-API](https://github.com/peterschwps/SAP-Datasphere-API) library
+can share the same session.
 
 ### Menu Navigation
 

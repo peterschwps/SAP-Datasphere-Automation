@@ -40,6 +40,7 @@ from datasphere_cli.utils.settings import (
     build_config,
     reload_settings,
 )
+from datasphere_cli.utils.tokens import TokenStore
 
 # Mapping of all menu categories, sub-categories and its options
 type MenuOption = dict[str, Callable]
@@ -668,11 +669,14 @@ class ExecutionScreen(BaseScreen):
         logger.addHandler(handler)
         library_logger.addHandler(handler)
 
-        # Create client, log in and call the action
+        # Create client, log in (persisting the session tokens between
+        # runs) and call the action
         client: DatasphereClient | None = None
         try:
+            token_store = TokenStore()
             client = DatasphereClient(build_config())
-            await client.login()
+            tokens = await client.login(token_store.load())
+            token_store.save(tokens)
             await self._action(client, **self._params)
             status.update("Done. Press Enter or Escape to return to the menu.")
 

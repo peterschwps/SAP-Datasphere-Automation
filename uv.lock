@@ -214,14 +214,12 @@ version = "0.2.0"
 source = { editable = "../SAP-Datasphere-API" }
 dependencies = [
     { name = "httpx" },
-    { name = "platformdirs" },
     { name = "playwright" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "platformdirs", specifier = ">=4.4.0" },
     { name = "playwright", specifier = ">=1.54.0" },
 ]
 

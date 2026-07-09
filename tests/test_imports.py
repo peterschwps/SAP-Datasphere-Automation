@@ -9,6 +9,7 @@ def test_imports_do_not_require_settings() -> None:
         logging,
         screens,
         settings,
+        tokens,
     )
 
     assert callable(cli.main)
@@ -18,3 +19,4 @@ def test_imports_do_not_require_settings() -> None:
     assert callable(settings.build_config)
     assert callable(logging.configure_logging)
     assert callable(screens.DatasphereApp)
+    assert callable(tokens.TokenStore)
