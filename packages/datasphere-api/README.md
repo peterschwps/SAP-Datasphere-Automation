@@ -11,32 +11,51 @@ and can be used to build your own automations.
 
 ## Features
 
-- **Analytical Models**:
-  - get all analytical models
-  - get all analytical models by space
-  - get mapping of all analytical models and their views
-- **Remote Tables**:
-  - get all remote tables
-  - create statistics
-  - change statistics type
-  - refresh existing statistics
-- **Task Chains**:
-  - start a task chain without awaiting its result
-  - run a task chain and await its execution result
-  - retrieve logs of running task chain
-- **Views**:
-  - get all views
-  - get all attributes of a view
-  - get all partitions
-  - create partitions
-  - lock partitions
-  - unlock partitions
-  - delete partitions
-  - create persistence (with/without awaiting the result)
-  - remove persistence (with/without awaiting the result)
-  - get all logs of a view
-  - get logs of a persistence run
-  - analyze view using the view analyzer
+<detail open>
+  <summary><b>Analytical Models</b></summary>
+  <ul>
+    <li>get all analytical models</li>
+    <li>get all analytical models by space</li>
+    <li>get mapping of all analytical models and their views</li>
+  </ul>
+</details>
+
+<details open>
+  <summary><b>Remote Tables</b></summary>
+  <ul>
+    <li>get all remote tables</li>
+    <li>create statistics</li>
+    <li>change statistics type</li>
+    <li>refresh existing statistics</li>
+  </ul>
+</details>
+
+<details open>
+  <summary><b>Task Chains</b></summary>
+  <ul>
+    <li>start a task chain without awaiting its result</li>
+    <li>run a task chain and await its execution result</li>
+    <li>retrieve logs of running task chain</li>
+  </ul>
+</details>
+
+<details open>
+  <summary><b>Views</b></summary>
+  <ul>
+    <li>get all views</li>
+    <li>get all attributes of a view</li>
+    <li>get all partitions</li>
+    <li>create partitions</li>
+    <li>lock partitions</li>
+    <li>unlock partitions</li>
+    <li>delete partitions</li>
+    <li>create persistence (with/without awaiting the result)</li>
+    <li>remove persistence (with/without awaiting the result)</li>
+    <li>get all logs of a view</li>
+    <li>get logs of a persistence run</li>
+    <li>analyze view using the view analyzer</li>
+  </ul>
+</details>
 
 > [!TIP]
 > Open an issue if you need another functionality.
