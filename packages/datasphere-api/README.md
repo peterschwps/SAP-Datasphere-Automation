@@ -11,7 +11,7 @@ and can be used to build your own automations.
 
 ## Features
 
-<detail open>
+<details open>
   <summary><b>Analytical Models</b></summary>
   <ul>
     <li>get all analytical models</li>
