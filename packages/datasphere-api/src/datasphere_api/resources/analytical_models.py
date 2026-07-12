@@ -110,7 +110,10 @@ class AnalyticalModels(BaseResource):
         # Update headers
         # (if get_all_analytical_models() was called before)
         self.session.headers.update(
-            {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
+            {
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", "")
+            }
         )
 
         # Fetch details

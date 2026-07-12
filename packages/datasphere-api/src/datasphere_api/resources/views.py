@@ -20,8 +20,6 @@ logger = logging.getLogger(__name__)
 
 class Views(BaseResource):
 
-    # Endpoint methods (one HTTP call each)
-
     async def get_all_views(self) -> list[ViewDetailsDict]:
         """
         Returns all views as a list of dictionaries.
@@ -225,7 +223,7 @@ class Views(BaseResource):
 
     async def get_monitor_details(self, view: str, space: str) -> dict:
         """
-        Returns the monitor details of a view (e.g. 'dataPersistency').
+        Returns the monitor details of a view.
 
         Args:
             view (str): Name of the view.
@@ -428,8 +426,6 @@ class Views(BaseResource):
             )
         )
         return response.json()
-
-    # Single-view workflows (compositions of the endpoint methods)
 
     async def persist_view(
         self, view_name: str, view_space: str
@@ -674,13 +670,12 @@ class Views(BaseResource):
             space (str): Space of the view.
             attribute (str): Attribute to partition by (has to be of
                              type string).
-            partitions (list[str]): List of all partitions to be created
-                                    in the correct order.
+            partitions (list[str]): List of all partitions to be created in the
+                                    correct order.
                                     Example: ['0000', '2001', '2002', ...]
                                     Last value is the upper limit of the
-                                    last partition (example:
-                                    FISCYEAR < 2025). Therefore has to
-                                    have at least two values.
+                                    last partition (example: FISCYEAR < 2025).
+                                    Therefore has to have at least two values.
             overwrite_existing (bool, optional): If True, existing
                                                  partitions will get
                                                  overwritten. Otherwise

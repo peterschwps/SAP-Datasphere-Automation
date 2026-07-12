@@ -82,8 +82,7 @@ class RemoteTables(BaseResource):
                                    Defaults to "BWBRIDGESPACE".
 
         Returns:
-            StatisticsCreateOutcome: 'created', 'already_exists' or
-                                     'failed'.
+            StatisticsCreateOutcome: 'created', 'already_exists' or 'failed'.
         """
         response = await self.session.post(
             url=f"{self._base_url}/dwaas-core/statistics"
@@ -124,8 +123,7 @@ class RemoteTables(BaseResource):
                                    Defaults to "BWBRIDGESPACE".
 
         Returns:
-            StatisticsUpdateOutcome: 'updated', 'already_exists' or
-                                     'failed'.
+            StatisticsUpdateOutcome: 'updated', 'already_exists' or 'failed'.
         """
         response = await self.session.put(
             url=f"{self._base_url}/dwaas-core/statistics"
@@ -154,7 +152,8 @@ class RemoteTables(BaseResource):
         space: str = "BWBRIDGESPACE",
     ) -> bool:
         """
-        Refreshes the statistics of a single remote table.
+        Refreshes the statistics of a single remote table (keeping the same
+        statistics type).
 
         Args:
             table (str): Name of the remote table.

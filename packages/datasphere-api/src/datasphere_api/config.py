@@ -15,8 +15,8 @@ BROWSER_MAPPING: dict[str, str] = {
 class DatasphereConfig:
     """
     Configuration for the Datasphere client. All URLs and credentials can
-    be found in the SAP Datasphere tenant under
-    System > Administration > App Integration.
+    be found in the SAP Datasphere tenant under:  System > Administration >
+    App Integration.
 
     Args:
         base_url (str): URL of the SAP Datasphere tenant.
@@ -24,12 +24,12 @@ class DatasphereConfig:
         token_url (str): OAuth token URL of the tenant.
         client_id (str): OAuth client ID of an "Interactive Usage" client.
         client_secret (str): OAuth client secret of the client.
-        browser (Browser, optional): Browser to use for the interactive
-                                     login. Has to be installed on the
-                                     system. Defaults to "CHROME".
-        redirect_uri (str, optional): Redirect URI configured for the
-                                      OAuth client. Defaults to
-                                      "http://localhost:8080".
+        browser (Browser, optional): Browser to use for the interactive login.
+                                     Has to be installed on the system.
+                                     Defaults to "CHROME".
+        redirect_uri (str, optional): Redirect URI configured for the OAuth
+                                      client.
+                                      Defaults to "http://localhost:8080".
         timeout (float, optional): Timeout for HTTP requests in seconds.
                                    Defaults to 60 seconds.
     """

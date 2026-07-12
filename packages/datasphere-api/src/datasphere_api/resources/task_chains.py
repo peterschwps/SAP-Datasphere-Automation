@@ -9,22 +9,22 @@ logger = logging.getLogger(__name__)
 
 class TaskChains(BaseResource):
 
-    # Endpoint methods (one HTTP call each)
-
     async def start(self, chain: str, space: str) -> int | None:
         """
-        Starts a task chain.
+        Starts a task chain. Does not wait for the result.
 
         Args:
             chain (str): Name of the task chain.
             space (str): Space of the task chain.
 
         Returns:
-            int | None: Log ID of the started run, or None if the start
-                        failed.
+            int | None: Log ID of the started run or None if the start failed.
         """
         self.session.headers.update(
-            {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
+            {
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", "")
+            }
         )
         response = await self.session.post(
             url=(
@@ -68,12 +68,10 @@ class TaskChains(BaseResource):
         )
         return response.json()[0]
 
-    # Single-chain workflow
-
     async def run(self, chain: str, space: str) -> tuple[bool, dict]:
         """
-        Starts a task chain and waits for the final result of the
-        execution.
+        Starts a task chain and waits for the final result of the execution.
+        Polls the log every second until the chain completes or fails.
 
         Args:
             chain (str): Name of the task chain.

@@ -1,5 +1,7 @@
 class DatasphereException(Exception):
-    """Common base class for all exceptions raised by this library."""
+    """
+    Common base class for all exceptions raised by this library.
+    """
 
 
 class AuthenticationFailed(DatasphereException):

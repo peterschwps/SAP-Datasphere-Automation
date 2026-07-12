@@ -8,8 +8,8 @@ class BaseResource:
 
     def __init__(self, client: "DatasphereClient"):
         """
-        Initializes the resource with a shared client. The client owns
-        the authenticated session that is used for all requests.
+        Initializes the resource with a shared client. The client owns the
+        authenticated session that is used for all requests.
 
         Args:
             client (DatasphereClient): Client to send requests with.

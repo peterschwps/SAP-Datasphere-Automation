@@ -79,8 +79,7 @@ ViewDetailsDict = TypedDict(
         "technical_type_description": str,
         "technical_type_icon": str,
         "user_is_member_in_source_space_id": str,
-        "business_purpose_description@com.sap.vocabularies.Search.v1.Snippets": str  # noqa: E501
-        | None,
+        "business_purpose_description@com.sap.vocabularies.Search.v1.Snippets": str | None,  # noqa: E501
         "@com.sap.vocabularies.Search.v1.ParentHierarchies": list[dict],
     },
 )

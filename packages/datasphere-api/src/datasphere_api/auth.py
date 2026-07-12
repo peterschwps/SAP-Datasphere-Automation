@@ -122,10 +122,9 @@ async def authenticate_interactively(
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 """
-                Checks the query params of an incoming GET-request for a
-                'code' parameter. Assigns the value to the 'code' key in
-                the callback dict and displays a short confirmation in
-                the browser.
+                Checks the query params of an incoming GET-request for a 'code'
+                parameter. Assigns the value to the 'code' key in the callback
+                dict and displays a short confirmation in the browser.
                 """
                 params = parse_qs(urlparse(self.path).query)
                 callback_code = params.get("code", [None])[0]

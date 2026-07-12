@@ -27,8 +27,7 @@ class DatasphereClient:
 
     def __init__(self, config: DatasphereConfig):
         """
-        Initializes the client and its httpx session. Doesn't perform any
-        file or network I/O.
+        Initializes the client and its httpx session.
 
         Args:
             config (DatasphereConfig): Configuration with the URLs and
@@ -104,9 +103,11 @@ class DatasphereClient:
             if new_tokens is not None:
                 self._apply_tokens(new_tokens)
                 return new_tokens
-            logger.warning("Starting a new login...")
+            logger.warning(
+                "Unable to refresh session tokens. Starting a new login..."
+            )
         else:
-            logger.debug("No session tokens given.")
+            logger.debug("No session tokens provided.")
 
         # Start interactive login
         logger.debug("Opening browser window to log in...")
@@ -137,6 +138,8 @@ class DatasphereClient:
     @property
     def analytical_models(self) -> "AnalyticalModels":
         """
+        Lazy-loads the analytical models resource.
+
         Returns:
             AnalyticalModels: Resource for the analytical model APIs.
         """
@@ -150,6 +153,8 @@ class DatasphereClient:
     @property
     def remote_tables(self) -> "RemoteTables":
         """
+        Lazy-loads the remote tables resource.
+
         Returns:
             RemoteTables: Resource for the remote table APIs.
         """
@@ -161,6 +166,8 @@ class DatasphereClient:
     @property
     def task_chains(self) -> "TaskChains":
         """
+        Lazy-loads the task chains resource.
+
         Returns:
             TaskChains: Resource for the task chain APIs.
         """
@@ -172,6 +179,8 @@ class DatasphereClient:
     @property
     def views(self) -> "Views":
         """
+        Lazy-loads the views resource.
+
         Returns:
             Views: Resource for the view APIs.
         """
