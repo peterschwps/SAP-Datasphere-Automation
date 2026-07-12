@@ -5,43 +5,51 @@
 [![CI](https://github.com/peterschwps/SAP-Datasphere-API/actions/workflows/ci.yml/badge.svg)](https://github.com/peterschwps/SAP-Datasphere-API/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Unofficial async Python client for the SAP Datasphere automation APIs.
-This library powers the
+Asynchronous client for the internal SAP Datasphere API. This library powers the
 [SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI)
-and can be used to build your own automations (e.g. MCP servers or
-scheduled jobs).
-
-> [!NOTE]
-> This project is not affiliated with, endorsed by, or supported by SAP.
-> It uses the same internal HTTP endpoints as the SAP Datasphere web UI,
-> which may change without notice.
+and can be used to build your own automations.
 
 ## Features
 
-- **Views**: export view analytics (persistence candidates), search
-  views by attribute, persist/unpersist views, create/remove partitions,
-  lock/unlock partitions.
-- **Remote Tables**: list tables with statistics information,
-  create/update statistics (Record Count / Simple / Histogram), refresh
-  statistics.
-- **Task Chains**: run task chains and wait for their completion.
-- **Analytical Models**: export models with all their views (optionally
-  per space), measure view persistence runtimes.
-- **OAuth login included**: interactive authorization code flow via a
-  real Chrome/Edge window (Playwright) with automatic token refresh and
-  a shared token cache.
+- **Analytical Models**:
+  - get all analytical models
+  - get all analytical models by space
+  - get mapping of all analytical models and their views
+- **Remote Tables**:
+  - get all remote tables
+  - create statistics
+  - change statistics type
+  - refresh existing statistics
+- **Task Chains**:
+  - start a task chain without awaiting its result
+  - run a task chain and await its execution result
+  - retrieve logs of running task chain
+- **Views**:
+  - get all views
+  - get all attributes of a view
+  - get all partitions
+  - create partitions
+  - lock partitions
+  - unlock partitions
+  - delete partitions
+  - create persistence (with/without awaiting the result)
+  - remove persistence (with/without awaiting the result)
+  - get all logs of a view
+  - get logs of a persistence run
+  - analyze view using the view analyzer
+
+> [!TIP]
+> Open an issue if you need another functionality.
 
 ## Installation
 
 ```bash
-uv add datasphere-api
-# or
 pip install datasphere-api
+# or
+uv add datasphere-api
 ```
 
-The interactive login drives an installed Chrome or Edge browser via
-Playwright channels — a regular Chrome/Edge installation is required,
-no `playwright install` download is needed.
+The interactive login requires a Chrome or Edge installation.
 
 ## Quickstart
 
@@ -86,45 +94,25 @@ client has to be of type "Interactive Usage" with the redirect URI
 
 ## Authentication
 
-`client.login(tokens)` tries to refresh the given tokens of a previous
-login. If no tokens are given or the refresh fails, a browser window
-opens for the interactive login. The new tokens are returned — the
-client itself doesn't persist anything. Consumers are responsible for
-caching the tokens between runs (the
-[SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI)
-for example stores them as `session.json` in the user data directory
-of `Datasphere`).
+This client provides an interactive login. If no tokens are provided, it opens a browser window for the user to sign in. If tokens are provided, the client tries to refresh them first. After a valid session has been created it returns the tokens (from `client.login(tokens)`).
+
+Make sure to store those tokens if you want to persist the session across multiple runs (see [SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI) for an example). The client itself does not persist any tokens!
 
 ## Layered results
 
-The library is deliberately thin and works on two levels:
+This library aims to provide a thin client for the internal Datasphere API. It works on two levels:
 
 - **Endpoint methods**: one method = one HTTP call, acting as an
   unofficial documentation of the internal Datasphere API (e.g.
-  `views.get_partitioning()`, `views.start_persistence()`,
-  `remote_tables.create_statistics()`). They return the parsed
-  payload or a small typed outcome.
+  `views.get_partitioning()` or `remote_tables.create_statistics()`). They return the parsed payload or a small typed outcome.
+
 - **Single-entity workflows**: minimal compositions of endpoint calls
-  that every consumer needs identically — mostly start-and-poll flows
+  that every consumer needs identically, mostly start-and-poll flows (which can be triggered by clicking a button in Datasphere)
   like `views.persist_view()`, `views.analyze_view()` or
   `task_chains.run()`.
 
-Batching, concurrency, retries across many entities and file output
-are intentionally **not** part of this library — consumers like the
-[SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI)
-implement their own loops on top. For anything not covered,
-`client.session` is the authenticated `httpx.AsyncClient` — you can
-call any endpoint directly.
+Both levels mirror single UI actions in SAP Datasphere, e.g. clicking a button or running a search query.
 
-## Development
+## Disclaimer
 
-```bash
-uv sync
-uv run pytest
-uv run ruff check .
-uv run pyright
-```
-
-## License
-
-[MIT](LICENSE)
+This project is not affiliated with, endorsed by, or supported by SAP. It uses the same internal HTTP endpoints as the SAP Datasphere web UI, which may change without notice.
