@@ -3,6 +3,7 @@ from datasphere_api.models import StatisticsType
 
 from datasphere_cli.utils.concurrency import run_async_tasks
 from datasphere_cli.utils.logging import logger
+from datasphere_cli.utils.runs import Run
 
 
 async def create_statistics(
@@ -11,9 +12,9 @@ async def create_statistics(
     thread_count: int,
 ) -> None:
     """
-    Creates statistics for all remote tables. Tables that don't support
-    statistics or already have statistics of the given type are
-    skipped.
+    Creates statistics for all remote tables and saves the results.
+    Tables that don't support statistics or already have statistics of
+    the given type are skipped.
 
     Args:
         client (DatasphereClient): Authenticated client.
@@ -21,15 +22,29 @@ async def create_statistics(
         thread_count (int): Amount of concurrent asynchronous requests.
     """
     all_tables = await client.remote_tables.get_all_tables()
+    run = Run("create-statistics")
 
     # Function to create or update the statistics of a table
     async def create_statistics_for_table(table: str) -> None:
-        # Only create statistics for tables that support them
-        # and don't have statistics of the given type yet
-        if not (
-            all_tables[table]["statisticsSupported"]
-            and all_tables[table]["statisticsType"] != statistics_type
-        ):
+        # Skip tables that don't support statistics or already have
+        # statistics of the given type
+        if not all_tables[table]["statisticsSupported"]:
+            run.append_result(
+                {
+                    "entity": table,
+                    "success": False,
+                    "detail": "skipped_unsupported",
+                }
+            )
+            return
+        if all_tables[table]["statisticsType"] == statistics_type:
+            run.append_result(
+                {
+                    "entity": table,
+                    "success": True,
+                    "detail": "skipped_same_type",
+                }
+            )
             return
 
         # Create new statistics or update the existing type
@@ -50,10 +65,18 @@ async def create_statistics(
             )
         elif outcome in ("created", "updated"):
             logger.info("Created statistics for table '%s'.", table)
+        run.append_result(
+            {
+                "entity": table,
+                "success": outcome in ("created", "updated"),
+                "detail": outcome,
+            }
+        )
 
     await run_async_tasks(
         all_tables, create_statistics_for_table, thread_count
     )
+    run.log_saved()
 
 
 async def refresh_statistics(
@@ -61,29 +84,53 @@ async def refresh_statistics(
     thread_count: int,
 ) -> None:
     """
-    Refreshes statistics for all remote tables. Tables that don't
-    support statistics or don't have statistics are skipped.
+    Refreshes statistics for all remote tables and saves the results.
+    Tables that don't support statistics or don't have statistics are
+    skipped.
 
     Args:
         client (DatasphereClient): Authenticated client.
         thread_count (int): Amount of concurrent asynchronous requests.
     """
     all_tables = await client.remote_tables.get_all_tables()
+    run = Run("refresh-statistics")
 
     # Function to refresh the statistics of a table
     async def refresh_statistics_for_table(table: str) -> None:
-        # Only refresh statistics for tables that support them
-        # and have statistics
-        if not (
-            all_tables[table]["statisticsSupported"]
-            and all_tables[table]["statisticsType"] is not None
-        ):
+        # Skip tables that don't support statistics or don't have
+        # statistics
+        if not all_tables[table]["statisticsSupported"]:
+            run.append_result(
+                {
+                    "entity": table,
+                    "success": False,
+                    "detail": "skipped_unsupported",
+                }
+            )
+            return
+        if all_tables[table]["statisticsType"] is None:
+            run.append_result(
+                {
+                    "entity": table,
+                    "success": False,
+                    "detail": "skipped_no_statistics",
+                }
+            )
             return
 
         # Refresh the statistics (errors are logged by the client)
-        if await client.remote_tables.refresh_statistics(table):
+        refreshed = await client.remote_tables.refresh_statistics(table)
+        if refreshed:
             logger.info("Refreshed statistics for table '%s'.", table)
+        run.append_result(
+            {
+                "entity": table,
+                "success": refreshed,
+                "detail": "refreshed" if refreshed else "failed",
+            }
+        )
 
     await run_async_tasks(
         all_tables, refresh_statistics_for_table, thread_count
     )
+    run.log_saved()

@@ -8,43 +8,37 @@ import pytest
 from datasphere_api import DatasphereClient
 
 from datasphere_cli import actions
-from datasphere_cli.utils.filehandler import ALL_FILES
+from datasphere_cli.utils import runs
 
 
 @pytest.fixture
-def result_files(tmp_path: Path, monkeypatch) -> Path:
+def data_dir(tmp_path: Path, monkeypatch) -> Path:
     """
-    Points all task/result/export files into tmp_path and creates them
-    with their headers (like file_setup() does).
+    Points the task file and the runs directory into tmp_path.
     """
-    for name, details in ALL_FILES.items():
-        path = tmp_path / details["name"]
-        monkeypatch.setitem(ALL_FILES[name], "absolute_path", str(path))
-        if "csv" in details["name"]:
-            with open(path, "w", newline="", encoding="utf-8") as file:
-                writer = csv.DictWriter(file, fieldnames=details["columns"])
-                writer.writeheader()
-        else:
-            path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(runs, "TASKS_FILE", tmp_path / "tasks.csv")
+    monkeypatch.setattr(runs, "RUNS_DIR", tmp_path / "runs")
     return tmp_path
 
 
-def _write_task_rows(file_key: str, rows: list[dict]) -> None:
+def _write_tasks(rows: list[dict]) -> None:
     with open(
-        ALL_FILES[file_key]["absolute_path"],
-        "a",
-        newline="",
-        encoding="utf-8",
+        runs.TASKS_FILE, "w", newline="", encoding="utf-8"
     ) as file:
-        writer = csv.DictWriter(
-            file, fieldnames=ALL_FILES[file_key]["columns"]
-        )
+        writer = csv.DictWriter(file, fieldnames=runs.TASK_COLUMNS)
+        writer.writeheader()
         writer.writerows(rows)
 
 
-def _read_csv(file_key: str) -> list[dict]:
+def _run_dir() -> Path:
+    run_dirs = list(runs.RUNS_DIR.iterdir())
+    assert len(run_dirs) == 1
+    return run_dirs[0]
+
+
+def _read_csv(file_name: str) -> list[dict]:
     with open(
-        ALL_FILES[file_key]["absolute_path"], newline="", encoding="utf-8"
+        _run_dir() / file_name, newline="", encoding="utf-8"
     ) as file:
         return list(csv.DictReader(file))
 
@@ -53,13 +47,27 @@ def _client(**resources) -> DatasphereClient:
     return cast(DatasphereClient, SimpleNamespace(**resources))
 
 
-async def test_run_task_chains_writes_results(result_files: Path) -> None:
-    _write_task_rows(
-        "TASK_CHAIN_RUN",
+def test_read_tasks_creates_template(data_dir: Path) -> None:
+    # First call creates the file and returns no tasks
+    assert runs.read_tasks() == []
+    with open(runs.TASKS_FILE, newline="", encoding="utf-8") as file:
+        assert file.read() == "entity,space,attribute\r\n"
+
+    # Filled rows are returned including the optional attribute
+    _write_tasks(
+        [{"entity": "VIEW_A", "space": "SP", "attribute": "YEAR"}]
+    )
+    assert runs.read_tasks() == [
+        {"entity": "VIEW_A", "space": "SP", "attribute": "YEAR"}
+    ]
+
+
+async def test_run_task_chains_writes_results(data_dir: Path) -> None:
+    _write_tasks(
         [
             {"entity": "CHAIN_A", "space": "SP"},
             {"entity": "CHAIN_B", "space": "SP"},
-        ],
+        ]
     )
 
     # Stub client that reports one success and one failure
@@ -71,27 +79,27 @@ async def test_run_task_chains_writes_results(result_files: Path) -> None:
     client = _client(task_chains=SimpleNamespace(run=fake_run))
     await actions.run_task_chains(client, thread_count=1)
 
-    # Check the exact rows of the result file
-    assert _read_csv("TASK_CHAIN_RUN_RESULT") == [
+    # Check the exact rows of the uniform result file
+    assert _read_csv("results.csv") == [
         {
             "entity": "CHAIN_A",
             "space": "SP",
-            "isCompleted": "True",
+            "success": "True",
+            "detail": "",
             "runtime": "65",
         },
         {
             "entity": "CHAIN_B",
             "space": "SP",
-            "isCompleted": "False",
+            "success": "False",
+            "detail": "",
             "runtime": "",
         },
     ]
 
 
-async def test_persist_views_prefills_and_updates(
-    result_files: Path,
-) -> None:
-    _write_task_rows("VIEW_PERSIST", [{"entity": "VIEW_A", "space": "SP"}])
+async def test_persist_views_prefills_and_updates(data_dir: Path) -> None:
+    _write_tasks([{"entity": "VIEW_A", "space": "SP"}])
 
     # Stub client that persists the view successfully
     async def fake_persist_view(view, space):
@@ -101,18 +109,28 @@ async def test_persist_views_prefills_and_updates(
     client = _client(views=SimpleNamespace(persist_view=fake_persist_view))
     await actions.persist_views(client, timer=True, thread_count=1)
 
-    assert _read_csv("VIEW_PERSIST_RESULT") == [
+    assert _read_csv("results.csv") == [
         {
             "entity": "VIEW_A",
             "space": "SP",
-            "isPersisted": "True",
+            "success": "True",
+            "detail": "",
             "runtime": "12",
         }
     ]
 
 
+async def test_no_run_folder_without_tasks(data_dir: Path) -> None:
+    # Task file doesn't exist yet: action creates the template and
+    # returns without creating a run folder
+    client = _client(views=SimpleNamespace())
+    await actions.persist_views(client, timer=False, thread_count=1)
+    assert runs.TASKS_FILE.is_file()
+    assert not runs.RUNS_DIR.exists()
+
+
 async def test_create_view_analytics_filters_score_10(
-    result_files: Path,
+    data_dir: Path,
 ) -> None:
     all_views = [
         {"id": "v1", "name": "VIEW_A", "space_name": "SP"},
@@ -145,8 +163,7 @@ async def test_create_view_analytics_filters_score_10(
     )
     await actions.create_view_analytics(client, thread_count=1)
 
-    rows = _read_csv("VIEW_ANALYSE")
-    assert rows == [
+    assert _read_csv("export.csv") == [
         {
             "entity": "VIEW_A",
             "space": "SP",
@@ -156,9 +173,97 @@ async def test_create_view_analytics_filters_score_10(
     ]
 
 
-async def test_create_statistics_decision_matrix(
-    result_files: Path,
+async def test_create_partitioning_requires_attribute(
+    data_dir: Path,
 ) -> None:
+    _write_tasks(
+        [
+            {"entity": "VIEW_A", "space": "SP", "attribute": "YEAR"},
+            {"entity": "VIEW_B", "space": "SP", "attribute": ""},
+        ]
+    )
+
+    # Stub client that accepts the partitioning
+    async def fake_create_partitioning(
+        view, space, attribute, partitions, overwrite_existing
+    ):
+        assert (view, attribute) == ("VIEW_A", "YEAR")
+        assert partitions == ["2023", "2024"]
+        return "created"
+
+    client = _client(
+        views=SimpleNamespace(
+            create_partitioning=fake_create_partitioning
+        )
+    )
+    await actions.create_partitioning_for_views(
+        client,
+        partitions=["2023", "2024"],
+        overwrite_existing_partitions=False,
+        thread_count=1,
+    )
+
+    # Rows without an attribute produce a missing_attribute result
+    assert _read_csv("results.csv") == [
+        {
+            "entity": "VIEW_A",
+            "space": "SP",
+            "success": "True",
+            "detail": "created",
+            "runtime": "",
+        },
+        {
+            "entity": "VIEW_B",
+            "space": "SP",
+            "success": "False",
+            "detail": "missing_attribute",
+            "runtime": "",
+        },
+    ]
+
+
+async def test_lock_partitions_reports_views_without_partitions(
+    data_dir: Path,
+) -> None:
+    _write_tasks(
+        [
+            {"entity": "WITH", "space": "SP"},
+            {"entity": "WITHOUT", "space": "SP"},
+        ]
+    )
+
+    # Stub client where one view has no partitions
+    async def fake_lock_partitions(view, space, until_year):
+        assert until_year == 2023
+        return "locked" if view == "WITH" else "no_partitions"
+
+    client = _client(
+        views=SimpleNamespace(lock_partitions=fake_lock_partitions)
+    )
+    await actions.lock_partitions_until_year(
+        client, year=2023, thread_count=1
+    )
+
+    # Views without partitions get a result row with the outcome
+    assert _read_csv("results.csv") == [
+        {
+            "entity": "WITH",
+            "space": "SP",
+            "success": "True",
+            "detail": "locked",
+            "runtime": "",
+        },
+        {
+            "entity": "WITHOUT",
+            "space": "SP",
+            "success": "False",
+            "detail": "no_partitions",
+            "runtime": "",
+        },
+    ]
+
+
+async def test_create_statistics_decision_matrix(data_dir: Path) -> None:
     all_tables = {
         "NEW": {"statisticsSupported": True, "statisticsType": None},
         "OTHER_TYPE": {
@@ -201,42 +306,43 @@ async def test_create_statistics_decision_matrix(
     )
 
     # Tables without statistics are created, different types updated,
-    # same type and unsupported tables are skipped
+    # same type and unsupported tables are only reported
     assert created == ["NEW"]
     assert updated == ["OTHER_TYPE"]
-
-
-async def test_lock_partitions_skips_views_without_partitions(
-    result_files: Path,
-) -> None:
-    _write_task_rows(
-        "VIEW_PARTITION_LOCK",
-        [
-            {"entity": "WITH", "space": "SP"},
-            {"entity": "WITHOUT", "space": "SP"},
-        ],
-    )
-
-    # Stub client where one view has no partitions
-    async def fake_lock_partitions(view, space, until_year):
-        assert until_year == 2023
-        return "locked" if view == "WITH" else "no_partitions"
-
-    client = _client(
-        views=SimpleNamespace(lock_partitions=fake_lock_partitions)
-    )
-    await actions.lock_partitions_until_year(
-        client, year=2023, thread_count=1
-    )
-
-    # Views without partitions produce no result row
-    assert _read_csv("VIEW_PARTITION_LOCK_RESULT") == [
-        {"entity": "WITH", "space": "SP", "lockedPartitions": "True"}
+    assert _read_csv("results.csv") == [
+        {
+            "entity": "NEW",
+            "space": "",
+            "success": "True",
+            "detail": "created",
+            "runtime": "",
+        },
+        {
+            "entity": "OTHER_TYPE",
+            "space": "",
+            "success": "True",
+            "detail": "updated",
+            "runtime": "",
+        },
+        {
+            "entity": "SAME_TYPE",
+            "space": "",
+            "success": "True",
+            "detail": "skipped_same_type",
+            "runtime": "",
+        },
+        {
+            "entity": "UNSUPPORTED",
+            "space": "",
+            "success": "False",
+            "detail": "skipped_unsupported",
+            "runtime": "",
+        },
     ]
 
 
 async def test_export_analytical_models_writes_json(
-    result_files: Path,
+    data_dir: Path,
 ) -> None:
     # Stub client with one model whose views partially resolve to spaces
     async def fake_get_all_analytical_models():
@@ -261,8 +367,7 @@ async def test_export_analytical_models_writes_json(
         client, skip_duplicates=False, thread_count=1
     )
 
-    file_name = ALL_FILES["ANALYTICAL_MODELS_ALL_VIEWS"]["absolute_path"]
-    with open(file_name, encoding="utf-8") as file:
+    with open(_run_dir() / "export.json", encoding="utf-8") as file:
         assert json.load(file) == {
             "m1": {
                 "name": "Model1",

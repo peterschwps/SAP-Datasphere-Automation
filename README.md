@@ -238,18 +238,33 @@ The program starts with an interactive menu:
 ### Directory Structure
 
 The `datasphere/` folder will be created in the directory where you run the
-program. It contains three important subdirectories:
+program:
 
-- **`exports/`**: Contains all extracted data created during program execution
-                  (JSON, CSV files)
-- **`results/`**: Contains an overview of executed tasks showing their status
-                  (successful / unsuccessful)
-- **`tasks/`**: Contains all task files (CSV format) that specify what should
-                be processed
+```
+datasphere/
+  tasks.csv                             # shared task list (input)
+  runs/
+    2026-07-12_14-30-05_persist-views/  # one folder per executed action
+      results.csv                       # uniform result report
+      export.json / export.csv          # extracted data (export actions only)
+```
 
-> [!WARNING]
-> All files in `exports/` and `results/` are **reset on program start**! If you
-> want to preserve files, rename or move them to a different location.
+- **`tasks.csv`**: One shared task list for all task-driven actions with the
+                   columns `entity`, `space` and `attribute`. The `entity`
+                   column holds the view, task chain or analytical model name
+                   depending on the action. `attribute` is only required for
+                   creating partitions and can be left empty otherwise. The
+                   file is created automatically on first use.
+- **`runs/`**: Every executed action writes into its own timestamped folder —
+               previous results are never overwritten.
+- **`results.csv`**: Same columns for every action: `entity`, `space`,
+                     `success`, `detail` and `runtime`. `detail` explains
+                     skips and outcomes (e.g. `no_partitions`,
+                     `missing_attribute`, `skipped_same_type`), `runtime` is
+                     in seconds where measured.
+- **`export.json` / `export.csv`**: Data extracted by the export actions
+                                    (action-specific structure, see the
+                                    function overview below).
 
 ### Threading
 
@@ -283,7 +298,7 @@ Creates an overview of **ALL** analytical models with their views in JSON format
                                 multiple analytical models are only saved once
                                 and not for every model.
 
-**Output file:** `exports/analytical_models_with_all_views.json`
+**Output file:** `export.json` in the run folder
 
 **Example output:**
 
@@ -326,7 +341,7 @@ specific space.
                                 multiple analytical models are only saved once
                                 and not for every model.
 
-**Output file:** `exports/analytical_models_with_all_views_in_<space_name>.json`
+**Output file:** `export_<space_name>.json` in the run folder
 
 **Example output:**
 
@@ -360,11 +375,12 @@ specific space.
 Checks the persistence time for all views of the analytical models listed in
 the task file.
 
-**Required task file:** `tasks/analytical_models_to_check_view_persistence_time.csv`
+**Required task file:** `datasphere/tasks.csv` (`entity` = analytical model
+name)
 
 **Parameters:** None
 
-**Output file:** `exports/analytical_models_with_all_views_and_persistence_time.json`
+**Output file:** `export.json` in the run folder
 
 **Example output:**
 
@@ -422,9 +438,16 @@ statistics type are skipped.<br>
   2. Simple Statistics
   3. Histogram
 
-**Output file:** None
+**Output file:** `results.csv` in the run folder
 
-**Example output:** None
+**Example output:**
+
+```csv
+entity,space,success,detail,runtime
+SALES_ORDERS,,True,created,
+CUSTOMERS,,True,skipped_same_type,
+LEGACY_TABLE,,False,skipped_unsupported,
+```
 
 **Reference:** [SAP Datasphere Documentation - Statistics for Remote Tables](https://help.sap.com/docs/SAP_DATASPHERE)
 
@@ -439,9 +462,15 @@ Updates all existing statistics for remote tables.
 
 **Parameters:** None
 
-**Output file:** None
+**Output file:** `results.csv` in the run folder
 
-**Example output:** None
+**Example output:**
+
+```csv
+entity,space,success,detail,runtime
+SALES_ORDERS,,True,refreshed,
+LEGACY_TABLE,,False,skipped_no_statistics,
+```
 
 </details>
 
@@ -452,17 +481,17 @@ Updates all existing statistics for remote tables.
 
 Runs all task chains in the task file and exports the results of the runs.
 
-**Required task file:** `tasks/task_chains_to_run.csv`
+**Required task file:** `datasphere/tasks.csv` (`entity` = task chain name)
 
 **Parameters:** None
 
-**Output file:** `tasks/task_chains_completed.csv`
+**Output file:** `results.csv` in the run folder
 
 **Example output:**
 
 ```csv
-entity,space,isCompleted,runtime
-AnalyzeSales2025,SALES_DEPARTMENT,true,1025
+entity,space,success,detail,runtime
+AnalyzeSales2025,SALES_DEPARTMENT,True,,1025
 ```
 
 </details>
@@ -484,7 +513,7 @@ persistence score of 10.
 
 **Parameters:** None
 
-**Output file:** `exports/best_views_to_persist.csv`
+**Output file:** `export.csv` in the run folder
 
 **Example output:**
 
@@ -511,7 +540,7 @@ Finds all views that have an attribute containing a specific substring.
 
 - **Search word**: The substring to search for (e.g., `YEAR`)
 
-**Output file:** `exports/view_attributes.csv`
+**Output file:** `export.csv` in the run folder
 
 **Example output (searching for "YEAR"):**
 
@@ -529,7 +558,8 @@ Customers,SALES_DEPARTMENT,All Customers,YEAR
 Creates partitions for views based on a yearly interval. Only columns with full
 year numbers can be used (in Datasphere: `STRING(4)`).
 
-**Required task file:** `tasks/views_to_create_partitions.csv`
+**Required task file:** `datasphere/tasks.csv` (`entity` = view name,
+`attribute` = column to partition by)
 
 **Parameters:**
 
@@ -545,14 +575,14 @@ year numbers can be used (in Datasphere: `STRING(4)`).
 - ...
 - Partition 40: `>= 2039 AND < 2040`
 
-**Output file:** `results/views_partitions_created.csv`
+**Output file:** `results.csv` in the run folder
 
 **Example output:**
 
 ```csv
-entity,space,attribute,createdPartition
-Sales2025,SALES_DEPARTMENT,FISCAL_YEAR,True
-Customers,SALES_DEPARTMENT,YEAR,True
+entity,space,success,detail,runtime
+Sales2025,SALES_DEPARTMENT,True,created,
+Customers,SALES_DEPARTMENT,False,missing_attribute,
 ```
 
 </details>
@@ -562,17 +592,17 @@ Customers,SALES_DEPARTMENT,YEAR,True
 
 Removes all existing partitions from specified views.
 
-**Required task file:** `tasks/views_to_delete_partitions.csv`
+**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
 
 **Parameters:** None
 
-**Output file:** `results/views_partitions_deleted.csv`
+**Output file:** `results.csv` in the run folder
 
 **Example output:**
 
 ```csv
-entity,space,removedPartition
-Sales2025,SALES_DEPARTMENT,True
+entity,space,success,detail,runtime
+Sales2025,SALES_DEPARTMENT,True,,
 ```
 
 </details>
@@ -584,20 +614,21 @@ Locks partitions up to and including a specific year (<= year entered).
 Requires that the views already have partitions. Only partitions with yearly
 values can be locked (in Datasphere `STRING(4)`).
 
-**Required task file:** `tasks/views_to_lock_partitions.csv`
+**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
 
 **Parameters:**
 
 - **Year**: The year up to which partitions should be locked
             (the entered year is also locked)
 
-**Output file:** `results/views_partitions_locked.csv`
+**Output file:** `results.csv` in the run folder
 
 **Example output:**
 
 ```csv
-entity,space,lockedPartitions
-Sales2025,SALES_DEPARTMENT,True
+entity,space,success,detail,runtime
+Sales2025,SALES_DEPARTMENT,True,locked,
+Customers,SALES_DEPARTMENT,False,no_partitions,
 ```
 
 </details>
@@ -607,17 +638,17 @@ Sales2025,SALES_DEPARTMENT,True
 
 Unlocks all existing partitions for specified views.
 
-**Required task file:** `tasks/views_to_unlock_partitions.csv`
+**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
 
 **Parameters:** None
 
-**Output file:** `results/views_partitions_unlocked.csv`
+**Output file:** `results.csv` in the run folder
 
 **Example output:**
 
 ```csv
-entity,space,unlockedPartitions
-Sales2025,SALES_DEPARTMENT,True
+entity,space,success,detail,runtime
+Sales2025,SALES_DEPARTMENT,True,unlocked,
 ```
 
 </details>
@@ -627,20 +658,20 @@ Sales2025,SALES_DEPARTMENT,True
 
 Persists all views listed in the task file.
 
-**Required task file:** `tasks/views_to_persist.csv`
+**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
 
 **Parameters:**
 
 - **Save runtime** (yes/no): Whether to record and save the persistence runtime
 
-**Output file:** `results/views_persisted.csv`
+**Output file:** `results.csv` in the run folder
 
 **Example output:**
 
 ```csv
-entity,space,isPersisted,runtime
-Sales2025,SALES_DEPARTMENT,True,37
-Customers,SALES_DEPARTMENT,True,9
+entity,space,success,detail,runtime
+Sales2025,SALES_DEPARTMENT,True,,37
+Customers,SALES_DEPARTMENT,True,,9
 ```
 
 </details>
@@ -650,17 +681,17 @@ Customers,SALES_DEPARTMENT,True,9
 
 Removes persistence from all views listed in the task file.
 
-**Required task file:** `tasks/views_to_unpersist.csv`
+**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
 
 **Parameters:** None
 
-**Output file:** `results/views_unpersisted.csv`
+**Output file:** `results.csv` in the run folder
 
 **Example output:**
 
 ```csv
-entity,space,isRemoved
-Sales2025,SALES_DEPARTMENT,True
+entity,space,success,detail,runtime
+Sales2025,SALES_DEPARTMENT,True,,
 ```
 
 </details>
@@ -701,18 +732,19 @@ user data directory:
 
 ## 📃 Notes
 
-- **Cookies**: Authentication cookies are saved in
-               `~/.config/Datasphere/.cookies.json` and automatically reused.
+- **Session Tokens**: The OAuth tokens are saved as `session.json` in the
+                      user data directory of `Datasphere` and automatically
+                      reused.
 - **Session Duration**: The SAP Datasphere session expires after 1 hour and is
-                        automatically renewed using the persistent
-                        authentication cookies which last for 3 months.
+                        automatically renewed using the persistent refresh
+                        token.
 - **Threading**: "Parallel" execution is implemented using asynchronous
                  requests. Running tasks simoultaneously can improve
                  performance but should be used with caution to avoid
                  triggering rate limits.
-- **Export/Results**: All files in `exports/` and `results/` are overwritten on
-                      the next program start. You can either move or rename
-                      them to prevent results being overwritten.
+- **Export/Results**: Every action writes into its own timestamped folder in
+                      `datasphere/runs/` — previous results are never
+                      overwritten. Old run folders can be deleted at any time.
 - **Browser**: When using browser authentication, a new browser profile is
                being created to speed up future logins.
 

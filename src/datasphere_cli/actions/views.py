@@ -1,17 +1,13 @@
-from typing import cast
-
 from datasphere_api import DatasphereClient
 
-from datasphere_cli.actions.files import (
-    append_result_row,
-    log_results_saved,
-    prefill_result_rows,
-    read_task_csv,
-    update_result_row,
-)
-from datasphere_cli.models import PartitionTask, ViewRef
+from datasphere_cli.models import TaskRow
 from datasphere_cli.utils.concurrency import run_async_tasks
 from datasphere_cli.utils.logging import logger
+from datasphere_cli.utils.runs import Run, read_tasks
+
+# Columns of the CSV exports of the analytics actions
+ANALYTICS_COLUMNS = ["entity", "space", "businessName", "isPersisted"]
+ATTRIBUTE_COLUMNS = ["entity", "space", "businessName", "attribute"]
 
 
 async def create_view_analytics(
@@ -27,6 +23,7 @@ async def create_view_analytics(
         thread_count (int): Amount of concurrent asynchronous requests.
     """
     all_views = await client.views.get_all_views()
+    run = Run("view-analytics")
 
     # Function to analyze a view and save the best candidate
     async def analyze_view(view: dict) -> None:
@@ -49,10 +46,10 @@ async def create_view_analytics(
             best_view[0]["entity"],
             best_view[0]["space"],
         )
-        append_result_row("VIEW_ANALYSE", best_view[0])
+        run.append_export_row(best_view[0], ANALYTICS_COLUMNS)
 
     await run_async_tasks(all_views, analyze_view, thread_count)
-    log_results_saved("VIEW_ANALYSE")
+    run.log_saved()
 
 
 async def get_all_views_where_attribute_contains(
@@ -69,6 +66,7 @@ async def get_all_views_where_attribute_contains(
         thread_count (int): Amount of concurrent asynchronous requests.
     """
     all_views = await client.views.get_all_views()
+    run = Run("attribute-search")
     logger.debug(
         "Searching for views that have an attribute "
         "containing the substring '%s'...",
@@ -95,18 +93,18 @@ async def get_all_views_where_attribute_contains(
                     view["space_name"],
                     attribute,
                 )
-                append_result_row(
-                    "VIEW_ATTRIBUTE",
+                run.append_export_row(
                     {
                         "entity": view["name"],
                         "space": view["space_name"],
                         "businessName": view["business_name"],
                         "attribute": attribute,
                     },
+                    ATTRIBUTE_COLUMNS,
                 )
 
     await run_async_tasks(all_views, check_view, thread_count)
-    log_results_saved("VIEW_ATTRIBUTE")
+    run.log_saved()
 
 
 async def create_partitioning_for_views(
@@ -117,7 +115,7 @@ async def create_partitioning_for_views(
 ) -> None:
     """
     Creates partitions for all views from the task file and saves the
-    results.
+    results. Task rows need the 'attribute' column filled.
 
     Args:
         client (DatasphereClient): Authenticated client.
@@ -128,32 +126,49 @@ async def create_partitioning_for_views(
                                               overwritten.
         thread_count (int): Amount of concurrent asynchronous requests.
     """
-    views = cast(
-        list[PartitionTask], read_task_csv("VIEW_PARTITIONING_CREATE")
-    )
+    views = read_tasks()
+    if not views:
+        return
+    run = Run("create-partitions")
 
     # Function to create the partitioning for a view
-    async def create_partitioning(view: PartitionTask) -> None:
+    async def create_partitioning(view: TaskRow) -> None:
+        # Skip rows without the attribute to partition by
+        attribute = view.get("attribute")
+        if not attribute:
+            logger.error(
+                "No attribute given for view '%s' in '%s'.",
+                view["entity"],
+                view["space"],
+            )
+            run.append_result(
+                {
+                    "entity": view["entity"],
+                    "space": view["space"],
+                    "success": False,
+                    "detail": "missing_attribute",
+                }
+            )
+            return
         outcome = await client.views.create_partitioning(
             view=view["entity"],
             space=view["space"],
-            attribute=view["attribute"],
+            attribute=attribute,
             partitions=partitions,
             overwrite_existing=overwrite_existing_partitions,
         )
-        append_result_row(
-            "VIEW_PARTITIONING_CREATE_RESULT",
+        run.append_result(
             {
                 "entity": view["entity"],
                 "space": view["space"],
-                "attribute": view["attribute"],
                 # Existing partitions count as created (skip case)
-                "createdPartition": outcome in ("created", "exists"),
-            },
+                "success": outcome in ("created", "exists"),
+                "detail": outcome,
+            }
         )
 
     await run_async_tasks(views, create_partitioning, thread_count)
-    log_results_saved("VIEW_PARTITIONING_CREATE_RESULT")
+    run.log_saved()
 
 
 async def remove_partitioning_for_views(
@@ -168,10 +183,13 @@ async def remove_partitioning_for_views(
         client (DatasphereClient): Authenticated client.
         thread_count (int): Amount of concurrent asynchronous requests.
     """
-    views = cast(list[ViewRef], read_task_csv("VIEW_PARTITIONING_DELETE"))
+    views = read_tasks()
+    if not views:
+        return
+    run = Run("remove-partitions")
 
     # Function to remove the partitioning of a view
-    async def remove_partitioning(view: ViewRef) -> None:
+    async def remove_partitioning(view: TaskRow) -> None:
         logger.debug(
             "Removing partitions for view '%s' in '%s'...",
             view["entity"],
@@ -192,17 +210,16 @@ async def remove_partitioning_for_views(
                 view["entity"],
                 view["space"],
             )
-        append_result_row(
-            "VIEW_PARTITIONING_DELETE_RESULT",
+        run.append_result(
             {
                 "entity": view["entity"],
                 "space": view["space"],
-                "removedPartition": removed,
-            },
+                "success": removed,
+            }
         )
 
     await run_async_tasks(views, remove_partitioning, thread_count)
-    log_results_saved("VIEW_PARTITIONING_DELETE_RESULT")
+    run.log_saved()
 
 
 async def persist_views(
@@ -220,40 +237,42 @@ async def persist_views(
                       saved.
         thread_count (int): Amount of concurrent asynchronous requests.
     """
-    views = cast(list[ViewRef], read_task_csv("VIEW_PERSIST"))
-    prefill_result_rows(
-        "VIEW_PERSIST_RESULT",
+    views = read_tasks()
+    if not views:
+        return
+    run = Run("persist-views")
+    run.prefill_results(
         [
             {
                 "entity": view["entity"],
                 "space": view["space"],
-                "isPersisted": False,
+                "success": False,
+                "detail": "",
                 "runtime": None,
             }
             for view in views
-        ],
+        ]
     )
 
     # Function to persist a view and update its result row
-    async def persist_view(view: ViewRef) -> None:
+    async def persist_view(view: TaskRow) -> None:
         success, log_details = await client.views.persist_view(
             view["entity"], view["space"]
         )
         runtime = round(log_details.get("runTime", 0) / 1000)
-        update_result_row(
-            "VIEW_PERSIST_RESULT",
+        run.update_result(
             {
                 "entity": view["entity"],
                 "space": view["space"],
-                "isPersisted": success,
+                "success": success,
                 "runtime": (
                     runtime if timer and success and runtime > 0 else None
                 ),
-            },
+            }
         )
 
     await run_async_tasks(views, persist_view, thread_count)
-    log_results_saved("VIEW_PERSIST_RESULT")
+    run.log_saved()
 
 
 async def unpersist_views(
@@ -268,35 +287,38 @@ async def unpersist_views(
         client (DatasphereClient): Authenticated client.
         thread_count (int): Amount of concurrent asynchronous requests.
     """
-    views = cast(list[ViewRef], read_task_csv("VIEW_UNPERSIST"))
-    prefill_result_rows(
-        "VIEW_UNPERSIST_RESULT",
+    views = read_tasks()
+    if not views:
+        return
+    run = Run("unpersist-views")
+    run.prefill_results(
         [
             {
                 "entity": view["entity"],
                 "space": view["space"],
-                "isRemoved": False,
+                "success": False,
+                "detail": "",
+                "runtime": None,
             }
             for view in views
-        ],
+        ]
     )
 
     # Function to unpersist a view and update its result row
-    async def unpersist_view(view: ViewRef) -> None:
+    async def unpersist_view(view: TaskRow) -> None:
         success, _ = await client.views.unpersist_view(
             view["entity"], view["space"]
         )
-        update_result_row(
-            "VIEW_UNPERSIST_RESULT",
+        run.update_result(
             {
                 "entity": view["entity"],
                 "space": view["space"],
-                "isRemoved": success,
-            },
+                "success": success,
+            }
         )
 
     await run_async_tasks(views, unpersist_view, thread_count)
-    log_results_saved("VIEW_UNPERSIST_RESULT")
+    run.log_saved()
 
 
 async def lock_partitions_until_year(
@@ -306,36 +328,36 @@ async def lock_partitions_until_year(
 ) -> None:
     """
     Locks partitions for all views from the task file up to (and
-    including) the given year and saves the results. Views without
-    partitions are skipped.
+    including) the given year and saves the results.
 
     Args:
         client (DatasphereClient): Authenticated client.
         year (int): Year up to which partitions should be locked.
         thread_count (int): Amount of concurrent asynchronous requests.
     """
-    views = cast(list[ViewRef], read_task_csv("VIEW_PARTITION_LOCK"))
+    views = read_tasks()
+    if not views:
+        return
+    run = Run("lock-partitions")
 
     # Function to lock the partitions of a view
-    async def lock_partitions(view: ViewRef) -> None:
+    async def lock_partitions(view: TaskRow) -> None:
         outcome = await client.views.lock_partitions(
             view=view["entity"],
             space=view["space"],
             until_year=year,
         )
-        if outcome == "no_partitions":
-            return
-        append_result_row(
-            "VIEW_PARTITION_LOCK_RESULT",
+        run.append_result(
             {
                 "entity": view["entity"],
                 "space": view["space"],
-                "lockedPartitions": outcome == "locked",
-            },
+                "success": outcome == "locked",
+                "detail": outcome,
+            }
         )
 
     await run_async_tasks(views, lock_partitions, thread_count)
-    log_results_saved("VIEW_PARTITION_LOCK_RESULT")
+    run.log_saved()
 
 
 async def unlock_all_partitions(
@@ -344,29 +366,30 @@ async def unlock_all_partitions(
 ) -> None:
     """
     Unlocks all partitions for all views from the task file and saves
-    the results. Views without partitions are skipped.
+    the results.
 
     Args:
         client (DatasphereClient): Authenticated client.
         thread_count (int): Amount of concurrent asynchronous requests.
     """
-    views = cast(list[ViewRef], read_task_csv("VIEW_PARTITION_UNLOCK"))
+    views = read_tasks()
+    if not views:
+        return
+    run = Run("unlock-partitions")
 
     # Function to unlock the partitions of a view
-    async def unlock_partitions(view: ViewRef) -> None:
+    async def unlock_partitions(view: TaskRow) -> None:
         outcome = await client.views.unlock_partitions(
             view["entity"], view["space"]
         )
-        if outcome == "no_partitions":
-            return
-        append_result_row(
-            "VIEW_PARTITION_UNLOCK_RESULT",
+        run.append_result(
             {
                 "entity": view["entity"],
                 "space": view["space"],
-                "unlockedPartitions": outcome == "unlocked",
-            },
+                "success": outcome == "unlocked",
+                "detail": outcome,
+            }
         )
 
     await run_async_tasks(views, unlock_partitions, thread_count)
-    log_results_saved("VIEW_PARTITION_UNLOCK_RESULT")
+    run.log_saved()

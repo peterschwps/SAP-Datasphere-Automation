@@ -5,8 +5,8 @@ def test_imports_do_not_require_settings() -> None:
     """
     from datasphere_cli import actions, cli
     from datasphere_cli.utils import (
-        filehandler,
         logging,
+        runs,
         screens,
         settings,
         tokens,
@@ -14,7 +14,7 @@ def test_imports_do_not_require_settings() -> None:
 
     assert callable(cli.main)
     assert callable(actions.persist_views)
-    assert callable(filehandler.file_setup)
+    assert callable(runs.read_tasks)
     assert callable(settings.load_settings)
     assert callable(settings.build_config)
     assert callable(logging.configure_logging)

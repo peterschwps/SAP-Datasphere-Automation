@@ -1,21 +1,10 @@
-from typing import cast
-
 from datasphere_api import DatasphereClient
 from datasphere_api.models import AnalyticalModelsDetailsDict
 
-from datasphere_cli.actions.files import (
-    log_results_saved,
-    read_task_csv,
-    write_json_export,
-)
-from datasphere_cli.models import (
-    ModelRef,
-    ModelsRuntimeReport,
-    ModelsWithViews,
-)
+from datasphere_cli.models import ModelsRuntimeReport, ModelsWithViews
 from datasphere_cli.utils.concurrency import run_async_tasks
-from datasphere_cli.utils.filehandler import ALL_FILES
 from datasphere_cli.utils.logging import logger
+from datasphere_cli.utils.runs import Run, read_tasks
 
 
 async def _collect_views_for_models(
@@ -106,14 +95,15 @@ async def get_all_views_for_analytical_models(
     """
     logger.debug("Loading all analytical models...")
     models = await client.analytical_models.get_all_analytical_models()
+    run = Run("models-with-views")
     collected = await _collect_views_for_models(
         client=client,
         models=models,
         skip_duplicates=skip_duplicates,
         thread_count=thread_count,
     )
-    write_json_export("ANALYTICAL_MODELS_ALL_VIEWS", collected)
-    log_results_saved("ANALYTICAL_MODELS_ALL_VIEWS")
+    run.write_export_json(collected)
+    run.log_saved()
 
 
 async def get_all_views_for_analytical_models_in_space(
@@ -140,20 +130,15 @@ async def get_all_views_for_analytical_models_in_space(
     models = await client.analytical_models.get_analytical_models_in_space(
         space_name
     )
+    run = Run("models-with-views-in-space")
     collected = await _collect_views_for_models(
         client=client,
         models=models,
         skip_duplicates=skip_duplicates,
         thread_count=thread_count,
     )
-    file_name = cast(
-        str,
-        ALL_FILES["ANALYTICAL_MODELS_ALL_VIEWS_IN_SPACE"]["absolute_path"],
-    ).replace("space", space_name)
-    write_json_export(
-        "ANALYTICAL_MODELS_ALL_VIEWS_IN_SPACE", collected, file_name
-    )
-    logger.info("Results saved to '%s'.", file_name)
+    run.write_export_json(collected, f"export_{space_name}.json")
+    run.log_saved()
 
 
 async def check_runtime_for_all_views_of_analytical_models(
@@ -162,19 +147,19 @@ async def check_runtime_for_all_views_of_analytical_models(
 ) -> None:
     """
     Checks the persistence times of all views for the analytical models
-    in the task file. Persists the views to check the actual runtime.
-    Unpersists views unless they were previously persisted. Saves the
-    results incrementally to a JSON file.
+    in the task file ('entity' holds the model name). Persists the
+    views to check the actual runtime. Unpersists views unless they
+    were previously persisted. Saves the results incrementally to a
+    JSON file.
 
     Args:
         client (DatasphereClient): Authenticated client.
         thread_count (int): Amount of concurrent asynchronous requests.
     """
-    models = cast(
-        list[ModelRef],
-        read_task_csv("ANALYTICAL_MODELS_ALL_VIEWS_PERSISTENCE_TIME"),
-    )
-    result_key = "ANALYTICAL_MODELS_ALL_VIEWS_PERSISTENCE_TIME_RESULT"
+    models = read_tasks()
+    if not models:
+        return
+    run = Run("models-runtime-check")
 
     # Fetch all analytical models and create ID mapping
     logger.debug("Loading all analytical models...")
@@ -196,13 +181,13 @@ async def check_runtime_for_all_views_of_analytical_models(
         # Resolve the analytical model ID from the name/space mapping
         found = False
         for model_id, (name, space) in id_to_name_and_space.items():
-            if model["modelname"] == name and model["space"] == space:
+            if model["entity"] == name and model["space"] == space:
                 found = True
 
                 # Fetch all views for the analytical model
                 logger.debug(
                     "Loading all views for analytical model '%s'...",
-                    model["modelname"],
+                    model["entity"],
                 )
                 all_views = await (
                     client.analytical_models.get_views_for_analytical_model(
@@ -223,7 +208,7 @@ async def check_runtime_for_all_views_of_analytical_models(
 
                 # Save analytical model
                 models_with_views[model_id] = {
-                    "name": model["modelname"],
+                    "name": model["entity"],
                     "dependencies": dependencies,
                 }
                 break
@@ -232,7 +217,7 @@ async def check_runtime_for_all_views_of_analytical_models(
         if not found:
             logger.error(
                 "Analytical model '%s' in space '%s' was not found.",
-                model["modelname"],
+                model["entity"],
                 model["space"],
             )
 
@@ -268,7 +253,7 @@ async def check_runtime_for_all_views_of_analytical_models(
     # Function to save the current report (crash resilience during
     # hours-long runs)
     def save_results() -> None:
-        write_json_export(result_key, report)
+        run.write_export_json(report)
 
     # Function to add runtime to view
     def update_runtime(
@@ -369,4 +354,4 @@ async def check_runtime_for_all_views_of_analytical_models(
         all_views_to_persist, persist_and_unpersist_view, thread_count
     )
     save_results()
-    log_results_saved(result_key)
+    run.log_saved()
