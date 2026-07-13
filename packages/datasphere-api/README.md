@@ -81,23 +81,15 @@ from datasphere_api import DatasphereClient, DatasphereConfig
 async def main() -> None:
     config = DatasphereConfig(
         base_url="https://example.eu10.hcs.cloud.sap",
-        authorization_url=(
-            "https://example.authentication.eu10.hana.ondemand.com"
-            "/oauth/authorize"
-        ),
-        token_url=(
-            "https://example.authentication.eu10.hana.ondemand.com"
-            "/oauth/token"
-        ),
+        authorization_url="https://example.authentication.eu10.hana.ondemand.com/oauth/authorize",
+        token_url="https://example.authentication.eu10.hana.ondemand.com/oauth/token",
         client_id="...",
         client_secret="...",
     )
     client = DatasphereClient(config)
     try:
         await client.login()
-        success, log_details = await client.task_chains.run(
-            "MY_CHAIN", "MY_SPACE"
-        )
+        success, log_details = await client.task_chains.run("MY_CHAIN", "MY_SPACE")
         print(success, log_details.get("runTime"))
     finally:
         await client.aclose()
