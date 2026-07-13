@@ -161,8 +161,9 @@ callback code.
 In order to create the settings file you need to run the CLI once. This will
 create a `settings.toml` in your user configuration directory:
 
-- **macOS/Linux**: `~/.config/Datasphere/settings.toml`
-- **Windows**: `%APPDATA%\Datasphere\settings.toml`
+- **macOS**: `~/Library/Application Support/Datasphere/settings.toml`
+- **Linux**: `~/.config/Datasphere/settings.toml`
+- **Windows**: `%LOCALAPPDATA%\Datasphere\settings.toml`
 
 > [!NOTE]
 > Version 0.4.0 replaced the previous `settings.ini` with a validated
@@ -725,16 +726,15 @@ The project uses:
 ### Logging
 
 The program uses logging. Log files are created for each day and saved in the
-user data directory:
-
-- **macOS/Linux**: `~/.local/share/Datasphere/`
-- **Windows**: `%LOCALAPPDATA%\Datasphere\`
+`.logs/` folder of the directory where you run the program.
 
 ## 📃 Notes
 
-- **Session Tokens**: The OAuth tokens are saved as `session.json` in the
-                      user data directory of `Datasphere` and automatically
-                      reused.
+- **Session Tokens**: The OAuth tokens are saved as `session.json` and
+                      automatically reused (macOS:
+                      `~/Library/Application Support/Datasphere/`, Linux:
+                      `~/.local/share/Datasphere/`, Windows:
+                      `%LOCALAPPDATA%\Datasphere\`).
 - **Session Duration**: The SAP Datasphere session expires after 1 hour and is
                         automatically renewed using the persistent refresh
                         token.
