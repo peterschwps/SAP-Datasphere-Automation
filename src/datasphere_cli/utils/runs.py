@@ -30,9 +30,7 @@ def read_tasks() -> list[TaskRow]:
     # Create an empty task file on the first run
     if not TASKS_FILE.is_file():
         TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(
-            TASKS_FILE, "w", newline="", encoding="utf-8"
-        ) as task_file:
+        with open(TASKS_FILE, "w", newline="", encoding="utf-8") as task_file:
             writer = csv.DictWriter(task_file, fieldnames=TASK_COLUMNS)
             writer.writeheader()
         logger.info("Created new task file at '%s'.", TASKS_FILE)

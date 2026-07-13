@@ -28,7 +28,10 @@ def test_token_store_deletes_corrupt_file(tmp_path: Path) -> None:
 
 def test_token_store_default_path() -> None:
     store = TokenStore()
-    expected = Path(user_data_dir("Datasphere")) / "session.json"
+    expected = (
+        Path(user_data_dir("Datasphere", appauthor=False))
+        / "session.json"
+    )
     assert store.path == expected
 
 

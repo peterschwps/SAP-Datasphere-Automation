@@ -18,7 +18,7 @@ from pydantic_settings import (
 from datasphere_cli.utils.logging import logger
 
 # Paths
-_CONFIG_DIR = Path(user_config_dir("Datasphere"))
+_CONFIG_DIR = Path(user_config_dir("Datasphere", appauthor=False))
 SETTINGS_FILE = _CONFIG_DIR / "settings.toml"
 
 # Template for new settings files (with explanatory comments)

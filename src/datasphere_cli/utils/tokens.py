@@ -23,7 +23,10 @@ class TokenStore:
                                           'Datasphere'.
         """
         if path is None:
-            path = Path(user_data_dir("Datasphere")) / "session.json"
+            path = (
+                Path(user_data_dir("Datasphere", appauthor=False))
+                / "session.json"
+            )
         self.path = path
 
     def load(self) -> TokenDict | None:
