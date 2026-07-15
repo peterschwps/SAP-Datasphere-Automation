@@ -64,42 +64,69 @@ provides scripts for managing:
 ## 🔧 Prerequisites
 
 - **Python**: Version 3.12 or newer
-- **uv** for package management
+- **Package Installer**: [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/stable/)
 
 ## 📦 Installation
 
-### Option A: Windows (Release)
+### Quick Start
 
-1. Download the latest release asset: `DatasphereAutomation-<version>-windows.exe`.
-
-2. Run via double-click or from a terminal:
-
-    ```bash
-    DatasphereAutomation-<version>-windows.exe
-    ```
-
-----
-
-### Option B: macOS (PyPI)
-
-1. Install the CLI as a tool with [uv](https://docs.astral.sh/uv/)
-   (or use pipx):
+1. Install the CLI as a tool with [uv](https://docs.astral.sh/uv/):
 
     ```bash
     uv tool install datasphere-cli
     ```
 
-2. Run it from the terminal:
+    **or** with [pipx](https://pipx.pypa.io/stable/):
+
+    ```bash
+    pipx install datasphere-cli
+    ```
+
+2. Run it from the terminal **using any of the following commands**:
 
     ```bash
     datasphere
     ```
 
-Update to the latest release with `uv tool upgrade datasphere-cli`.
+    ```bash
+    datasphere-cli
+    ```
+
+Update to the latest release with `uv tool upgrade datasphere-cli`
+ / `pipx upgrade datasphere-cli`.
 
 ----
 
-### Option C: Install from Git (all platforms)
+### Command Layer
+
+The presentation-independent command layer can be installed without Textual
+or Rich. It is intended for integrations such as Datasphere-MCP:
+
+```bash
+pip install datasphere-core
+```
+
+The full `datasphere-cli` package continues to include the TUI and depends on
+this command layer.
+
+### Direct Commands
+
+Providing no arguments continues to open the TUI. Individual operations can
+also be executed directly:
+
+```bash
+datasphere taskchain start TC_TEST_DEV --space DEV
+datasphere taskchain start TC_TEST_DEV --space DEV --timeout 600
+datasphere taskchain start TC_TEST_DEV --space DEV --output json
+```
+
+The task-chain command waits for the terminal SAP status. It exits with code
+zero only when the run completes successfully. JSON output is written only to
+`stdout`; errors are written to `stderr`.
+
+----
+
+### Install from Git (all platforms)
 
 1. Clone the repository:
 
@@ -111,7 +138,7 @@ Update to the latest release with `uv tool upgrade datasphere-cli`.
 2. Install with uv (recommended):
 
     ```bash
-    uv sync
+    uv sync --all-packages
     ```
 
 3. Install the required browsers for Playwright:
@@ -129,7 +156,7 @@ Update to the latest release with `uv tool upgrade datasphere-cli`.
 2. Install dev dependencies:
 
     ```bash
-    uv sync --group dev
+    uv sync --all-packages --group dev
     ```
 
 3. Install Playwright:
@@ -204,14 +231,14 @@ secret = ""
 
 ### Execution
 
+Run it from the terminal **using any of the following commands**:
+
 ```bash
-uv run python main.py
+datasphere
 ```
 
-**Executable:**
-
 ```bash
-.\DatasphereAutomation.exe
+datasphere-cli
 ```
 
 ### First Run / Expired Tokens
@@ -678,7 +705,7 @@ The project uses:
 2. Install development environment:
 
     ```bash
-    uv sync --group dev
+    uv sync --all-packages --group dev
     ```
 
 3. Run pre-commit checks:
@@ -698,11 +725,13 @@ user data directory:
 
 ## 📃 Notes
 
-- **Cookies**: Authentication cookies are saved in
-               `~/.config/Datasphere/.cookies.json` and automatically reused.
-- **Session Duration**: The SAP Datasphere session expires after 1 hour and is
-                        automatically renewed using the persistent
-                        authentication cookies which last for 3 months.
+- **Credentials**: OAuth tokens and the client secret are stored in the
+                   operating system credential store, separated by tenant and
+                   OAuth client ID. They are never written to a shared
+                   plaintext session file.
+- **Session Duration**: Stored refresh tokens are used to renew the session
+                        before an action starts. A browser opens only when no
+                        valid stored session is available.
 - **Threading**: "Parallel" execution is implemented using asynchronous
                  requests. Running tasks simoultaneously can improve
                  performance but should be used with caution to avoid
@@ -710,8 +739,8 @@ user data directory:
 - **Export/Results**: All files in `exports/` and `results/` are overwritten on
                       the next program start. You can either move or rename
                       them to prevent results being overwritten.
-- **Browser**: When using browser authentication, a new browser profile is
-               being created to speed up future logins.
+- **Browser**: Browser authentication uses a temporary Playwright context and
+               a loopback-only OAuth callback.
 
 ## 🚨 Disclaimer
 
