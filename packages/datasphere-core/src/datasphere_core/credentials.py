@@ -39,6 +39,7 @@ class KeyringTokenStore:
     """
     Stores OAuth tokens in the OS credential store.
     """
+
     async def load_tokens(self, key: str) -> TokenDict | None:
         """
         Loads a token (stored as a 'password') from the credential store.
@@ -132,7 +133,7 @@ class KeyringTokenStore:
             value (str): Password to store.
 
         Raises:
-            TokenStoreError: If the password could not be read from the
+            TokenStoreError: If the password could not be written to the
                              credential store.
         """
         try:
@@ -158,7 +159,7 @@ class KeyringTokenStore:
                        value returned by build_credential_key()).
 
         Raises:
-            TokenStoreError: If the password could not be read from the
+            TokenStoreError: If the password could not be deleted from the
                              credential store.
         """
         # Skip if no password is stored for the given key
