@@ -7,7 +7,18 @@
   "packages": {
     ".": {
       "package-name": "Datasphere-CLI",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "packages/datasphere-core/pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "generic",
+          "path": "pyproject.toml"
+        }
+      ]
     }
   },
   "changelog-sections": [
