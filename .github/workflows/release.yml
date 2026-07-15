@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
-      - run: uv build
+      - run: uv build --all-packages
       - uses: actions/upload-artifact@v7
         with:
           name: dist
@@ -58,41 +58,3 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           files: dist/*
-
-  binary-windows:
-    name: Build Windows binary
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: astral-sh/setup-uv@v7
-
-      # --no-sources ignores the local path link to ../SAP-Datasphere-API
-      # and installs datasphere-api from PyPI instead
-      - name: Install project dependencies
-        run: uv sync --no-sources
-
-      - name: Install PyInstaller
-        run: uv pip install pyinstaller
-
-      - name: Build executable
-        run: >
-          uv run --no-sources pyinstaller --onefile main.py
-          --name DatasphereAutomation
-          --icon src/datasphere_cli/static/datasphere.ico
-
-      - name: Package artifact with version
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p dist_out
-          cp "dist/DatasphereAutomation.exe" \
-            "dist_out/DatasphereAutomation-${VERSION}-windows.exe"
-
-      - name: Upload binary to GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: dist_out/*
