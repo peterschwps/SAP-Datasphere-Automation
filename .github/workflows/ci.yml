@@ -21,9 +21,15 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      # --no-sources ignores the local path link to ../SAP-Datasphere-API
-      - run: uv sync --no-dev --no-sources
-      - run: uv run --no-sources --with ruff ruff check .
+      # Installs CLI and Core packages from the workspace, resolves
+      # the datasphere-api from PyPI and ignores the local path in the
+      # pyproject.toml
+      - run: >
+          uv sync --all-packages --no-dev
+          --no-sources-package datasphere-api
+      - run: >
+          uv run --no-sources-package datasphere-api
+          --with ruff ruff check .
 
   test:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
@@ -39,8 +45,20 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install ${{ matrix.python-version }}
-      - run: uv sync --no-sources --python ${{ matrix.python-version }}
-      - run: uv run --no-sources pytest
+      - run: >
+          uv sync --all-packages
+          --no-sources-package datasphere-api
+          --python ${{ matrix.python-version }}
+      - run: >
+          uv run --no-sources-package datasphere-api pytest
+
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv build --all-packages
 
   commitlint:
     name: Commit messages
@@ -65,8 +83,8 @@ jobs:
       - name: Validate branch name
         run: |
           name="${{ github.head_ref }}"
-          # Exempt automation branches whose names follow each tool's
-          # own convention (Dependabot, release-please).
+          # Exempt automation branches whose names follow each tool's own
+          # convention (Dependabot, release-please).
           if [[ "$name" == dependabot/* ]] \
              || [[ "$name" == release-please--* ]]; then
             echo "::notice::Skipping branch-name check for bot branch '$name'"
