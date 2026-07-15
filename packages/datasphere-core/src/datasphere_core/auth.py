@@ -12,8 +12,8 @@ from filelock import AsyncFileLock
 from platformdirs import user_cache_path
 
 from datasphere_core.credentials import (
-    CredentialStore,
-    KeyringCredentialStore,
+    KeyringTokenStore,
+    TokenStore,
     build_credential_key,
 )
 from datasphere_core.errors import SessionNotAuthenticatedError
@@ -80,7 +80,7 @@ class DatasphereSession:
         self,
         config: SessionConfig,
         *,
-        credential_store: CredentialStore | None = None,
+        token_store: TokenStore | None = None,
         client_factory: ClientFactory = DatasphereClient,
         lock_directory: Path | None = None,
     ) -> None:
@@ -90,10 +90,10 @@ class DatasphereSession:
         Args:
             config (SessionConfig): Configuration to create an SAP Datasphere
                                     session.
-            credential_store (CredentialStore | None, optional):
-                Credential store used to store OAuth tokens. If None, the OS
-                credential store will be used. This argument is mainly used
-                to provide a different credential store when running tests.
+            token_store (TokenStore | None, optional):
+                Token store used to persist OAuth tokens. If None, the OS
+                credential store will be used. This argument is mainly used to
+                provide a different token store when running tests.
                 Defaults to None.
             client_factory (ClientFactory, optional):
                 A callable that receives a DatasphereConfig and returns a
@@ -108,7 +108,7 @@ class DatasphereSession:
                 Defaults to None.
         """
         self._config = config
-        self._credential_store = credential_store or KeyringCredentialStore()
+        self._token_store = token_store or KeyringTokenStore()
         self._client_factory = client_factory
         self._client: DatasphereClient | None = None
         self._lock = asyncio.Lock()
@@ -143,7 +143,7 @@ class DatasphereSession:
             interactive (bool): Whether to allow interactive login if no valid
                                 refresh token is available.
         Raises:
-            CredentialStoreError: If local tokens could not be read or written.
+            TokenStoreError: If local tokens could not be read or written.
         """
         # Start authentication with lock to prevent parallel processes from
         # writing tokens
@@ -158,14 +158,14 @@ class DatasphereSession:
                 self._client = self._client_factory(api_config)
 
             # Load tokens from the credential store and login
-            tokens = await self._credential_store.load_tokens(key)
+            tokens = await self._token_store.load_tokens(key)
             new_tokens = await self._client.login(
                 tokens=tokens,
                 allow_interactive_fallback=interactive,
             )
 
             # Save tokens to the credential store (only saves if they changed)
-            await self._credential_store.save_tokens(key, new_tokens)
+            await self._token_store.save_tokens(key, new_tokens)
 
     async def logout(self) -> None:
         """
@@ -173,7 +173,7 @@ class DatasphereSession:
         """
         async with self._lock, self._file_lock:
             key = self._config.credential_key
-            await self._credential_store.delete_tokens(key)
+            await self._token_store.delete_tokens(key)
             if self._client is not None:
                 self._client.session.headers.pop("Authorization", None)
 
