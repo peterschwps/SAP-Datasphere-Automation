@@ -1,4 +1,9 @@
 from datasphere_api import DatasphereClient
+from datasphere_core import (
+    CommandContext,
+    StartTaskChainRequest,
+    start_task_chain,
+)
 
 from datasphere_cli.models import TaskRow
 from datasphere_cli.utils.concurrency import run_async_tasks
@@ -34,18 +39,23 @@ async def run_task_chains(
     )
 
     # Function to run a task chain and update its result row
-    async def run_task_chain(chain: TaskRow) -> None:
-        success, log_details = await client.task_chains.run(
-            chain["entity"], chain["space"]
+    async def run_task_chain(chain: ViewRef) -> None:
+        result = await start_task_chain(
+            CommandContext(client=client),
+            StartTaskChainRequest(
+                chain=chain["entity"],
+                space=chain["space"],
+                timeout_seconds=None,
+            ),
         )
-        runtime = round(log_details.get("runTime", 0) / 1000)
-        run.update_result(
+        update_result_row(
+            "TASK_CHAIN_RUN_RESULT",
             {
                 "entity": chain["entity"],
                 "space": chain["space"],
-                "success": success,
-                "runtime": runtime if success else None,
-            }
+                "isCompleted": result.status == "completed",
+                "runtime": result.runtime_seconds,
+            },
         )
 
     await run_async_tasks(chains, run_task_chain, thread_count)
