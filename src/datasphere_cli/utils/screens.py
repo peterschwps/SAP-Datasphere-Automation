@@ -26,7 +26,7 @@ try:
 except PackageNotFoundError:
     _APP_VERSION = "dev"
 
-from datasphere_api import DatasphereClient
+from datasphere_core import DatasphereSession
 
 from datasphere_cli import actions
 from datasphere_cli.static.logo import ASCII_LOGO
@@ -37,7 +37,7 @@ from datasphere_cli.utils.logging import (
 )
 from datasphere_cli.utils.settings import (
     SETTINGS_FILE,
-    build_config,
+    build_session_config,
     reload_settings,
 )
 
@@ -668,12 +668,15 @@ class ExecutionScreen(BaseScreen):
         logger.addHandler(handler)
         library_logger.addHandler(handler)
 
-        # Create client, log in and call the action
-        client: DatasphereClient | None = None
+        # Create session, log in and call the action
+        session: DatasphereSession | None = None
         try:
-            client = DatasphereClient(build_config())
-            await client.login()
-            await self._action(client, **self._params)
+            config = build_session_config()
+            session = DatasphereSession(config)
+            await session.authenticate(
+                interactive=True,
+            )
+            await self._action(session.client, **self._params)
             status.update("Done. Press Enter or Escape to return to the menu.")
 
         # Stop on any unhandled exceptions
@@ -686,8 +689,8 @@ class ExecutionScreen(BaseScreen):
         # Remove handler to prevent multiple handlers co-existing if this
         # screen gets called more than once
         finally:
-            if client is not None:
-                await client.aclose()
+            if session is not None:
+                await session.aclose()
             logger.removeHandler(handler)
             library_logger.removeHandler(handler)
             self._done = True
