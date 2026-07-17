@@ -5,7 +5,7 @@ import webbrowser
 from pathlib import Path
 from typing import Literal
 
-from datasphere_api import DatasphereConfig
+from datasphere_core import SessionConfig
 from platformdirs import user_config_dir
 from pydantic import BaseModel, ValidationError, field_validator
 from pydantic_settings import (
@@ -179,30 +179,22 @@ def get_settings() -> Settings:
     return settings
 
 
-def build_config() -> DatasphereConfig:
+def build_session_config() -> SessionConfig:
     """
-    Builds the Datasphere configuration from the settings file. The
-    client secret can also be provided via the 'SECRET' environment
-    variable. Exits the program if no secret is found.
+    Builds the session configuration from the settings file. The client
+    secret can also be provided via the 'SECRET' environment variable.
 
     Returns:
-        DatasphereConfig: Configuration for the DatasphereClient.
+        SessionConfig: Configuration for the Datasphere session.
     """
-    # Read secret from settings or environment
     current = get_settings()
-    client_secret = current.credentials.secret
+    client_secret = current.credentials.secret or os.environ.get("SECRET")
     if not client_secret:
-        client_secret = os.environ.get("SECRET", "")
-        if not client_secret:
-            logger.critical(
-                "Client secret not found. Please set the 'SECRET' "
-                "environment variable or add the secret to the settings "
-                "file."
-            )
-            sys.exit(1)
-
-    # Build config from settings
-    return DatasphereConfig(
+        raise ValueError(
+            "Client secret not found. Add it to the settings file or set "
+            "the 'SECRET' environment variable."
+        )
+    return SessionConfig(
         base_url=current.setup.datasphere_url,
         authorization_url=current.setup.authorization_url,
         token_url=current.setup.token_url,
