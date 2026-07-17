@@ -1,6 +1,11 @@
 from typing import cast
 
 from datasphere_api import DatasphereClient
+from datasphere_core import (
+    CommandContext,
+    StartTaskChainRequest,
+    start_task_chain,
+)
 
 from datasphere_cli.actions.files import (
     log_results_saved,
@@ -39,17 +44,21 @@ async def run_task_chains(
 
     # Function to run a task chain and update its result row
     async def run_task_chain(chain: ViewRef) -> None:
-        success, log_details = await client.task_chains.run(
-            chain["entity"], chain["space"]
+        result = await start_task_chain(
+            CommandContext(client=client),
+            StartTaskChainRequest(
+                chain=chain["entity"],
+                space=chain["space"],
+                timeout_seconds=None,
+            ),
         )
-        runtime = round(log_details.get("runTime", 0) / 1000)
         update_result_row(
             "TASK_CHAIN_RUN_RESULT",
             {
                 "entity": chain["entity"],
                 "space": chain["space"],
-                "isCompleted": success,
-                "runtime": runtime if success else None,
+                "isCompleted": result.status == "completed",
+                "runtime": result.runtime_seconds,
             },
         )
 
