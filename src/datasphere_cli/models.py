@@ -7,20 +7,26 @@ from typing import Literal, TypedDict
 # Task file rows
 
 class ViewRef(TypedDict):
-    """Reference to a view, task chain or other entity in a space."""
+    """
+    Reference to a view, task chain or other entity in a space.
+    """
     entity: str
     space: str
 
 
 class PartitionTask(TypedDict):
-    """Reference to a view with the attribute to partition by."""
+    """
+    Reference to a view with the attribute to partition by.
+    """
     entity: str
     space: str
     attribute: str
 
 
 class ModelRef(TypedDict):
-    """Reference to an analytical model in a space."""
+    """
+    Reference to an analytical model in a space.
+    """
     modelname: str
     space: str
 
@@ -28,7 +34,9 @@ class ModelRef(TypedDict):
 # Result file rows
 
 class ViewAttributeMatch(TypedDict):
-    """View with an attribute that matched the search word."""
+    """
+    View with an attribute that matched the search word.
+    """
     entity: str
     space: str
     businessName: str
@@ -36,7 +44,9 @@ class ViewAttributeMatch(TypedDict):
 
 
 class PersistenceCandidate(TypedDict):
-    """View that received a persistence score of 10 from the advisor."""
+    """
+    View that received a persistence score of 10 from the advisor.
+    """
     entity: str
     space: str
     businessName: str
@@ -101,7 +111,9 @@ StatisticsResultStatus = Literal[
 
 
 class StatisticsResult(TypedDict):
-    """Outcome of a statistics create/update/refresh for one table."""
+    """
+    Outcome of a statistics create/update/refresh for one table.
+    """
     tableName: str
     status: StatisticsResultStatus
 
@@ -121,7 +133,9 @@ type ModelsWithViews = dict[str, ModelWithViews]
 
 
 class ViewRuntimeDetails(TypedDict):
-    """Persistence runtime details of a single view."""
+    """
+    Persistence runtime details of a single view.
+    """
     space: str
     name: str
     runtime: int | None
@@ -130,7 +144,9 @@ class ViewRuntimeDetails(TypedDict):
 
 
 class ModelRuntimeReport(TypedDict):
-    """Analytical model with the runtime details of all its views."""
+    """
+    Analytical model with the runtime details of all its views.
+    """
     name: str
     dependencies: dict[str, ViewRuntimeDetails]
 
