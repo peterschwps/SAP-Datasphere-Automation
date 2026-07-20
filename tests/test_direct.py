@@ -9,8 +9,9 @@ from datasphere_core import (
     StartTaskChainResult,
 )
 
-from datasphere_cli import cli, direct
-from datasphere_cli.utils import settings as settings_module
+from datasphere_cli import cli
+from datasphere_cli import settings as settings_module
+from datasphere_cli.cli import commands
 
 
 def _result(status: str = "completed") -> StartTaskChainResult:
@@ -30,7 +31,7 @@ def test_main_routes_arguments_to_direct_commands(monkeypatch) -> None:
         received.extend(arguments)
         return 7
 
-    monkeypatch.setattr("datasphere_cli.direct.run", fake_run)
+    monkeypatch.setattr("datasphere_cli.cli.commands.run", fake_run)
 
     result = cli.main(["taskchain", "start"])
 
@@ -47,9 +48,9 @@ def test_task_chain_command_prints_json(monkeypatch, capsys) -> None:
         requests.append(request)
         return _result()
 
-    monkeypatch.setattr(direct, "execute_task_chain", fake_execute)
+    monkeypatch.setattr(commands, "execute_task_chain", fake_execute)
 
-    exit_code = direct.run(
+    exit_code = commands.run(
         [
             "taskchain",
             "start",
@@ -88,9 +89,9 @@ def test_task_chain_failure_returns_exit_code_one(monkeypatch, capsys) -> None:
     ) -> StartTaskChainResult:
         return _result("failed")
 
-    monkeypatch.setattr(direct, "execute_task_chain", fake_execute)
+    monkeypatch.setattr(commands, "execute_task_chain", fake_execute)
 
-    exit_code = direct.run(
+    exit_code = commands.run(
         ["taskchain", "start", "CHAIN_A", "--space", "SPACE_A"]
     )
 
@@ -106,9 +107,9 @@ def test_task_chain_timeout_is_written_to_stderr(monkeypatch, capsys) -> None:
     ) -> StartTaskChainResult:
         raise CommandTimeoutError("Timed out")
 
-    monkeypatch.setattr(direct, "execute_task_chain", fake_execute)
+    monkeypatch.setattr(commands, "execute_task_chain", fake_execute)
 
-    exit_code = direct.run(
+    exit_code = commands.run(
         ["taskchain", "start", "CHAIN_A", "--space", "SPACE_A"]
     )
 
@@ -120,7 +121,7 @@ def test_task_chain_timeout_is_written_to_stderr(monkeypatch, capsys) -> None:
 
 def test_invalid_timeout_is_a_usage_error() -> None:
     with pytest.raises(SystemExit) as error:
-        direct.run(
+        commands.run(
             [
                 "taskchain",
                 "start",
@@ -146,6 +147,6 @@ async def test_execute_requires_initialized_settings(
     )
 
     with pytest.raises(CommandError, match="Settings are not initialized"):
-        await direct.execute_task_chain(
+        await commands.execute_task_chain(
             StartTaskChainRequest(chain="CHAIN_A", space="SPACE_A")
         )

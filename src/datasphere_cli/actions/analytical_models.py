@@ -1,10 +1,19 @@
 from datasphere_api import DatasphereClient
 from datasphere_api.models import AnalyticalModelsDetailsDict
 
-from datasphere_cli.models import ModelsRuntimeReport, ModelsWithViews
-from datasphere_cli.utils.concurrency import run_async_tasks
-from datasphere_cli.utils.logging import logger
-from datasphere_cli.utils.runs import Run, read_tasks
+from datasphere_cli.concurrency import run_async_tasks
+from datasphere_cli.files.records import (
+    ModelRef,
+    ModelsRuntimeReport,
+    ModelsWithViews,
+)
+from datasphere_cli.files.storage import (
+    log_results_saved,
+    read_task_csv,
+    write_json_export,
+)
+from datasphere_cli.files.workspace import ALL_FILES
+from datasphere_cli.logging import logger
 
 
 async def _collect_views_for_models(

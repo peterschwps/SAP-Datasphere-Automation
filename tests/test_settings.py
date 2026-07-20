@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from datasphere_cli.utils import settings as settings_module
-from datasphere_cli.utils.settings import Settings, build_session_config
+from datasphere_cli import settings as settings_module
+from datasphere_cli.settings import Settings, build_session_config
 
 VALID_TOML = """\
 [setup]

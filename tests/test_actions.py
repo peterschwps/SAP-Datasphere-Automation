@@ -8,7 +8,7 @@ import pytest
 from datasphere_api import DatasphereClient
 
 from datasphere_cli import actions
-from datasphere_cli.utils import runs
+from datasphere_cli.files.workspace import ALL_FILES
 
 
 @pytest.fixture

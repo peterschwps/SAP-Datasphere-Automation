@@ -5,9 +5,14 @@ from datasphere_core import (
     start_task_chain,
 )
 
-from datasphere_cli.models import TaskRow
-from datasphere_cli.utils.concurrency import run_async_tasks
-from datasphere_cli.utils.runs import Run, read_tasks
+from datasphere_cli.concurrency import run_async_tasks
+from datasphere_cli.files.records import ViewRef
+from datasphere_cli.files.storage import (
+    log_results_saved,
+    prefill_result_rows,
+    read_task_csv,
+    update_result_row,
+)
 
 
 async def run_task_chains(
