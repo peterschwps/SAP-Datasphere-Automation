@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from datasphere_cli.utils import settings as settings_module
-from datasphere_cli.utils.settings import Settings, build_config
+from datasphere_cli.utils.settings import Settings, build_session_config
 
 VALID_TOML = """\
 [setup]
@@ -45,15 +45,15 @@ def test_settings_reject_missing_keys(settings_file: Path) -> None:
         Settings()  # pyright: ignore[reportCallIssue]
 
 
-def test_build_config_uses_settings(settings_file: Path) -> None:
+def test_build_session_config_uses_settings(settings_file: Path) -> None:
     settings_file.write_text(VALID_TOML, encoding="utf-8")
-    config = build_config()
+    config = build_session_config()
     assert config.base_url == "https://example.eu10.hcs.cloud.sap"
     assert config.browser == "EDGE"
     assert config.client_secret == "top-secret"
 
 
-def test_build_config_secret_from_environment(
+def test_build_session_config_secret_from_environment(
     settings_file: Path,
     monkeypatch,
 ) -> None:
@@ -62,5 +62,19 @@ def test_build_config_secret_from_environment(
         encoding="utf-8",
     )
     monkeypatch.setenv("SECRET", "env-secret")
-    config = build_config()
+    config = build_session_config()
     assert config.client_secret == "env-secret"
+
+
+def test_build_session_config_requires_secret(
+    settings_file: Path,
+    monkeypatch,
+) -> None:
+    settings_file.write_text(
+        VALID_TOML.replace('secret = "top-secret"', 'secret = ""'),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("SECRET", raising=False)
+
+    with pytest.raises(ValueError, match="Client secret"):
+        build_session_config()
