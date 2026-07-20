@@ -29,13 +29,13 @@ except PackageNotFoundError:
 from datasphere_core import DatasphereSession
 
 from datasphere_cli import actions
-from datasphere_cli.static.logo import ASCII_LOGO
-from datasphere_cli.utils.logging import (
+from datasphere_cli.cli.logo import ASCII_LOGO
+from datasphere_cli.logging import (
     LIBRARY_LOGGER_NAME,
     STREAM_FORMAT,
     logger,
 )
-from datasphere_cli.utils.settings import (
+from datasphere_cli.settings import (
     SETTINGS_FILE,
     build_session_config,
     reload_settings,
@@ -769,7 +769,7 @@ class DatasphereApp(App):
     Global app configuration for the CLI. Calls the EntryScreen.
     """
 
-    CSS_PATH = "../static/style.tcss"
+    CSS_PATH = "style.tcss"
     MIN_WIDTH = 112
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", show=False),
