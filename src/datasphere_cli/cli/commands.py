@@ -84,7 +84,7 @@ async def execute_task_chain(
     Returns:
         StartTaskChainResult: Object with the result of the executed task.
     """
-    from datasphere_cli.utils.settings import (
+    from datasphere_cli.settings import (
         SETTINGS_FILE,
         build_session_config,
     )
