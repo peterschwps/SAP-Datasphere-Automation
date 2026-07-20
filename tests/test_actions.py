@@ -63,7 +63,8 @@ async def test_run_task_chains_writes_results(result_files: Path) -> None:
     )
 
     # Stub client that reports one success and one failure
-    async def fake_run(chain, space):
+    async def fake_run(chain, space, *, timeout_seconds):
+        assert timeout_seconds is None
         if chain == "CHAIN_A":
             return True, {"runTime": 65432}
         return False, {}
