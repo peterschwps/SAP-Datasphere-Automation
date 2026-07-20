@@ -3,8 +3,8 @@ import json
 from collections.abc import Mapping
 from typing import Any, cast
 
-from datasphere_cli.utils.filehandler import ALL_FILES
-from datasphere_cli.utils.logging import logger
+from datasphere_cli.files.workspace import ALL_FILES
+from datasphere_cli.logging import logger
 
 
 def read_task_csv(file_key: str) -> list[dict[str, str]]:
@@ -33,8 +33,8 @@ def append_result_row(
     row: Mapping[str, Any],
 ) -> None:
     """
-    Appends a single row to a result/export file. Only the configured
-    columns of the file are written.
+    Appends a single row to a result/export file. Only the configured columns
+    of the file are written.
 
     Args:
         file_key (str): Key of the result file in ALL_FILES.
@@ -57,8 +57,8 @@ def prefill_result_rows(
     rows: list[dict[str, Any]],
 ) -> None:
     """
-    Pre-fills a result file with one row per task so results can be
-    updated incrementally during long runs.
+    Pre-fills a result file with one row per task so results can be updated
+    incrementally during long runs.
 
     Args:
         file_key (str): Key of the result file in ALL_FILES.
@@ -81,8 +81,8 @@ def update_result_row(
     row: Mapping[str, Any],
 ) -> None:
     """
-    Updates the row matching 'entity' and 'space' in a result file.
-    Reads the whole file and writes it back with the updated values.
+    Updates the row matching 'entity' and 'space' in a result file. Reads the
+    whole file and writes it back with the updated values.
 
     Args:
         file_key (str): Key of the result file in ALL_FILES.
@@ -143,6 +143,4 @@ def log_results_saved(file_key: str) -> None:
     Args:
         file_key (str): Key of the file in ALL_FILES.
     """
-    logger.info(
-        "Results saved to '%s'.", ALL_FILES[file_key]["absolute_path"]
-    )
+    logger.info("Results saved to '%s'.", ALL_FILES[file_key]["absolute_path"])

@@ -4,7 +4,7 @@ import os
 import os.path
 import sys
 
-from datasphere_cli.utils.logging import logger
+from datasphere_cli.logging import logger
 
 # Working directory of the program (task/export/result files)
 _PROJECT_PATH = os.getcwd()
@@ -18,6 +18,26 @@ ALL_PATHS = {
 
 # Files
 ALL_FILES = {
+    "ANALYTICAL_MODELS_ALL_VIEWS": {
+        "name": "analytical_models_with_all_views.json",
+        "path": ALL_PATHS["EXPORTS"],
+        "columns": None,
+    },
+    "ANALYTICAL_MODELS_ALL_VIEWS_IN_SPACE": {
+        "name": "analytical_models_with_all_views_in_space.json",
+        "path": ALL_PATHS["EXPORTS"],
+        "columns": None,
+    },
+    "ANALYTICAL_MODELS_ALL_VIEWS_PERSISTENCE_TIME": {
+        "name": "analytical_models_to_check_view_persistence_time.csv",
+        "path": ALL_PATHS["TASKS"],
+        "columns": ["modelname", "space"],
+    },
+    "ANALYTICAL_MODELS_ALL_VIEWS_PERSISTENCE_TIME_RESULT": {
+        "name": "analytical_models_with_all_views_and_persistence_time.json",
+        "path": ALL_PATHS["EXPORTS"],
+        "columns": None,
+    },
     "TASK_CHAIN_RUN": {
         "name": "task_chains_to_run.csv",
         "path": ALL_PATHS["TASKS"],
@@ -97,26 +117,6 @@ ALL_FILES = {
         "name": "views_partitions_unlocked.csv",
         "path": ALL_PATHS["RESULTS"],
         "columns": ["entity", "space", "unlockedPartitions"],
-    },
-    "ANALYTICAL_MODELS_ALL_VIEWS": {
-        "name": "analytical_models_with_all_views.json",
-        "path": ALL_PATHS["EXPORTS"],
-        "columns": None,
-    },
-    "ANALYTICAL_MODELS_ALL_VIEWS_IN_SPACE": {
-        "name": "analytical_models_with_all_views_in_space.json",
-        "path": ALL_PATHS["EXPORTS"],
-        "columns": None,
-    },
-    "ANALYTICAL_MODELS_ALL_VIEWS_PERSISTENCE_TIME": {
-        "name": "analytical_models_to_check_view_persistence_time.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["modelname", "space"],
-    },
-    "ANALYTICAL_MODELS_ALL_VIEWS_PERSISTENCE_TIME_RESULT": {
-        "name": "analytical_models_with_all_views_and_persistence_time.json",
-        "path": ALL_PATHS["EXPORTS"],
-        "columns": None,
     },
 }
 
