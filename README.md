@@ -8,7 +8,7 @@
 **Retro-styled CLI for SAP Datasphere** that automates various tasks such as managing
 analytical models, remote tables, task chains and views.
 
-![Preview of the CLI](./src/datasphere_cli/static/cli.png)
+![Preview of the CLI](./docs/images/cli.png)
 
 ## 📋 Table of Contents
 
@@ -181,7 +181,7 @@ callback code.
 
 **This is how your OAuth Client should look like:**
 
-<img src="./src/datasphere_cli/static/setup.png" alt="example-setup" width="600"/>
+<img src="./docs/images/setup.png" alt="example-setup" width="600"/>
 
 ### Creating settings.toml
 
