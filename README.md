@@ -223,7 +223,7 @@ browser_to_use = "EDGE"
 client_id = ""
 
 # Secret of your Configured Client
-# NOTE: Can be left empty and set with the environment variable 'SECRET'.
+# Must be provided here or with the environment variable 'SECRET'.
 secret = ""
 ```
 
@@ -725,10 +725,10 @@ user data directory:
 
 ## 📃 Notes
 
-- **Credentials**: OAuth tokens and the client secret are stored in the
-                   operating system credential store, separated by tenant and
-                   OAuth client ID. They are never written to a shared
-                   plaintext session file.
+- **Credentials**: OAuth tokens are stored in the operating system credential
+                   store, separated by tenant and OAuth client ID. The client
+                   secret must be provided through `settings.toml` or the
+                   `SECRET` environment variable whenever the CLI runs.
 - **Session Duration**: Stored refresh tokens are used to renew the session
                         before an action starts. A browser opens only when no
                         valid stored session is available.
