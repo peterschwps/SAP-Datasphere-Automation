@@ -1,0 +1,143 @@
+* {
+    scrollbar-size: 0 0;
+}
+
+App {
+    background: #A9B4BE;
+    color: #223548;
+}
+
+Screen {
+    background: #A9B4BE;
+    padding: 0;
+    border: none #223548;
+}
+
+
+#content {
+    align-horizontal: center;
+    border: hkey #223548;
+    content-align: center middle;
+    height: 1fr;
+    padding: 0 1 0 1;
+}
+
+#footer {
+    height: 1;
+    # margin: 1 0 0 0;
+    min-width: 50;
+    opacity: 80%;
+    text-wrap: nowrap;
+}
+
+#footer-center,
+#footer-center-left,
+#footer-center-right {
+    content-align: center middle;
+    width: 1fr;
+}
+
+#footer-left {
+    content-align: left middle;
+    margin-left: 3;
+    width: 1fr;
+}
+
+#footer-right {
+    content-align: right middle;
+    margin-right: 3;
+    width: 1fr;
+}
+
+#header {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#header-byline {
+    content-align: center middle;
+    height: 1;
+}
+
+#header-logo {
+    # border: round white;
+    content-align: center middle;
+    # margin: 1 0 1 0;
+    min-width: 112;
+    text-wrap: nowrap;
+}
+
+#log {
+    height: 1fr;
+    border: round #223548;
+    background: #A9B4BE;
+}
+
+#menu {
+    height: 1fr;
+}
+
+#param-error {
+    color: #AA0808;
+    text-style: bold;
+}
+
+#param-form {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#result-status {
+    height: auto;
+    padding: 1 0 0 0;
+    content-align: center middle;
+    color: #223548;
+}
+
+#settings-editor {
+    background: #A9B4BE;
+    border: round #223548;
+    color: #223548;
+    height: 1fr;
+}
+
+#settings-label {
+    content-align: left middle;
+    height: auto;
+    padding-top: 1;
+}
+
+#settings-status {
+    height: auto;
+    content-align: center middle;
+    padding: 1 0 0 0;
+}
+
+Input {
+    background: #A9B4BE;
+    border: tall #223548;
+    color: #223548;
+}
+
+Input:focus {
+    border: tall #5B738B;
+}
+
+OptionList, ListView {
+    background: #A9B4BE;
+    border: round #223548;
+}
+
+OptionList > .option-list--option {
+    color: #223548;
+}
+
+OptionList > .option-list--option-highlighted {
+    background: #5B738B;
+    color: $text;
+    text-style: bold;
+}
+
+OptionList > .option-list--option-hover {
+    color: #223548;
+}
