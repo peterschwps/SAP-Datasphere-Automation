@@ -2,16 +2,16 @@ from typing import cast
 
 from datasphere_api import DatasphereClient
 
-from datasphere_cli.actions.files import (
+from datasphere_cli.concurrency import run_async_tasks
+from datasphere_cli.files.records import PartitionTask, ViewRef
+from datasphere_cli.files.storage import (
     append_result_row,
     log_results_saved,
     prefill_result_rows,
     read_task_csv,
     update_result_row,
 )
-from datasphere_cli.models import PartitionTask, ViewRef
-from datasphere_cli.utils.concurrency import run_async_tasks
-from datasphere_cli.utils.logging import logger
+from datasphere_cli.logging import logger
 
 
 async def create_view_analytics(

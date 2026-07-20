@@ -1,8 +1,8 @@
 from datasphere_api import DatasphereClient
 from datasphere_api.models import StatisticsType
 
-from datasphere_cli.utils.concurrency import run_async_tasks
-from datasphere_cli.utils.logging import logger
+from datasphere_cli.concurrency import run_async_tasks
+from datasphere_cli.logging import logger
 
 
 async def create_statistics(

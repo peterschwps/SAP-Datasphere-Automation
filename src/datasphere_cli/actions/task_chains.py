@@ -7,14 +7,14 @@ from datasphere_core import (
     start_task_chain,
 )
 
-from datasphere_cli.actions.files import (
+from datasphere_cli.concurrency import run_async_tasks
+from datasphere_cli.files.records import ViewRef
+from datasphere_cli.files.storage import (
     log_results_saved,
     prefill_result_rows,
     read_task_csv,
     update_result_row,
 )
-from datasphere_cli.models import ViewRef
-from datasphere_cli.utils.concurrency import run_async_tasks
 
 
 async def run_task_chains(
