@@ -83,3 +83,7 @@ ViewDetailsDict = TypedDict(
         "@com.sap.vocabularies.Search.v1.ParentHierarchies": list[dict],
     },
 )
+
+class ViewAnalyzerResultDict(TypedDict):
+    logId: int | None
+    entityStats: list[dict]

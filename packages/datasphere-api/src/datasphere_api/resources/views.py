@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import logging
 from json import JSONDecodeError
 from urllib.parse import quote, urlencode
@@ -7,15 +6,38 @@ from uuid import uuid4
 
 import httpx
 
-from datasphere_api.exceptions import UnexpectedResponse
+from datasphere_api.exceptions import (
+    UnexpectedResponse,
+    ViewAnalysisCancelled,
+    ViewAnalysisTimeout,
+    ViewPersistenceCancelled,
+    ViewPersistenceTimeout,
+)
 from datasphere_api.models import (
     PartitionCreateOutcome,
     PartitionLockOutcome,
+    ViewAnalyzerResultDict,
     ViewDetailsDict,
 )
-from datasphere_api.resources.base import BaseResource
+from datasphere_api.resources.base import BaseResource, validate_timeout
 
 logger = logging.getLogger(__name__)
+
+
+def _log_id_from_log(log: dict) -> int | None:
+    """
+    Fetches the logId from a payload.
+
+    Args:
+        log (dict): Payload of a log entry (as returned by get_task_logs()).
+
+    Returns:
+        int | None: LogId or None if it cannot be parsed.
+    """
+    log_id = log.get("logId")
+    if isinstance(log_id, int) and not isinstance(log_id, bool):
+        return log_id
+    return None
 
 
 class Views(BaseResource):
@@ -28,15 +50,6 @@ class Views(BaseResource):
             list[ViewDetailsDict]: List of dictionaries with view
                                    names ("name") and further details.
         """
-        # Update headers
-        self.session.headers.update(
-            {
-                "Accept": "application/json",
-                "Accept-Language": "de",
-                "Cache-Control": "no-cache",
-            }
-        )
-
         # Prepare request
         url = f"{self._base_url}/deepsea/repository/search/$all"
         params = {
@@ -69,13 +82,14 @@ class Views(BaseResource):
         # Send request
         logger.debug("Loading all views...")
         response = await self.session.get(
-            url=f"{url}?{urlencode(params, safe='()*', quote_via=quote)}"
+            url=f"{url}?{urlencode(params, safe='()*', quote_via=quote)}",
+            headers={
+                "Accept": "application/json",
+                "Accept-Language": "de",
+                "Cache-Control": "no-cache",
+            },
         )
         all_views: list[ViewDetailsDict] = response.json()["value"]
-
-        # Remove unnecessary headers for next requests
-        with contextlib.suppress(KeyError):
-            self.session.headers.pop("Cache-Control")
 
         return all_views
 
@@ -95,18 +109,9 @@ class Views(BaseResource):
             space (str): Space of the view.
 
         Returns:
-            list[str]: Attribute names of the view. Empty if the details
-                       cannot be fetched or parsed.
+            list[str]: Attribute names of the view. Empty if the details cannot
+            be fetched or parsed.
         """
-        # Update headers
-        self.session.headers.update(
-            {
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "X-Requested-With": "XMLHttpRequest",
-                "x-request-id": str(uuid4()).replace("-", ""),
-            }
-        )
-
         # Prepare request
         params = {
             "ids": view_id,
@@ -129,16 +134,19 @@ class Views(BaseResource):
 
         # Send request and parse the attribute names from the CSN
         response = await self.session.get(
-            url=f"{self._base_url}/deepsea/repository"
-            f"/{space}/designObjects",
+            url=f"{self._base_url}/deepsea/repository/{space}/designObjects",
             params=params,
+            headers={
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With": "XMLHttpRequest",
+                "x-request-id": str(uuid4()).replace("-", ""),
+            },
         )
         try:
-            view_data = response.json()
+            result = response.json()
+            view_data = result["results"][0]
             return list(
-                view_data["results"][0]["#repairedCsn"]["definitions"][
-                    view_name
-                ]["elements"]
+                view_data["#repairedCsn"]["definitions"][view_name]["elements"]
             )
         except (httpx.HTTPError, JSONDecodeError, KeyError, IndexError):
             logger.error(
@@ -158,15 +166,17 @@ class Views(BaseResource):
             space (str): Space of the view.
 
         Returns:
-            dict: Partitioning details (e.g. 'ranges',
-                  'partitioningColumns').
+            dict: Partitioning details (e.g. 'ranges', 'partitioningColumns').
         """
-        self.session.headers.update(
-            {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
-        )
         response = await self.session.get(
-            url=f"{self._base_url}/dwaas-core/partitioning"
-            f"/{space}/persistedViews/{view}"
+            url=(
+                f"{self._base_url}/dwaas-core/partitioning"
+                f"/{space}/persistedViews/{view}"
+            ),
+            headers={
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", ""),
+            },
         )
         return response.json()
 
@@ -188,13 +198,16 @@ class Views(BaseResource):
         Returns:
             bool: True if the partitioning was accepted, else False.
         """
-        self.session.headers.update(
-            {"x-request-id": str(uuid4()).replace("-", "")}
-        )
         response = await self.session.post(
-            url=f"{self._base_url}/dwaas-core/partitioning"
-            f"/{space}/persistedViews/{view}",
+            url=(
+                f"{self._base_url}/dwaas-core/partitioning"
+                f"/{space}/persistedViews/{view}"
+            ),
             json=data,
+            headers={
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", ""),
+            },
         )
         if response.status_code != 201:
             logger.debug("Response: %s\n", response.text)
@@ -212,12 +225,15 @@ class Views(BaseResource):
         Returns:
             bool: True if the partitioning was removed, else False.
         """
-        self.session.headers.update(
-            {"Accept": "*/*", "x-request-id": str(uuid4()).replace("-", "")}
-        )
         response = await self.session.delete(
-            url=f"{self._base_url}/dwaas-core/partitioning"
-            f"/{space}/persistedViews/{view}"
+            url=(
+                f"{self._base_url}/dwaas-core/partitioning"
+                f"/{space}/persistedViews/{view}"
+            ),
+            headers={
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", ""),
+            },
         )
         return response.status_code == 200
 
@@ -242,8 +258,7 @@ class Views(BaseResource):
 
     async def get_extended_log(self, log_id: int, space: str) -> dict:
         """
-        Returns the extended log details of a task (e.g. a persistence
-        run).
+        Returns the extended log details of a task (e.g. a persistence run).
 
         Args:
             log_id (int): Task log ID.
@@ -252,16 +267,95 @@ class Views(BaseResource):
         Returns:
             dict: Log details with 'status' and 'runTime'.
         """
-        self.session.headers.update(
-            {"x-request-id": str(uuid4()).replace("-", "")}
-        )
         response = await self.session.get(
             url=(
-                f"{self._base_url}/dwaas-core/tf"
-                f"/{space}/extendedlogs/{log_id}"
-            )
+                f"{self._base_url}/dwaas-core/tf/{space}/extendedlogs/{log_id}"
+            ),
+            headers={
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", ""),
+            },
         )
         return response.json()["logDetails"]
+
+    async def get_view_analyzer_result(
+        self,
+        log_id: int,
+        space: str,
+    ) -> dict:
+        """
+        Returns the result of a completed view analyzer run.
+
+        Args:
+            log_id (int): LogId of the analyzer run.
+            space (str): Space of the analyzed view.
+
+        Returns:
+            dict: Analyzer result (e.g. 'entityStats').
+        """
+        response = await self.session.get(
+            url=(
+                f"{self._base_url}/dwaas-core/advisor/{space}/result/{log_id}"
+            ),
+            headers={
+                "Accept": "*/*",
+                "X-Requested-With": "XMLHttpRequest",
+                "x-request-id": str(uuid4()).replace("-", ""),
+            },
+        )
+        return response.json()
+
+    async def get_task_logs(
+        self,
+        view: str,
+        space: str,
+    ) -> list[dict]:
+        """
+        Returns the task logs of a view.
+
+        Args:
+            view (str): View to fetch logs for.
+            space (str): Space of the object.
+
+        Returns:
+            list[dict]: Log entries with 'status' and 'logId'.
+        """
+        response = await self.session.get(
+            url=f"{self._base_url}/dwaas-core/tf/{space}/logs",
+            params={"objectId": view, "getLocks": True},
+            headers={
+                "Accept": "*/*",
+                "X-Requested-With": "XMLHttpRequest",
+                "x-request-id": str(uuid4()).replace("-", ""),
+            },
+        )
+        return response.json()["logs"]
+
+    async def is_persisted(self, view: str, space: str) -> bool:
+        """
+        Checks if a view is currently persisted. Retries up to three times if
+        the monitor endpoint doesn't answer.
+
+        Args:
+            view (str): Name of the view.
+            space (str): Space of the view.
+
+        Raises:
+            UnexpectedResponse: If the persistence state cannot be checked
+                                after three attempts.
+
+        Returns:
+            bool: True if the view is persisted, else False.
+        """
+        for _ in range(3):
+            monitor_details = await self.get_monitor_details(view, space)
+            if not monitor_details:
+                await asyncio.sleep(1)
+                continue
+            return monitor_details.get("dataPersistency", "") == "Persisted"
+        raise UnexpectedResponse(
+            f"Failed to check persistence of view '{view}' in '{space}'."
+        )
 
     async def start_persistence(self, view: str, space: str) -> int | None:
         """
@@ -272,8 +366,8 @@ class Views(BaseResource):
             space (str): Space of the view.
 
         Returns:
-            int | None: Task log ID of the started run, or None if the
-                        start failed.
+            int | None: Task log ID of the started run, or None if the start
+                        failed.
         """
         response = await self.session.post(
             url=f"{self._base_url}/dwaas-core/tf/directexecute",
@@ -282,6 +376,10 @@ class Views(BaseResource):
                 "spaceId": space,
                 "objectId": view,
                 "activity": "PERSIST",
+            },
+            headers={
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", ""),
             },
         )
         if response.status_code != 202:
@@ -307,12 +405,9 @@ class Views(BaseResource):
             space (str): Space of the view.
 
         Returns:
-            int | None: Task log ID of the started run, or None if the
-                        start failed.
+            int | None: Task log ID of the started run, or None if the start
+                        failed.
         """
-        self.session.headers.update(
-            {"x-request-id": str(uuid4()).replace("-", "")}
-        )
         response = await self.session.post(
             url=f"{self._base_url}/dwaas-core/tf/directexecute",
             json={
@@ -320,6 +415,10 @@ class Views(BaseResource):
                 "spaceId": space,
                 "objectId": view,
                 "activity": "REMOVE_PERSISTED_DATA",
+            },
+            headers={
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", ""),
             },
         )
         if response.status_code != 202:
@@ -341,318 +440,427 @@ class Views(BaseResource):
             space (str): Space of the view.
 
         Returns:
-            bool: True if the analyzer was started (or is already
-                  running), else False.
+            bool: True if the analyzer was started (or is already running),
+                  else False.
         """
-        self.session.headers.update(
-            {
-                "x-request-id": str(uuid4()).replace("-", ""),
-                "Accept": "*/*",
-                "X-Requested-With": "XMLHttpRequest",
-            }
-        )
+        started, _, _ = await self._start_view_analyzer(view, space)
+        return started
+
+    async def _start_view_analyzer(
+        self,
+        view: str,
+        space: str,
+    ) -> tuple[bool, int | None, bool]:
+        """
+        Starts the view analyzer.
+
+        Args:
+            view (str): View to analyze.
+            space (str): Space of the view.
+
+        Returns:
+            tuple[bool, int | None, bool]: A tuple containing, in order:
+                                           whether the analyzer was started,
+                                           the log ID of the run (or None), and
+                                           whether the analyzer was already
+                                           running.
+        """
+        # Start view analyzer
         response = await self.session.post(
-            url=(
-                f"{self._base_url}/dwaas-core/advisor/{space}"
-                f"/execute/{view}"
-            ),
+            url=f"{self._base_url}/dwaas-core/advisor/{space}/execute/{view}",
             json={
                 "withMemoryAnalysis": False,
                 "maximumMemoryConsumptionInGiB": 1,
             },
+            headers={
+                "x-request-id": str(uuid4()).replace("-", ""),
+                "Accept": "*/*",
+                "X-Requested-With": "XMLHttpRequest",
+            },
         )
 
-        # The analyzer counts as started if it is already running
-        if not (
+        # Check if analyzer was started successfully or is already running
+        already_running = (
             response.status_code == 409
             and "taskAlreadyRunning" in response.text
-        ) and not (
-            response.status_code == 202 and "Running" in response.text
-        ):
+        )
+        started = response.status_code == 202 and "Running" in response.text
+        if not (already_running or started):
             logger.error(
                 "Error starting view analyzer for view '%s' in '%s'.",
                 view,
                 space,
             )
-            return False
-        return True
+            return False, None, False
 
-    async def get_task_logs(
-        self,
-        object_id: str,
-        space: str,
-    ) -> list[dict]:
-        """
-        Returns the task logs of an object (newest first).
+        # Fetch payload
+        try:
+            response_payload = response.json()
+        except ValueError:
+            response_payload = {}
 
-        Args:
-            object_id (str): ID/name of the object (e.g. a view).
-            space (str): Space of the object.
-
-        Returns:
-            list[dict]: Log entries with 'status' and 'logId'.
-        """
-        self.session.headers.update(
-            {"x-request-id": str(uuid4()).replace("-", "")}
+        # Extract logId from paylaod
+        log_id = (
+            response_payload.get("logId")
+            if isinstance(response_payload, dict)
+            else None
         )
-        response = await self.session.get(
-            url=f"{self._base_url}/dwaas-core/tf/{space}/logs",
-            params={"objectId": object_id, "getLocks": True},
-        )
-        return response.json()["logs"]
-
-    async def get_view_analyzer_result(
-        self,
-        log_id: int,
-        space: str,
-    ) -> dict:
-        """
-        Returns the result of a completed view analyzer run.
-
-        Args:
-            log_id (int): Log ID of the analyzer run.
-            space (str): Space of the analyzed view.
-
-        Returns:
-            dict: Analyzer result (e.g. 'entityStats').
-        """
-        self.session.headers.update(
-            {"x-request-id": str(uuid4()).replace("-", "")}
-        )
-        response = await self.session.get(
-            url=(
-                f"{self._base_url}/dwaas-core/advisor"
-                f"/{space}/result/{log_id}"
-            )
-        )
-        return response.json()
+        if not isinstance(log_id, int):
+            log_id = None
+        return True, log_id, already_running
 
     async def persist_view(
-        self, view_name: str, view_space: str
+        self,
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict]:
         """
-        Persists a view and waits for the run to finish. Does not check
-        if the view is already persisted.
+        Persists a view and waits for the run to finish. Does not check if the
+        view is already persisted.
 
         Args:
-            view_name (str): Name of the view.
-            view_space (str): Name of the view space.
+            view (str): View to persist.
+            space (str): Space of the view.
+            timeout_seconds (float | None, optional): Maximum polling duration.
+                                                      None if no timeout should
+                                                      be used.
+
+        Raises:
+            ViewPersistenceTimeout: If polling times out after persistence
+                                    starts. The remote operation may continue.
+            ViewPersistenceCancelled: If polling is cancelled after persistence
+                                      starts. The remote operation may
+                                      continue.
+            ValueError: If timeout_seconds is not positive and finite, or is
+                        a boolean.
 
         Returns:
-            tuple[bool, dict]: True if persistence was successful,
-                               otherwise False. Dict with log details.
+            tuple[bool, dict]: True if persistence was successful, otherwise
+                               False. Dict with log details (containing the
+                               keys 'status', 'runTime' and 'logId').
         """
+        validate_timeout(timeout_seconds)
+
         # Start persistence
         logger.debug(
             "Starting persistence of view '%s' in '%s'...",
-            view_name,
-            view_space,
+            view,
+            space,
         )
-        log_id = await self.start_persistence(view_name, view_space)
+        log_id = await self.start_persistence(view, space)
         if log_id is None:
             return False, {}
 
         # Wait for results
         log_details = {}
-        while True:
-            log_details = await self.get_extended_log(log_id, view_space)
-            latest_status = log_details["status"]
-            if latest_status == "COMPLETED":
-                break
-            if latest_status != "RUNNING":
-                logger.error(
-                    "Error persisting view '%s' in '%s'.",
-                    view_name,
-                    view_space,
-                )
-                return False, log_details
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                while True:
+                    log_details = await self.get_extended_log(log_id, space)
 
-            # Convert runtime to readable format and print to console
-            milliseconds = log_details["runTime"]
-            hours, remainder = divmod(milliseconds, 3600000)
-            minutes, seconds = divmod(remainder, 60000)
-            seconds, milliseconds = divmod(seconds, 1000)
-            logger.debug(
-                "Waiting for results for view '%s' in '%s'. "
-                "Current runtime: %02d:%02d:%02d.",
-                view_name,
-                view_space,
-                hours,
-                minutes,
-                seconds,
-            )
-            await asyncio.sleep(1)
+                    # Add logId to the log details
+                    log_details["logId"] = log_id
+
+                    # Check status of the run
+                    latest_status = log_details["status"]
+                    if latest_status == "COMPLETED":
+                        break
+                    if latest_status != "RUNNING":
+                        logger.error(
+                            "Error persisting view '%s' in '%s'.",
+                            view,
+                            space,
+                        )
+                        return False, log_details
+
+                    # Convert runTime to readable format and log to console
+                    milliseconds = log_details["runTime"]
+                    hours, remainder = divmod(milliseconds, 3600000)
+                    minutes, seconds = divmod(remainder, 60000)
+                    seconds, milliseconds = divmod(seconds, 1000)
+                    logger.debug(
+                        "Waiting for results for view '%s' in '%s'. "
+                        "Current runtime: %02d:%02d:%02d.",
+                        view,
+                        space,
+                        hours,
+                        minutes,
+                        seconds,
+                    )
+                    await asyncio.sleep(1)
+
+        except TimeoutError:
+            exc = ViewPersistenceTimeout("persist", view, space, log_id)
+            raise exc from None
+
+        except asyncio.CancelledError:
+            exc = ViewPersistenceCancelled("persist", view, space, log_id)
+            raise exc from None
 
         # Return successful result with log details
         logger.info(
             "Completed persistence for view '%s' in '%s'.",
-            view_name,
-            view_space,
+            view,
+            space,
         )
         return True, log_details
 
     async def unpersist_view(
-        self, view_name: str, view_space: str
+        self,
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict]:
         """
-        Removes the persistence for a view and waits for the run to
-        finish. Checks if the view is persisted at all.
+        Removes the persistence for a view and waits for the run to finish.
+        Checks if the view is persisted at all.
 
         Args:
-            view_name (str): Name of the view.
-            view_space (str): Name of the view space.
+            view (str): View to unpersist.
+            space (str): Space of the view.
+            timeout_seconds (float | None, optional): Maximum polling duration.
+                                                      None if no timeout should
+                                                      be used.
+
+        Raises:
+            ViewPersistenceTimeout: If polling times out after removal starts.
+                                    The remote operation may continue.
+            ViewPersistenceCancelled: If polling is cancelled after removal
+                                      starts. The remote operation may
+                                      continue.
+            ValueError: If timeout_seconds is not positive and finite, or is
+                        a boolean.
 
         Returns:
-            tuple[bool, dict]: True if persistence was removed
-                               successfully, otherwise False. Dictionary
-                               with log details.
+            tuple[bool, dict]: True if persistence was removed successfully or
+                               did not exist, otherwise False. Dict with log
+                               details (containing the keys 'status', 'runTime'
+                               and 'logId').
         """
+        validate_timeout(timeout_seconds)
+
         # Check if view is persisted
-        monitor_details = await self.get_monitor_details(
-            view_name, view_space
-        )
+        monitor_details = await self.get_monitor_details(view, space)
         if "dataPersistency" not in monitor_details:
             logger.error(
                 "Error checking if view '%s' in '%s' is persisted. "
                 "Skipping...",
-                view_name,
-                view_space,
+                view,
+                space,
             )
             return False, {}
         if monitor_details["dataPersistency"] != "Persisted":
             logger.debug(
                 "View '%s' in '%s' is not persisted. Skipping...",
-                view_name,
-                view_space,
+                view,
+                space,
             )
             return True, {}
 
         # Start removal
         logger.debug(
             "Removing persistence for view '%s' in '%s'...",
-            view_name,
-            view_space,
+            view,
+            space,
         )
-        log_id = await self.start_persistence_removal(view_name, view_space)
+        log_id = await self.start_persistence_removal(view, space)
         if log_id is None:
             return False, {}
 
         # Wait for results
         log_details = {}
-        while True:
-            log_details = await self.get_extended_log(log_id, view_space)
-            latest_status = log_details["status"]
-            if latest_status == "COMPLETED":
-                break
-            if latest_status != "RUNNING":
-                logger.error(
-                    "Error removing persistence for view '%s' in '%s'.",
-                    view_name,
-                    view_space,
-                )
-                return False, log_details
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                while True:
+                    log_details = await self.get_extended_log(
+                        log_id, space
+                    )
 
-            # Convert runtime to readable format and print to console
-            milliseconds = log_details["runTime"]
-            hours, remainder = divmod(milliseconds, 3600000)
-            minutes, seconds = divmod(remainder, 60000)
-            seconds, milliseconds = divmod(seconds, 1000)
-            logger.debug(
-                "Waiting for results for view '%s' in '%s'. "
-                "Current runtime: %02d:%02d:%02d.",
-                view_name,
-                view_space,
-                hours,
-                minutes,
-                seconds,
-            )
-            await asyncio.sleep(1)
+                    # Add logId to the log details
+                    log_details["logId"] = log_id
+
+                    # Check status of the run
+                    latest_status = log_details["status"]
+                    if latest_status == "COMPLETED":
+                        break
+                    if latest_status != "RUNNING":
+                        logger.error(
+                            "Error removing persistence for view '%s' in "
+                            "'%s'.",
+                            view,
+                            space,
+                        )
+                        return False, log_details
+
+                    # Convert runtime to readable format and log to console
+                    milliseconds = log_details["runTime"]
+                    hours, remainder = divmod(milliseconds, 3600000)
+                    minutes, seconds = divmod(remainder, 60000)
+                    seconds, milliseconds = divmod(seconds, 1000)
+                    logger.debug(
+                        "Waiting for results for view '%s' in '%s'. "
+                        "Current runtime: %02d:%02d:%02d.",
+                        view,
+                        space,
+                        hours,
+                        minutes,
+                        seconds,
+                    )
+                    await asyncio.sleep(1)
+
+        except TimeoutError:
+            exc = ViewPersistenceTimeout("unpersist", view, space, log_id)
+            raise exc from None
+
+        except asyncio.CancelledError:
+            exc = ViewPersistenceCancelled("unpersist", view, space, log_id)
+            raise exc from None
 
         # Return successful result with log details
         logger.info(
             "Removed persistence for view '%s' in '%s'.",
-            view_name,
-            view_space,
+            view,
+            space,
         )
         return True, log_details
 
-    async def is_persisted(self, view: str, space: str) -> bool:
+    async def analyze_view(
+        self,
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ViewAnalyzerResultDict:
         """
-        Checks if a view is currently persisted. Retries up to three
-        times if the monitor endpoint doesn't answer.
+        Runs the view analyzer for a view, waits for the run to finish and
+        returns the entity statistics (including the persistency candidate
+        scores).
 
         Args:
             view (str): Name of the view.
             space (str): Space of the view.
+            timeout_seconds (float | None, optional): Maximum polling duration.
+                                                      None if no timeout should
+                                                      be used.
 
         Raises:
-            UnexpectedResponse: If the persistence state cannot be
-                                checked after three attempts.
+            ViewAnalysisTimeout: If polling times out after analysis starts.
+                                 The remote operation may continue.
+            ViewAnalysisCancelled: If polling is cancelled after analysis
+                                   starts. The remote operation may continue.
+            ValueError: If timeout_seconds is not positive and finite, or is
+                        a boolean.
 
         Returns:
-            bool: True if the view is persisted, else False.
+            ViewAnalyzerResultDict: The analyzer log ID and entity statistics.
+                                    Entity statistics are empty if the run
+                                    could not be started or failed.
         """
-        for _ in range(3):
-            monitor_details = await self.get_monitor_details(view, space)
-            if not monitor_details:
-                await asyncio.sleep(3)
-                continue
-            return monitor_details.get("dataPersistency", "") == "Persisted"
-        raise UnexpectedResponse(
-            f"Failed to check persistence of view '{view}' in '{space}'."
-        )
+        validate_timeout(timeout_seconds)
 
-    async def analyze_view(self, view: str, space: str) -> list[dict]:
-        """
-        Runs the view analyzer for a view, waits for the run to finish
-        and returns the entity statistics (including the persistency
-        candidate scores).
+        # Snapshot existing log IDs to compare with later
+        existing_logs = await self.get_task_logs(view, space)
+        existing_log_ids: set[int] = set()
+        for log in existing_logs:
+            log_id = _log_id_from_log(log)
+            if log_id is not None:
+                existing_log_ids.add(log_id)
 
-        Args:
-            view (str): Name of the view.
-            space (str): Space of the view.
-
-        Returns:
-            list[dict]: Entity statistics of the analyzer run. Empty if
-                        the run could not be started or failed.
-        """
         # Start the analyzer
         logger.debug(
             "Starting view analyzer for view '%s' in '%s'...",
             view,
             space,
         )
-        if not await self.start_view_analyzer(view, space):
-            return []
+        started, log_id, already_running = await self._start_view_analyzer(
+            view=view,
+            space=space,
+        )
+        if not started:
+            return {"logId": None, "entityStats": []}
         logger.info(
             "Started view analyzer for view '%s' in '%s'.",
             view,
             space,
         )
 
-        # Wait for results
-        latest_status = None
-        while latest_status != "COMPLETED":
-            logs = await self.get_task_logs(view, space)
-            latest_status = logs[0]["status"]
-            if latest_status == "FAILED":
-                logger.error(
-                    "Error generating view analysis for view '%s' in '%s'.",
-                    view,
-                    space,
-                )
-                return []
-            logger.debug(
-                "Waiting for results for view '%s' in '%s'...",
-                view,
-                space,
-            )
-            await asyncio.sleep(1)
+        # Poll the view analyzer run
+        active_statuses = ("PENDING", "RUNNING")
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                while True:
+                    # Find corresponding log entry for the started run
+                    logs = await self.get_task_logs(view, space)
+                    matching_log = None
+                    for log in logs:
+                        candidate_id = _log_id_from_log(log)
+                        if candidate_id is None:
+                            continue
+                        if log_id is not None and candidate_id != log_id:
+                            continue
+                        if log_id is None and candidate_id in existing_log_ids:
+                            continue
+                        matching_log = log
+                        break
 
-        # Fetch the result of the latest run
-        log_id: int = (await self.get_task_logs(view, space))[0]["logId"]
+                    # Fallback if view analyzer was already running and no
+                    # logId was returned
+                    if matching_log is None:
+
+                        # Fetch first log entry with an active status
+                        if already_running and log_id is None:
+                            for log in logs:
+                                status = str(log.get("status", "")).upper()
+                                if status in active_statuses:
+                                    matching_log = log
+                                    break
+
+                        # Check if matching log entry was found
+                        if matching_log is None:
+                            await asyncio.sleep(1)
+                            continue
+
+                    # Fetch matching logId
+                    matching_log_id = _log_id_from_log(matching_log)
+                    if matching_log_id is None:
+                        await asyncio.sleep(1)
+                        continue
+
+                    # Update log ID and check status
+                    log_id = matching_log_id
+                    status = str(matching_log.get("status", "")).upper()
+                    if status == "COMPLETED":
+                        break
+                    if status not in active_statuses:
+                        logger.error(
+                            "Error generating view analysis for view '%s' "
+                            "in '%s'.",
+                            view,
+                            space,
+                        )
+                        return {"logId": log_id, "entityStats": []}
+                    logger.debug(
+                        "Waiting for results for view '%s' in '%s'...",
+                        view,
+                        space,
+                    )
+                    await asyncio.sleep(1)
+
+        except TimeoutError:
+            raise ViewAnalysisTimeout(view, space, log_id) from None
+
+        except asyncio.CancelledError:
+            raise ViewAnalysisCancelled(view, space, log_id) from None
+
+        # Fetch results of the view analyzer run
         result = await self.get_view_analyzer_result(log_id, space)
-        return result["entityStats"]
+        entity_stats = result.get("entityStats", [])
+        if not isinstance(entity_stats, list):
+            entity_stats = []
+        return {"logId": log_id, "entityStats": entity_stats}
 
     async def create_partitioning(
         self,
@@ -668,18 +876,17 @@ class Views(BaseResource):
         Args:
             view (str): Name of the view.
             space (str): Space of the view.
-            attribute (str): Attribute to partition by (has to be of
-                             type string).
+            attribute (str): Attribute to partition by (has to be a string).
             partitions (list[str]): List of all partitions to be created in the
                                     correct order.
                                     Example: ['0000', '2001', '2002', ...]
                                     Last value is the upper limit of the
                                     last partition (example: FISCYEAR < 2025).
-                                    Therefore has to have at least two values.
-            overwrite_existing (bool, optional): If True, existing
-                                                 partitions will get
-                                                 overwritten. Otherwise
-                                                 views with existing
+                                    Therefore the list has to have at least two
+                                    values.
+            overwrite_existing (bool, optional): If True, existing partitions
+                                                 will get overwritten.
+                                                 Otherwise views with existing
                                                  partitions are skipped.
                                                  Defaults to False.
 
@@ -739,6 +946,8 @@ class Views(BaseResource):
             "runtimeDataCalculation": "designtime",
             "type": "range",
         }
+
+        # Check for success
         if await self.set_partitioning(view, space, data):
             logger.info(
                 "Created partitions for view '%s' in '%s'.",
@@ -753,6 +962,29 @@ class Views(BaseResource):
         )
         return "failed"
 
+    def _build_partitioning_payload(self, partitioning: dict) -> dict:
+        """
+        Builds the payload for set_partitioning() from an existing partitioning
+        definition.
+
+        Args:
+            partitioning (dict): Partitioning details as returned by
+                                 get_partitioning().
+
+        Returns:
+            dict: Payload with all fields required by the endpoint.
+        """
+        return {
+            "remoteSourceName": partitioning["remoteSourceName"],
+            "objectName": partitioning["objectName"],
+            "numParallelPartitions": partitioning["numParallelPartitions"],
+            "ranges": partitioning["ranges"],
+            "column": partitioning["column"],
+            "columnType": partitioning["columnType"],
+            "runtimeDataCalculation": partitioning["runtimeDataCalculation"],
+            "type": partitioning["type"],
+        }
+
     async def lock_partitions(
         self,
         view: str,
@@ -760,14 +992,14 @@ class Views(BaseResource):
         until_year: int,
     ) -> PartitionLockOutcome:
         """
-        Locks all partitions of a view up to (and including) the given
-        year. All partitions have to be integers!!
+        Locks all partitions of a view up to (and including) the given year.
+        All partitions have to be integers!!
 
         Args:
             view (str): Name of the view.
             space (str): Space of the view.
-            until_year (int): Year up to which partitions should be
-                              locked (including the year itself).
+            until_year (int): Year up to which partitions should be locked
+                              (including the year itself).
 
         Returns:
             PartitionLockOutcome: 'locked', 'no_partitions' or 'failed'.
@@ -823,8 +1055,7 @@ class Views(BaseResource):
             space (str): Space of the view.
 
         Returns:
-            PartitionLockOutcome: 'unlocked', 'no_partitions' or
-                                  'failed'.
+            PartitionLockOutcome: 'unlocked', 'no_partitions' or 'failed'.
         """
         # Fetch current partitioning
         partitioning = await self.get_partitioning(view, space)
@@ -858,28 +1089,3 @@ class Views(BaseResource):
             space,
         )
         return "failed"
-
-    def _build_partitioning_payload(self, partitioning: dict) -> dict:
-        """
-        Builds the payload for set_partitioning() from an existing
-        partitioning definition.
-
-        Args:
-            partitioning (dict): Partitioning details as returned by
-                                 get_partitioning().
-
-        Returns:
-            dict: Payload with all fields required by the endpoint.
-        """
-        return {
-            "remoteSourceName": partitioning["remoteSourceName"],
-            "objectName": partitioning["objectName"],
-            "numParallelPartitions": partitioning["numParallelPartitions"],
-            "ranges": partitioning["ranges"],
-            "column": partitioning["column"],
-            "columnType": partitioning["columnType"],
-            "runtimeDataCalculation": partitioning[
-                "runtimeDataCalculation"
-            ],
-            "type": partitioning["type"],
-        }

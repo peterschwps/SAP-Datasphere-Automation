@@ -1,8 +1,9 @@
 import httpx
+import pytest
 import respx
 
-from datasphere_api import DatasphereConfig
-from datasphere_api.auth import refresh_tokens
+from datasphere_api import DatasphereConfig, InvalidConfiguration
+from datasphere_api.auth import authenticate_interactively, refresh_tokens
 from tests.conftest import TOKEN_URL
 
 
@@ -51,3 +52,19 @@ async def test_refresh_tokens_invalid_json(
     async with httpx.AsyncClient() as session:
         tokens = await refresh_tokens(config, session, "old-refresh")
     assert tokens is None
+
+
+async def test_interactive_login_rejects_remote_redirect(
+    config: DatasphereConfig,
+) -> None:
+    invalid = DatasphereConfig(
+        base_url=config.base_url,
+        authorization_url=config.authorization_url,
+        token_url=config.token_url,
+        client_id=config.client_id,
+        client_secret=config.client_secret,
+        redirect_uri="https://attacker.example/callback",
+    )
+    async with httpx.AsyncClient() as session:
+        with pytest.raises(InvalidConfiguration):
+            await authenticate_interactively(invalid, session)

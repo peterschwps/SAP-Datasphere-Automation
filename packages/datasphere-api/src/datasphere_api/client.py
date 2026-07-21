@@ -10,6 +10,7 @@ from datasphere_api.auth import (
 )
 from datasphere_api.config import BROWSER_MAPPING, DatasphereConfig
 from datasphere_api.exceptions import (
+    AuthenticationFailed,
     InvalidConfiguration,
     MissingCredentials,
 )
@@ -59,21 +60,31 @@ class DatasphereClient:
         self._task_chains: TaskChains | None = None
         self._views: Views | None = None
 
-    async def login(self, tokens: TokenDict | None = None) -> TokenDict:
+    async def login(
+        self,
+        tokens: TokenDict | None = None,
+        *,
+        allow_interactive_fallback: bool = True,
+    ) -> TokenDict:
         """
-        Authenticates the session against the Datasphere tenant. Tries
-        to refresh the given tokens if they contain a refresh token.
-        Falls back to the interactive browser login if no tokens are
-        given or the refresh fails. Doesn't persist anything — the
-        caller is responsible for caching the returned tokens.
+        Authenticates the session against the Datasphere tenant. Tries to
+        refresh the given tokens if they contain a refresh token. Falls back to
+        the interactive browser login if no tokens are given or the refresh
+        fails, unless interactive fallback is disabled.
 
         Args:
             tokens (TokenDict | None, optional): Tokens of a previous
                                                  login to refresh.
                                                  Defaults to None.
+            allow_interactive_fallback (bool, optional): Whether to open a
+                                                         browser when no valid
+                                                         refresh token is
+                                                         available.
+                                                         Defaults to True.
 
         Raises:
-            AuthenticationFailed: If the interactive login fails.
+            AuthenticationFailed: If interactive login is required but
+                                  disabled, or if the interactive login fails.
 
         Returns:
             TokenDict: Tokens returned by the token endpoint.
@@ -101,6 +112,9 @@ class DatasphereClient:
                 refresh_token=tokens["refresh_token"],
             )
             if new_tokens is not None:
+                # Only add saved refresh token to the new tokens if the token
+                # endpoint didn't return a new one
+                new_tokens.setdefault("refresh_token", tokens["refresh_token"])
                 self._apply_tokens(new_tokens)
                 return new_tokens
             logger.warning(
@@ -108,6 +122,11 @@ class DatasphereClient:
             )
         else:
             logger.debug("No session tokens provided.")
+
+        if not allow_interactive_fallback:
+            raise AuthenticationFailed(
+                "Interactive login is required to authenticate."
+            )
 
         # Start interactive login
         logger.debug("Opening browser window to log in...")

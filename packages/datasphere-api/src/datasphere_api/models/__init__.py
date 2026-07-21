@@ -11,6 +11,7 @@ from datasphere_api.models.remote_tables import (
 from datasphere_api.models.views import (
     PartitionCreateOutcome,
     PartitionLockOutcome,
+    ViewAnalyzerResultDict,
     ViewDetailsDict,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "StatisticsInformationDict",
     "StatisticsType",
     "StatisticsUpdateOutcome",
+    "ViewAnalyzerResultDict",
     "ViewDetailsDict",
 ]

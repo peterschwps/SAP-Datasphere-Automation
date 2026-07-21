@@ -1,4 +1,3 @@
-import contextlib
 import logging
 from urllib.parse import quote, urlencode
 from uuid import uuid4
@@ -21,15 +20,6 @@ class AnalyticalModels(BaseResource):
             list[AnalyticalModelsDetailsDict]: List of dictionaries with
                                                the analytical models.
         """
-        # Update headers
-        self.session.headers.update(
-            {
-                "Accept": "application/json",
-                "Accept-Language": "de",
-                "Cache-Control": "no-cache",
-            }
-        )
-
         # Fetch all analytical models
         url = f"{self._base_url}/deepsea/repository/search/$all"
         params = {
@@ -59,15 +49,16 @@ class AnalyticalModels(BaseResource):
             ),
         }
         response = await self.session.get(
-            url=f"{url}?{urlencode(params, safe='()*', quote_via=quote)}"
+            url=f"{url}?{urlencode(params, safe='()*', quote_via=quote)}",
+            headers={
+                "Accept": "application/json",
+                "Accept-Language": "de",
+                "Cache-Control": "no-cache",
+            },
         )
         all_analytical_models: list[AnalyticalModelsDetailsDict] = (
             response.json()["value"]
         )
-
-        # Remove unnecessary headers for next requests
-        with contextlib.suppress(KeyError):
-            self.session.headers.pop("Cache-Control")
 
         return all_analytical_models
 
@@ -107,15 +98,6 @@ class AnalyticalModels(BaseResource):
                                        This dictionary has view IDs as
                                        keys and view names as values.
         """
-        # Update headers
-        # (if get_all_analytical_models() was called before)
-        self.session.headers.update(
-            {
-                "Accept": "*/*",
-                "x-request-id": str(uuid4()).replace("-", "")
-            }
-        )
-
         # Fetch details
         url = f"{self._base_url}/deepsea/repository/dependencies/"
         params = {
@@ -143,7 +125,14 @@ class AnalyticalModels(BaseResource):
                 "csn.derivation.lookupEntity,csn.valueHelp.entity"
             ),
         }
-        response = await self.session.get(url=url, params=params)
+        response = await self.session.get(
+            url=url,
+            params=params,
+            headers={
+                "Accept": "*/*",
+                "x-request-id": str(uuid4()).replace("-", ""),
+            },
+        )
         model_details = response.json()[0]
 
         # Function for recursive iteration
@@ -161,7 +150,5 @@ class AnalyticalModels(BaseResource):
 
         # Reverse list for bottom-up order
         all_ids.reverse()
-        analytical_model_to_view_mapping = {
-            analytical_model_id: {val[0]: val[1] for val in all_ids}
-        }
+        analytical_model_to_view_mapping = {analytical_model_id: dict(all_ids)}
         return analytical_model_to_view_mapping

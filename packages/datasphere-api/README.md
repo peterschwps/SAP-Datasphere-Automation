@@ -1,4 +1,4 @@
-# Datasphere-API
+# SAP-Datasphere-API
 
 [![PyPI](https://img.shields.io/pypi/v/Datasphere-API?label=PyPI)](https://pypi.org/project/Datasphere-API/)
 [![Python](https://img.shields.io/pypi/pyversions/Datasphere-API?label=Python)](https://pypi.org/project/Datasphere-API/)
@@ -11,7 +11,11 @@ and can be used to build your own automations.
 
 ## Features
 
-<details open>
+### Datasphere Features
+
+Extend the sections for a list of all supported features.
+
+<details>
   <summary><b>Analytical Models</b></summary>
   <ul>
     <li>get all analytical models</li>
@@ -20,7 +24,7 @@ and can be used to build your own automations.
   </ul>
 </details>
 
-<details open>
+<details>
   <summary><b>Remote Tables</b></summary>
   <ul>
     <li>get all remote tables</li>
@@ -30,16 +34,16 @@ and can be used to build your own automations.
   </ul>
 </details>
 
-<details open>
+<details>
   <summary><b>Task Chains</b></summary>
   <ul>
     <li>start a task chain without awaiting its result</li>
     <li>run a task chain and await its execution result</li>
-    <li>retrieve logs of running task chain</li>
+    <li>retrieve task-chain run logs by log ID</li>
   </ul>
 </details>
 
-<details open>
+<details>
   <summary><b>Views</b></summary>
   <ul>
     <li>get all views</li>
@@ -49,15 +53,17 @@ and can be used to build your own automations.
     <li>lock partitions</li>
     <li>unlock partitions</li>
     <li>delete partitions</li>
+    <li>check whether a view is persisted</li>
     <li>create persistence (with/without awaiting the result)</li>
     <li>remove persistence (with/without awaiting the result)</li>
     <li>get all logs of a view</li>
-    <li>get logs of a persistence run</li>
+    <li>get extended task logs</li>
     <li>analyze view using the view analyzer</li>
+    <li>retrieve view analyzer results</li>
   </ul>
 </details>
 
-> [!TIP]
+> [!NOTE]
 > Open an issue if you need another functionality.
 
 ## Installation
@@ -105,7 +111,12 @@ client has to be of type "Interactive Usage" with the redirect URI
 
 ## Authentication
 
-This client provides an interactive login. If no tokens are provided, it opens a browser window for the user to sign in. If tokens are provided, the client tries to refresh them first. After a valid session has been created it returns the tokens (from `client.login(tokens)`).
+This client supports interactive and non-interactive authentication. If tokens
+with a refresh token are provided, it tries to refresh them first. If no valid
+tokens are available, it opens a browser window by default. Non-interactive
+applications (e.g. MCP servers) can disable this fallback with
+`client.login(tokens, allow_interactive_fallback=False)`. After a valid session
+has been created, the client returns the tokens.
 
 Make sure to store those tokens if you want to persist the session across multiple runs (see [SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI) for an example). The client itself does not persist any tokens!
 

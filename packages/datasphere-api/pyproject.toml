@@ -1,7 +1,7 @@
 [project]
 name = "Datasphere-API"
 version = "0.2.0"
-description = "Unofficial async Python client for the SAP Datasphere automation APIs."
+description = "Asynchronous client for the internal SAP Datasphere API."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
