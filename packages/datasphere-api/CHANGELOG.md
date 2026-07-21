@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0](https://github.com/peterschwps/SAP-Datasphere-API/compare/v0.2.0...v0.3.0) (2026-07-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* removed token persistence from the client
+
+### Features
+
+* add non-interactive authentication and workflow timeouts ([#15](https://github.com/peterschwps/SAP-Datasphere-API/issues/15)) ([d841a51](https://github.com/peterschwps/SAP-Datasphere-API/commit/d841a51eadf200e6c284c3b6350e719dc6a07ef5))
+* removed token persistence from the client ([c6fc721](https://github.com/peterschwps/SAP-Datasphere-API/commit/c6fc7219faf2f294a6e439eebb99d677050b2763))
+
+
+### Bug Fixes
+
+* fixed HTML tag error ([e5ac3c7](https://github.com/peterschwps/SAP-Datasphere-API/commit/e5ac3c7fc312656e61b56302dedd75572a10f6d2))
+
+
+### Documentation
+
+* added collapsed sections for features ([c0027ea](https://github.com/peterschwps/SAP-Datasphere-API/commit/c0027ea63e8000239a0a506d18b9d21351a5b636))
+* removed redundant parts and structured features list ([48a24bd](https://github.com/peterschwps/SAP-Datasphere-API/commit/48a24bd0eb8d552ed65838cea2ce15529a5f13aa))
+
 ## [0.2.0](https://github.com/peterschwps/SAP-Datasphere-API/compare/v0.1.1...v0.2.0) (2026-07-08)
 
 
