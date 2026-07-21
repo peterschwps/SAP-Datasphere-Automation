@@ -1,3 +1,63 @@
-from datasphere_core.commands.task_chains import start_task_chain
+from datasphere_core.commands.analytical_models import (
+    get_analytical_model_view_dependencies,
+    get_analytical_model_view_dependencies_batch,
+    measure_analytical_model_view_persistence,
+    measure_analytical_model_view_persistence_batch,
+)
+from datasphere_core.commands.remote_tables import (
+    ensure_remote_table_statistics,
+    ensure_remote_table_statistics_batch,
+    refresh_remote_table_statistics,
+    refresh_remote_table_statistics_batch,
+)
+from datasphere_core.commands.task_chains import (
+    run_task_chain,
+    run_task_chain_batch,
+)
+from datasphere_core.commands.views import (
+    create_view_partitioning,
+    create_view_partitioning_batch,
+    delete_view_partitioning,
+    delete_view_partitioning_batch,
+    find_view_attribute_matches,
+    find_view_attribute_matches_batch,
+    find_view_persistence_candidates,
+    find_view_persistence_candidates_batch,
+    lock_view_partitions,
+    lock_view_partitions_batch,
+    persist_view,
+    persist_view_batch,
+    unlock_view_partitions,
+    unlock_view_partitions_batch,
+    unpersist_view,
+    unpersist_view_batch,
+)
 
-__all__ = ["start_task_chain"]
+__all__ = [
+    "create_view_partitioning",
+    "create_view_partitioning_batch",
+    "delete_view_partitioning",
+    "delete_view_partitioning_batch",
+    "ensure_remote_table_statistics",
+    "ensure_remote_table_statistics_batch",
+    "find_view_attribute_matches",
+    "find_view_attribute_matches_batch",
+    "find_view_persistence_candidates",
+    "find_view_persistence_candidates_batch",
+    "get_analytical_model_view_dependencies",
+    "get_analytical_model_view_dependencies_batch",
+    "lock_view_partitions",
+    "lock_view_partitions_batch",
+    "measure_analytical_model_view_persistence",
+    "measure_analytical_model_view_persistence_batch",
+    "persist_view",
+    "persist_view_batch",
+    "refresh_remote_table_statistics",
+    "refresh_remote_table_statistics_batch",
+    "run_task_chain",
+    "run_task_chain_batch",
+    "unlock_view_partitions",
+    "unlock_view_partitions_batch",
+    "unpersist_view",
+    "unpersist_view_batch",
+]
