@@ -19,5 +19,3 @@ COMMANDS = build_command_registry(
         *VIEWS_COMMAND_DEFINITIONS,
     )
 )
-
-__all__ = ["COMMANDS"]
