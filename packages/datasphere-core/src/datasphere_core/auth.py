@@ -35,10 +35,10 @@ class SessionConfig:
 
     def __post_init__(self) -> None:
         """
-        Validates if a client cecret was provided.
+        Validates if a client secret was provided.
 
         Raises:
-            ValueError: If no slient secret was provided.
+            ValueError: If no client secret was provided.
         """
         if not self.client_secret.strip():
             raise ValueError("Client secret must not be empty.")
