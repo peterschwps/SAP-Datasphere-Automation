@@ -344,7 +344,6 @@ name = "datasphere-cli"
 version = "0.4.0"
 source = { editable = "." }
 dependencies = [
-    { name = "datasphere-api" },
     { name = "datasphere-core" },
     { name = "platformdirs" },
     { name = "pydantic-settings" },
@@ -364,7 +363,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "datasphere-api", editable = "../SAP-Datasphere-API" },
     { name = "datasphere-core", editable = "packages/datasphere-core" },
     { name = "platformdirs", specifier = ">=4.4.0" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },

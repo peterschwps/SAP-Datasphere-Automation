@@ -16,7 +16,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "datasphere-api>=0.2.0",
     "datasphere-core==0.4.0", # x-release-please-version
     "pydantic-settings>=2.6.0",
     "rich>=14.0.0,<15.0.0",
@@ -41,7 +40,6 @@ build-backend = "hatchling.build"
 packages = ["src/datasphere_cli"]
 
 [tool.uv.sources]
-datasphere-api = { path = "../SAP-Datasphere-API", editable = true }
 datasphere-core = { workspace = true }
 
 [tool.uv.workspace]
