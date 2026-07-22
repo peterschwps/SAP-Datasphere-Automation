@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from datasphere_api import DatasphereClient
 
-from datasphere_core.models import BatchItemResult, CommandProgress
+from datasphere_core.models.common import BatchItemResult, CommandProgress
 
 type ProgressCallback = Callable[[CommandProgress], Awaitable[None]]
 type CheckpointCallback = Callable[[BatchItemResult], Awaitable[None]]
