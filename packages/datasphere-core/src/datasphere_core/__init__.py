@@ -1,9 +1,6 @@
 # ruff: noqa: F401
 
 from datasphere_core.auth import DatasphereSession, SessionConfig
-from datasphere_core.concurrency import (
-    execute_with_concurrency_limit,
-)
 from datasphere_core.context import (
     CheckpointCallback,
     CommandContext,
@@ -22,5 +19,9 @@ from datasphere_core.errors import (
     SessionNotAuthenticatedError,
     TokenStoreError,
 )
-from datasphere_core.execution import execute_command
+from datasphere_core.execution import (
+    execute_batch,
+    execute_command,
+    execute_with_concurrency_limit,
+)
 from datasphere_core.registry import COMMANDS
