@@ -24,17 +24,18 @@ class CommandContext:
     # Optional callback to report completion after finishing a batch item
     checkpoint: CheckpointCallback | None = None
 
-    async def report(self, update: CommandProgress) -> None:
+    async def report(self, command_progress: CommandProgress) -> None:
         """
         Reports progress updates if the caller supplied a callback.
 
         Args:
-            update (CommandProgress): Runtime update to report to the progress
-                                      callback (carriers information about a
-                                      specific task).
+            command_progress (CommandProgress): Latest command status to report
+                                                to the progress callback
+                                                (carriers information about a
+                                                specific task).
         """
         if self.progress is not None:
-            await self.progress(update)
+            await self.progress(command_progress)
 
     async def report_batch_item_result(
         self,
