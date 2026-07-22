@@ -6,6 +6,7 @@ from typing import cast
 from datasphere_core.context import CommandContext
 from datasphere_core.errors import CommandTimeoutError
 from datasphere_core.models.common import (
+    BatchItemFinalStatus,
     BatchSummary,
     CommandProgress,
     CommandProgressPhase,
@@ -27,6 +28,40 @@ class BatchProgressState:
     @property
     def completed_items(self) -> int:
         return self.succeeded + self.failed + self.skipped + self.timed_out
+
+    def record(self, status: BatchItemFinalStatus) -> None:
+        """
+        Records the outcome of one completed batch item by adding it to the
+        corresponding counter.
+
+        Args:
+            status (BatchItemFinalStatus): Status of the batch item execution.
+        """
+        match status:
+            case BatchItemFinalStatus.SUCCEEDED:
+                self.succeeded += 1
+            case BatchItemFinalStatus.FAILED:
+                self.failed += 1
+            case BatchItemFinalStatus.SKIPPED:
+                self.skipped += 1
+            case BatchItemFinalStatus.TIMED_OUT:
+                self.timed_out += 1
+
+    def to_summary(self) -> BatchSummary:
+        """
+        Creates a summary from the recorded batch outcomes. This summary
+        displays the result of the full batch exection.
+
+        Returns:
+            BatchSummary: Aggregate outcome counts for completed items.
+        """
+        return BatchSummary(
+            total=self.completed_items,
+            succeeded=self.succeeded,
+            failed=self.failed,
+            skipped=self.skipped,
+            timed_out=self.timed_out,
+        )
 
 
 def _lifecycle_progress(
@@ -91,10 +126,10 @@ def batch_result_phase(summary: BatchSummary) -> CommandProgressPhase:
         CommandProgressPhase: Phase of a command execution.
     """
     if summary.timed_out:
-        return "timed_out"
+        return CommandProgressPhase.TIMED_OUT
     if summary.failed:
-        return "failed"
-    return "completed"
+        return CommandProgressPhase.FAILED
+    return CommandProgressPhase.COMPLETED
 
 
 async def execute_command[ResultT](
@@ -205,7 +240,7 @@ async def _handle_operation_lifecycle[ResultT](
     # Report start of operation
     command_progress = _lifecycle_progress(
         command=command,
-        phase="started",
+        phase=CommandProgressPhase.STARTED,
         batch_progress_state=batch_progress_state,
     )
     await context.report(command_progress)
@@ -219,7 +254,7 @@ async def _handle_operation_lifecycle[ResultT](
     except CommandTimeoutError as error:
         command_progress = _lifecycle_progress(
             command=command,
-            phase="timed_out",
+            phase=CommandProgressPhase.TIMED_OUT,
             message=str(error),
             batch_progress_state=batch_progress_state,
         )
@@ -229,7 +264,7 @@ async def _handle_operation_lifecycle[ResultT](
     except asyncio.CancelledError as error:
         command_progress = _lifecycle_progress(
             command=command,
-            phase="cancelled",
+            phase=CommandProgressPhase.CANCELLED,
             message=str(error) or None,
             batch_progress_state=batch_progress_state,
         )
@@ -239,14 +274,18 @@ async def _handle_operation_lifecycle[ResultT](
     except Exception:
         command_progress = _lifecycle_progress(
             command=command,
-            phase="failed",
+            phase=CommandProgressPhase.FAILED,
             batch_progress_state=batch_progress_state,
         )
         await context.report(command_progress)
         raise
 
     # Evaluate result with supplied callback function or set to 'completed'
-    phase = result_phase(result) if result_phase is not None else "completed"
+    phase = (
+        result_phase(result)
+        if result_phase is not None
+        else CommandProgressPhase.COMPLETED
+    )
 
     # Report end of operation
     command_progress = _lifecycle_progress(
