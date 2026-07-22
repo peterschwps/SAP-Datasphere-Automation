@@ -6,7 +6,7 @@ from datasphere_api import DatasphereClient
 from datasphere_core.models.common import BatchItemResult, CommandProgress
 
 type ProgressCallback = Callable[[CommandProgress], Awaitable[None]]
-type CheckpointCallback = Callable[[BatchItemResult], Awaitable[None]]
+type BatchItemResultCallback = Callable[[BatchItemResult], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,15 +14,18 @@ class CommandContext:
     """
     Runtime dependencies available to command handlers.
     """
-
     # Authenticated DatasphereClient
     client: DatasphereClient
 
     # Optional callback to report progress of the command call
-    progress: ProgressCallback | None = None
+    # This reports very general progress of the command, e.g. if it has been
+    # started, completed, failed etc.
+    progress_callback: ProgressCallback | None = None
 
-    # Optional callback to report completion after finishing a batch item
-    checkpoint: CheckpointCallback | None = None
+    # Optional callback to report the result after finishing a batch item
+    # This sends the actual result of the execution and can be used to persist
+    # every result of completed items while the command is still running.
+    batch_item_result_callback: BatchItemResultCallback | None = None
 
     async def report(self, command_progress: CommandProgress) -> None:
         """
@@ -34,21 +37,24 @@ class CommandContext:
                                                 (carriers information about a
                                                 specific task).
         """
-        if self.progress is not None:
-            await self.progress(command_progress)
+        if self.progress_callback is not None:
+            await self.progress_callback(command_progress)
 
     async def report_batch_item_result(
         self,
-        result: BatchItemResult,
+        batch_item_result: BatchItemResult,
     ) -> None:
         """
         Reports a result after completing a batch item if the caller supplied
         a callback.
 
         Args:
-            result (BatchItemResult): Runtime update to report the completion
-                                      of a batch item to the checkpoint
-                                      callback.
+            batch_item_result (BatchItemResult): Result of a single batch item
+                                                 to report back to the
+                                                 checkpoint callback. This can
+                                                 be used to persist results
+                                                 while the batch execution is
+                                                 still running.
         """
-        if self.checkpoint is not None:
-            await self.checkpoint(result)
+        if self.batch_item_result_callback is not None:
+            await self.batch_item_result_callback(batch_item_result)
