@@ -2,7 +2,7 @@
 
 from datasphere_core.auth import DatasphereSession, SessionConfig
 from datasphere_core.context import (
-    CheckpointCallback,
+    BatchItemResultCallback,
     CommandContext,
     ProgressCallback,
 )
