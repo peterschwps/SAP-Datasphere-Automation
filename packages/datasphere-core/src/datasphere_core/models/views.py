@@ -302,7 +302,7 @@ class FindViewPersistenceCandidatesResult:
     space: str
     status: FindViewPersistenceCandidatesStatus
     candidates: tuple[ViewPersistenceCandidate, ...]
-    operation_id: str | None = None
+    log_id: str | None = None
 
     def __post_init__(self) -> None:
         """
@@ -714,7 +714,7 @@ class PersistViewResult:
     space: str
     status: PersistViewStatus
     sap_status: str | None = None
-    operation_id: str | None = None
+    log_id: str | None = None
     runtime_seconds: int | None = None
 
 
@@ -797,7 +797,7 @@ class UnpersistViewResult:
     space: str
     status: UnpersistViewStatus
     sap_status: str | None = None
-    operation_id: str | None = None
+    log_id: str | None = None
     runtime_seconds: int | None = None
 
 

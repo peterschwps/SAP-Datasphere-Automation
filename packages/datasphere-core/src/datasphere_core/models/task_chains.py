@@ -42,7 +42,8 @@ class RunTaskChainRequest:
             isinstance(self.timeout_seconds, bool)
             or not isinstance(self.timeout_seconds, (int, float))
             or not math.isfinite(self.timeout_seconds)
-            or not 0 < self.timeout_seconds
+            or not 0
+            < self.timeout_seconds
             <= MAXIMUM_TASK_CHAIN_TIMEOUT_SECONDS
         ):
             raise ValueError(
@@ -60,7 +61,7 @@ class RunTaskChainResult:
     space: str
     status: TaskChainStatus
     sap_status: str | None = None
-    operation_id: str | None = None
+    log_id: str | None = None
     runtime_seconds: int | None = None
 
 
