@@ -421,9 +421,9 @@ class MeasureAnalyticalModelViewPersistenceItemResult:
     previously_persisted: bool | None = None
     runtime_seconds: int | None = None
     persistence_sap_status: str | None = None
-    persistence_operation_id: str | None = None
+    persistence_log_id: str | None = None
     cleanup_sap_status: str | None = None
-    cleanup_operation_id: str | None = None
+    cleanup_log_id: str | None = None
     persistence_removed: bool | None = None
     manual_intervention: bool = False
 
@@ -442,9 +442,9 @@ class MeasureAnalyticalModelViewPersistenceItemResult:
         _validate_optional_non_empty(self.space, "Space")
         for value, field in (
             (self.persistence_sap_status, "Persistence SAP status"),
-            (self.persistence_operation_id, "Persistence operation ID"),
+            (self.persistence_log_id, "Persistence log ID"),
             (self.cleanup_sap_status, "Cleanup SAP status"),
-            (self.cleanup_operation_id, "Cleanup operation ID"),
+            (self.cleanup_log_id, "Cleanup log ID"),
         ):
             _validate_optional_non_empty(value, field)
 
