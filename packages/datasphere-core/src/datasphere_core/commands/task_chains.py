@@ -1,4 +1,3 @@
-import asyncio
 import math
 from typing import Any
 
@@ -8,15 +7,13 @@ from datasphere_core.context import CommandContext
 from datasphere_core.definitions import CommandDefinition
 from datasphere_core.errors import CommandCancelledError
 from datasphere_core.execution import (
-    BatchProgressState,
+    BatchExecution,
     batch_result_phase,
     execute_batch,
     execute_command,
-    execute_with_concurrency_limit,
 )
 from datasphere_core.models.common import (
     BatchItemFinalStatus,
-    CommandProgress,
     CommandProgressPhase,
 )
 from datasphere_core.models.task_chains import (
@@ -197,20 +194,40 @@ async def run_task_chain(
     Raises:
         CommandCancelledError: If the command itself was cancelled.
     """
-    async def operation() -> RunTaskChainResult:
-        """
-        Runs the requested task chain.
-
-        Returns:
-            RunTaskChainResult: Result of the task chain run.
-        """
-        return await _run_task_chain(context, request)
-
     return await execute_command(
         context=context,
         command=RUN_TASK_CHAIN_COMMAND_NAME,
-        operation=operation,
+        request=request,
+        operation=_run_task_chain,
         result_phase=_map_result_to_command_progress_phase,
+    )
+
+
+async def _run_task_chain_batch(
+    execution: BatchExecution,
+    request: RunTaskChainBatchRequest,
+) -> RunTaskChainBatchResult:
+    """
+    Runs all requested task chains with concurrency.
+
+    Args:
+        execution (BatchExecution): Runtime state of the batch execution.
+        request (RunTaskChainBatchRequest): Input for the task chain
+                                            executions with concurrency.
+
+    Returns:
+        RunTaskChainBatchResult: Ordered results of the task chain runs.
+
+    """
+    results = await execution.execute_items(
+        items=request.requests,
+        operation=_run_task_chain,
+        max_concurrency=request.max_concurrency,
+        classify=_map_result_to_batch_item_final_status,
+    )
+    return RunTaskChainBatchResult(
+        results=results,
+        summary=execution.to_summary(),
     )
 
 
@@ -233,76 +250,11 @@ async def run_task_chain_batch(
         CommandCancelledError: If the command itself was cancelled.
     """
 
-    async def operation(
-        progress_state: BatchProgressState,
-    ) -> RunTaskChainBatchResult:
-        """
-        Runs all requested task chains with concurrency.
-
-        Returns:
-            RunTaskChainBatchResult: Ordered results of the task chain runs.
-        """
-        progress_lock = asyncio.Lock()
-
-        async def run_one(
-            indexed_request: tuple[int, RunTaskChainRequest],
-        ) -> RunTaskChainResult:
-            """
-            Runs one task chain and reports progress updates.
-
-            Args:
-                indexed_request (tuple[int, RunTaskChainRequest]):
-                    Index and input for the task chain execution.
-
-            Returns:
-                RunTaskChainResult: Result of the task chain run.
-            """
-            # Run task chain
-            index, item = indexed_request
-            result = await _run_task_chain(context, item)
-
-            async with progress_lock:
-                # Add status to the batches progress state
-                status =  _map_result_to_batch_item_final_status(
-                    result=result
-                )
-                progress_state.record(status=status)
-
-                # Report status update to callback (phase "advanced" for each
-                # completed batch item)
-                await context.report(
-                    CommandProgress(
-                        command=RUN_TASK_CHAIN_BATCH_COMMAND_NAME,
-                        phase=CommandProgressPhase.ADVANCED,
-                        completed_items=progress_state.completed_items,
-                        total_items=progress_state.total_items,
-                        succeeded_items=progress_state.succeeded,
-                        failed_items=progress_state.failed,
-                        skipped_items=progress_state.skipped,
-                        timed_out_items=progress_state.timed_out,
-                        item_index=index,
-                    )
-                )
-            return result
-
-        # Index requests to use as input for 'run_one'
-        indexed_requests = tuple(enumerate(request.requests))
-
-        # Execute batch with concurrency
-        results = await execute_with_concurrency_limit(
-            items=indexed_requests,
-            operation=run_one,
-            max_concurrency=request.max_concurrency,
-        )
-        return RunTaskChainBatchResult(
-            results=results,
-            summary=progress_state.to_summary(),
-        )
-
     return await execute_batch(
         context=context,
         command=RUN_TASK_CHAIN_BATCH_COMMAND_NAME,
-        operation=operation,
+        request=request,
+        operation=_run_task_chain_batch,
         total_items=len(request.requests),
         result_phase=lambda result: batch_result_phase(result.summary),
     )
