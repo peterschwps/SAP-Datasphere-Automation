@@ -128,7 +128,7 @@ async def _run_task_chain(
     Runs one task chain.
 
     Args:
-        context (CommandContext): Authenticated client used to run the chain.
+        context (CommandContext): Authenticated client and progress callbacks.
         request (RunTaskChainRequest): Input for the task chain execution.
 
     Returns:
