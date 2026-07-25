@@ -211,7 +211,8 @@ async def _run_task_chain_batch(
     Runs all requested task chains with concurrency.
 
     Args:
-        execution (BatchExecution): Runtime state of the batch execution.
+        execution (BatchExecution): Runtime state and shared operations for the
+                                    batch execution.
         request (RunTaskChainBatchRequest): Input for the task chain
                                             executions with concurrency.
 
