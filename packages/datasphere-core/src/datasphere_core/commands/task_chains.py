@@ -286,8 +286,8 @@ TASK_CHAINS_RUN_BATCH_COMMAND = CommandDefinition(
     handler=run_task_chain_batch,
     cli_description="Run task chains with bounded concurrency.",
     mcp_description=(
-        "Run SAP Datasphere task chains with bounded concurrency and return "
-        "ordered per-item results."
+        "Run SAP Datasphere task chains with bounded concurrency and wait for"
+        "their results."
     ),
     default_timeout_seconds=DEFAULT_TASK_CHAIN_TIMEOUT_SECONDS,
     maximum_timeout_seconds=MAXIMUM_TASK_CHAIN_TIMEOUT_SECONDS,
