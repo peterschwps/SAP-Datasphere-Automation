@@ -267,10 +267,7 @@ TASK_CHAINS_RUN_COMMAND = CommandDefinition(
     request_type=RunTaskChainRequest,
     result_type=RunTaskChainResult,
     handler=run_task_chain,
-    cli_description="Run a task chain and wait for its result.",
-    mcp_description=(
-        "Run a SAP Datasphere task chain and wait for its result."
-    ),
+    description="Run a task chain and wait for its result.",
     default_timeout_seconds=DEFAULT_TASK_CHAIN_TIMEOUT_SECONDS,
     maximum_timeout_seconds=MAXIMUM_TASK_CHAIN_TIMEOUT_SECONDS,
     read_only=False,
@@ -284,10 +281,8 @@ TASK_CHAINS_RUN_BATCH_COMMAND = CommandDefinition(
     request_type=RunTaskChainBatchRequest,
     result_type=RunTaskChainBatchResult,
     handler=run_task_chain_batch,
-    cli_description="Run task chains with bounded concurrency.",
-    mcp_description=(
-        "Run SAP Datasphere task chains with bounded concurrency and wait for"
-        "their results."
+    description=(
+        "Run multiple task chains with concurrency and wait for their results."
     ),
     default_timeout_seconds=DEFAULT_TASK_CHAIN_TIMEOUT_SECONDS,
     maximum_timeout_seconds=MAXIMUM_TASK_CHAIN_TIMEOUT_SECONDS,
