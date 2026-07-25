@@ -27,8 +27,7 @@ class CommandDefinition[RequestT, ResultT]:
     request_type: type[RequestT]
     result_type: type[ResultT]
     handler: CommandHandler[RequestT, ResultT]
-    cli_description: str
-    mcp_description: str
+    description: str
     default_timeout_seconds: float
     maximum_timeout_seconds: float
     read_only: bool
@@ -42,8 +41,7 @@ class CommandDefinition[RequestT, ResultT]:
 
         Raises:
             ValueError: If the command name is invalid.
-            ValueError: If the CLI description is empty.
-            ValueError: If the MCP description is empty.
+            ValueError: If the description is empty.
             ValueError: If the default timeout is not a positive number.
             ValueError: If the maximum timeout is not finite or less than the
                         default.
@@ -53,11 +51,9 @@ class CommandDefinition[RequestT, ResultT]:
         if _COMMAND_NAME_PATTERN.fullmatch(self.name) is None:
             raise ValueError(f"Invalid command name: {self.name!r}.")
 
-        # Check CLI and MCP description
-        if not self.cli_description.strip():
-            raise ValueError("CLI description must not be empty.")
-        if not self.mcp_description.strip():
-            raise ValueError("MCP description must not be empty.")
+        # Check description
+        if not self.description.strip():
+            raise ValueError("Description must not be empty.")
 
         # Check default timeout
         if (
