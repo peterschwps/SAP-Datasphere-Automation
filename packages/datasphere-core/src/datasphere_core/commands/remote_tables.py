@@ -516,10 +516,7 @@ CONFIGURE_REMOTE_TABLE_STATISTICS_COMMAND = CommandDefinition(
     request_type=ConfigureRemoteTableStatisticsRequest,
     result_type=ConfigureRemoteTableStatisticsResult,
     handler=configure_remote_table_statistics,
-    cli_description="Configure statistics for one remote table.",
-    mcp_description=(
-        "Configure statistics for one SAP Datasphere remote table."
-    ),
+    description="Configure statistics for one remote table.",
     default_timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
     maximum_timeout_seconds=_MAXIMUM_TIMEOUT_SECONDS,
     read_only=False,
@@ -533,10 +530,8 @@ CONFIGURE_REMOTE_TABLE_STATISTICS_BATCH_COMMAND = CommandDefinition(
     request_type=ConfigureRemoteTableStatisticsBatchRequest,
     result_type=ConfigureRemoteTableStatisticsBatchResult,
     handler=configure_remote_table_statistics_batch,
-    cli_description="Configure remote-table statistics concurrently.",
-    mcp_description=(
-        "Configure SAP Datasphere remote-table statistics with bounded "
-        "concurrency."
+    description=(
+        "Configure statistics for multiple remote tables with concurrency."
     ),
     default_timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
     maximum_timeout_seconds=_MAXIMUM_TIMEOUT_SECONDS,
@@ -551,8 +546,7 @@ REFRESH_REMOTE_TABLE_STATISTICS_COMMAND = CommandDefinition(
     request_type=RefreshRemoteTableStatisticsRequest,
     result_type=RefreshRemoteTableStatisticsResult,
     handler=refresh_remote_table_statistics,
-    cli_description="Refresh statistics for one remote table.",
-    mcp_description="Refresh statistics for one SAP Datasphere remote table.",
+    description="Refresh statistics for one remote table.",
     default_timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
     maximum_timeout_seconds=_MAXIMUM_TIMEOUT_SECONDS,
     read_only=False,
@@ -566,10 +560,8 @@ REFRESH_REMOTE_TABLE_STATISTICS_BATCH_COMMAND = CommandDefinition(
     request_type=RefreshRemoteTableStatisticsBatchRequest,
     result_type=RefreshRemoteTableStatisticsBatchResult,
     handler=refresh_remote_table_statistics_batch,
-    cli_description="Refresh remote-table statistics concurrently.",
-    mcp_description=(
-        "Refresh SAP Datasphere remote-table statistics with bounded "
-        "concurrency."
+    description=(
+        "Refresh statistics for multiple remote tables with concurrency."
     ),
     default_timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
     maximum_timeout_seconds=_MAXIMUM_TIMEOUT_SECONDS,
