@@ -125,7 +125,8 @@ def _validate_timeout(timeout_seconds: float) -> None:
         isinstance(timeout_seconds, bool)
         or not isinstance(timeout_seconds, (int, float))
         or not math.isfinite(timeout_seconds)
-        or not 0 < timeout_seconds
+        or not 0
+        < timeout_seconds
         <= MAXIMUM_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS
     ):
         raise ValueError(
@@ -176,7 +177,7 @@ class AnalyticalModelReference:
     """
     Reference to one analytical model.
     """
-    analytical_model_name: str
+    name: str
     space: str
 
     def __post_init__(self) -> None:
@@ -186,9 +187,7 @@ class AnalyticalModelReference:
         Raises:
             ValueError: If either identifier is empty.
         """
-        _validate_non_empty(
-            self.analytical_model_name, "Analytical model name"
-        )
+        _validate_non_empty(self.name, "Name")
         _validate_non_empty(self.space, "Space")
 
 
