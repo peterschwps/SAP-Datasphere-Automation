@@ -1,3 +1,3 @@
-from datasphere_cli.cli.app import main
+# ruff: noqa: F401
 
-__all__ = ["main"]
+from datasphere_cli.cli.app import main

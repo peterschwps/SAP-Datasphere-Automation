@@ -7,59 +7,47 @@ from dataclasses import asdict
 from typing import Literal
 
 from datasphere_core import (
-    TASKCHAIN_START_COMMAND,
+    COMMANDS,
     CommandContext,
     CommandError,
     DatasphereSession,
-    StartTaskChainRequest,
-    StartTaskChainResult,
-    start_task_chain,
+)
+from datasphere_core.models.task_chains import (
+    RunTaskChainRequest,
+    RunTaskChainResult,
 )
 
-# TODO: Implement commands incl. help with Typer
+from datasphere_cli.actions.dispatch import dispatch_command
+
+_COMMAND = "task_chains.run"
+
 
 def _create_parser() -> argparse.ArgumentParser:
-    """
-    Creates an ArgumentParser for the CLI commands.
-
-    Returns:
-        argparse.ArgumentParser: ArgumentParser instance with the configured
-                                 commands and options.
-    """
+    """Create the parser for canonical direct CLI commands."""
     parser = argparse.ArgumentParser(prog="datasphere")
-
-    # Define the 'taskchain' command and its subcommands
     domains = parser.add_subparsers(dest="domain", required=True)
-    taskchain = domains.add_parser(
-        "taskchain",
+    task_chains = domains.add_parser(
+        "task-chains",
         help="Manage task chains.",
     )
-    taskchain_actions = taskchain.add_subparsers(
-        dest="action",
-        required=True,
+    actions = task_chains.add_subparsers(dest="action", required=True)
+    run = actions.add_parser(
+        "run",
+        help=COMMANDS[_COMMAND].description,
     )
-    start = taskchain_actions.add_parser(
-        "start",
-        help=TASKCHAIN_START_COMMAND.cli_description,
-    )
-
-    # Define arguments for the 'start' subcommand
-    start.add_argument(
-        "chain",
-        help="Technical name of the task chain."
-    )
-    start.add_argument(
+    run.add_argument("chain", help="Technical name of the task chain.")
+    run.add_argument(
         "--space",
         required=True,
         help="Technical name of the Datasphere space.",
     )
-    start.add_argument(
+    run.add_argument(
         "--timeout",
         type=float,
-        default=TASKCHAIN_START_COMMAND.default_timeout_seconds,
+        default=COMMANDS[_COMMAND].default_timeout_seconds,
         help="Maximum runtime in seconds.",
     )
-    start.add_argument(
+    run.add_argument(
         "--output",
         choices=("text", "json"),
         default="text",
@@ -68,84 +56,62 @@ def _create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def execute_task_chain(
-    request: StartTaskChainRequest,
-) -> StartTaskChainResult:
-    """
-    Executes a task-chain command using the configured tenant.
+async def run_task_chain(
+    request: RunTaskChainRequest,
+) -> RunTaskChainResult:
+    """Execute the task-chain command for the configured tenant.
 
     Args:
-        request (StartTaskChainRequest): Object with parameters required to
-                                         execute the task.
-
-    Raises:
-        CommandError: If no settings file is found.
+        request (RunTaskChainRequest): Task-chain name, space, and timeout.
 
     Returns:
-        StartTaskChainResult: Object with the result of the executed task.
+        RunTaskChainResult: Task-chain execution result.
     """
-    from datasphere_cli.settings import (
-        SETTINGS_FILE,
-        build_session_config,
-    )
+    from datasphere_cli.settings import SETTINGS_FILE, build_session_config
 
-    # Check if the settings file exists
     if not SETTINGS_FILE.exists():
         raise CommandError(
             "Settings are not initialized. Start 'datasphere' once to "
             "create the settings file."
         )
 
-    # Build the session configuration and execute the task chain
     config = build_session_config()
     async with DatasphereSession(config) as session:
         await session.authenticate(interactive=True)
-        return await start_task_chain(
-            context=CommandContext(client=session.client),
-            request=request,
+        return await dispatch_command(
+            _COMMAND,
+            CommandContext(client=session.client),
+            request,
+            RunTaskChainRequest,
+            RunTaskChainResult,
         )
 
 
 def _print_result(
-        result: StartTaskChainResult,
-        output: Literal['text', 'json']
-    ) -> None:
-    """
-    Prints the result of an executed task. Formats JSON output (e.g. to use it
-    when calling the task from an MCP) or prints a human-readable message
-    otherwise.
-
-    Args:
-        result (StartTaskChainResult): Result of the executed task.
-        output (Literal['text', 'json'] ): Output format. Formats JSON if
-                                           specified, otherwise prints a
-                                           human-readable message.
-    """
+    result: RunTaskChainResult,
+    output: Literal["text", "json"],
+) -> None:
     if output == "json":
         print(json.dumps(asdict(result), separators=(",", ":")))
-    else:
-        print(
-            f"Task chain '{result.chain}' in '{result.space}': {result.status}"
-        )
+        return
+    print(
+        f"Task chain '{result.chain}' in '{result.space}': {result.status}"
+    )
 
 
 def run(argv: Sequence[str]) -> int:
-    """
-    Runs a direct command and returns its process exit code.
+    """Run a direct command and return its process exit code.
 
     Args:
-        argv (Sequence[str]): Arguments provided when calling a command.
+        argv (Sequence[str]): Command-line arguments without the executable.
 
     Returns:
-        int: Exit code of the executed command. 0 if successful, otherwise 1.
+        int: Process exit code; zero indicates a completed command.
     """
-    # Parse arguments
     parser = _create_parser()
     args = parser.parse_args(argv)
-
-    # Create command request from parsed arguments
     try:
-        request = StartTaskChainRequest(
+        request = RunTaskChainRequest(
             chain=args.chain,
             space=args.space,
             timeout_seconds=args.timeout,
@@ -153,9 +119,8 @@ def run(argv: Sequence[str]) -> int:
     except ValueError as error:
         parser.error(str(error))
 
-    # Execute command
     try:
-        result = asyncio.run(execute_task_chain(request))
+        result = asyncio.run(run_task_chain(request))
     except (CommandError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
@@ -163,6 +128,5 @@ def run(argv: Sequence[str]) -> int:
         print(f"Unexpected error: {error}", file=sys.stderr)
         return 1
 
-    # Print result and return exit code
     _print_result(result, args.output)
     return 0 if result.status == "completed" else 1

@@ -1,172 +1,198 @@
 import csv
-import json
-import os
-import os.path
-import sys
-
-from datasphere_cli.logging import logger
-
-# Working directory of the program (task/export/result files)
-_PROJECT_PATH = os.getcwd()
-
-# Directories
-ALL_PATHS = {
-    "EXPORTS": "datasphere/exports",
-    "RESULTS": "datasphere/results",
-    "TASKS": "datasphere/tasks",
-}
-
-# Files
-ALL_FILES = {
-    "ANALYTICAL_MODELS_ALL_VIEWS": {
-        "name": "analytical_models_with_all_views.json",
-        "path": ALL_PATHS["EXPORTS"],
-        "columns": None,
-    },
-    "ANALYTICAL_MODELS_ALL_VIEWS_IN_SPACE": {
-        "name": "analytical_models_with_all_views_in_space.json",
-        "path": ALL_PATHS["EXPORTS"],
-        "columns": None,
-    },
-    "ANALYTICAL_MODELS_ALL_VIEWS_PERSISTENCE_TIME": {
-        "name": "analytical_models_to_check_view_persistence_time.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["modelname", "space"],
-    },
-    "ANALYTICAL_MODELS_ALL_VIEWS_PERSISTENCE_TIME_RESULT": {
-        "name": "analytical_models_with_all_views_and_persistence_time.json",
-        "path": ALL_PATHS["EXPORTS"],
-        "columns": None,
-    },
-    "TASK_CHAIN_RUN": {
-        "name": "task_chains_to_run.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["entity", "space"],
-    },
-    "TASK_CHAIN_RUN_RESULT": {
-        "name": "task_chains_completed.csv",
-        "path": ALL_PATHS["RESULTS"],
-        "columns": ["entity", "space", "isCompleted", "runtime"],
-    },
-    "VIEW_ANALYSE": {
-        "name": "best_views_to_persist.csv",
-        "path": ALL_PATHS["EXPORTS"],
-        "columns": ["entity", "space", "businessName", "isPersisted"],
-    },
-    "VIEW_ATTRIBUTE": {
-        "name": "view_attributes.csv",
-        "path": ALL_PATHS["EXPORTS"],
-        "columns": ["entity", "space", "businessName", "attribute"],
-    },
-    "VIEW_PARTITIONING_CREATE": {
-        "name": "views_to_create_partitions.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["entity", "space", "attribute"],
-    },
-    "VIEW_PARTITIONING_CREATE_RESULT": {
-        "name": "views_partitions_created.csv",
-        "path": ALL_PATHS["RESULTS"],
-        "columns": ["entity", "space", "attribute", "createdPartition"],
-    },
-    "VIEW_PARTITIONING_DELETE": {
-        "name": "views_to_delete_partitions.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["entity", "space"],
-    },
-    "VIEW_PARTITIONING_DELETE_RESULT": {
-        "name": "views_partitions_deleted.csv",
-        "path": ALL_PATHS["RESULTS"],
-        "columns": ["entity", "space", "removedPartition"],
-    },
-    "VIEW_PERSIST": {
-        "name": "views_to_persist.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["entity", "space"],
-    },
-    "VIEW_PERSIST_RESULT": {
-        "name": "views_persisted.csv",
-        "path": ALL_PATHS["RESULTS"],
-        "columns": ["entity", "space", "isPersisted", "runtime"],
-    },
-    "VIEW_UNPERSIST": {
-        "name": "views_to_unpersist.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["entity", "space"],
-    },
-    "VIEW_UNPERSIST_RESULT": {
-        "name": "views_unpersisted.csv",
-        "path": ALL_PATHS["RESULTS"],
-        "columns": ["entity", "space", "isRemoved"],
-    },
-    "VIEW_PARTITION_LOCK": {
-        "name": "views_to_lock_partitions.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["entity", "space"],
-    },
-    "VIEW_PARTITION_LOCK_RESULT": {
-        "name": "views_partitions_locked.csv",
-        "path": ALL_PATHS["RESULTS"],
-        "columns": ["entity", "space", "lockedPartitions"],
-    },
-    "VIEW_PARTITION_UNLOCK": {
-        "name": "views_to_unlock_partitions.csv",
-        "path": ALL_PATHS["TASKS"],
-        "columns": ["entity", "space"],
-    },
-    "VIEW_PARTITION_UNLOCK_RESULT": {
-        "name": "views_partitions_unlocked.csv",
-        "path": ALL_PATHS["RESULTS"],
-        "columns": ["entity", "space", "unlockedPartitions"],
-    },
-}
+import hashlib
+import re
+import unicodedata
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
 
 
-def file_setup():
-    """
-    Creates all required directories and files for the program. If new task
-    files were created, the program exits and prompts the user to restart.
-    """
-    # Set absolute file paths
-    for name, details in ALL_FILES.items():
-        ALL_FILES[name]["absolute_path"] = os.path.join(
-            _PROJECT_PATH, details["path"], details["name"]
+@dataclass(frozen=True, slots=True)
+class FileDefinition:
+    """Definition of one command-owned workspace file."""
+
+    filename: str
+    columns: tuple[str, ...] | None = None
+
+
+TASK_FILES: Mapping[str, FileDefinition] = MappingProxyType(
+    {
+        "analytical_models.measure_view_persistence_batch": FileDefinition(
+            "analytical_models_measure_view_persistence.csv",
+            ("analytical_model", "space"),
+        ),
+        "task_chains.run_batch": FileDefinition(
+            "task_chains_run.csv",
+            ("task_chain", "space"),
+        ),
+        "views.create_partitioning_batch": FileDefinition(
+            "views_create_partitioning.csv",
+            ("view", "space", "attribute"),
+        ),
+        "views.delete_partitioning_batch": FileDefinition(
+            "views_delete_partitioning.csv",
+            ("view", "space"),
+        ),
+        "views.persist_batch": FileDefinition(
+            "views_persist.csv",
+            ("view", "space"),
+        ),
+        "views.unpersist_batch": FileDefinition(
+            "views_unpersist.csv",
+            ("view", "space"),
+        ),
+        "views.lock_partitions_batch": FileDefinition(
+            "views_lock_partitions.csv",
+            ("view", "space"),
+        ),
+        "views.unlock_partitions_batch": FileDefinition(
+            "views_unlock_partitions.csv",
+            ("view", "space"),
+        ),
+    }
+)
+
+RESULT_FILES: Mapping[str, FileDefinition] = MappingProxyType(
+    {
+        "analytical_models.get_view_dependencies_batch": FileDefinition(
+            "analytical_models_get_view_dependencies.json"
+        ),
+        "analytical_models.measure_view_persistence_batch": FileDefinition(
+            "analytical_models_measure_view_persistence.json"
+        ),
+        "task_chains.run_batch": FileDefinition(
+            "task_chains_run.csv",
+            (
+                "task_chain",
+                "space",
+                "status",
+                "sap_status",
+                "log_id",
+                "runtime_seconds",
+            ),
+        ),
+        "views.find_persistence_candidates_batch": FileDefinition(
+            "views_find_persistence_candidates.csv",
+            (
+                "source_view",
+                "source_space",
+                "view",
+                "space",
+                "business_name",
+                "score",
+                "is_persisted",
+                "status",
+                "log_id",
+            ),
+        ),
+        "views.find_attribute_matches_batch": FileDefinition(
+            "views_find_attribute_matches.csv",
+            ("view", "space", "business_name", "attribute", "status"),
+        ),
+        "views.create_partitioning_batch": FileDefinition(
+            "views_create_partitioning.csv",
+            ("view", "space", "attribute", "status"),
+        ),
+        "views.delete_partitioning_batch": FileDefinition(
+            "views_delete_partitioning.csv",
+            ("view", "space", "status"),
+        ),
+        "views.persist_batch": FileDefinition(
+            "views_persist.csv",
+            (
+                "view",
+                "space",
+                "status",
+                "sap_status",
+                "log_id",
+                "runtime_seconds",
+            ),
+        ),
+        "views.unpersist_batch": FileDefinition(
+            "views_unpersist.csv",
+            (
+                "view",
+                "space",
+                "status",
+                "sap_status",
+                "log_id",
+                "runtime_seconds",
+            ),
+        ),
+        "views.lock_partitions_batch": FileDefinition(
+            "views_lock_partitions.csv",
+            ("view", "space", "status"),
+        ),
+        "views.unlock_partitions_batch": FileDefinition(
+            "views_unlock_partitions.csv",
+            ("view", "space", "status"),
+        ),
+    }
+)
+
+
+def workspace_root(root: str | Path | None = None) -> Path:
+    """Resolve the workspace root for one operation."""
+    return Path.cwd() if root is None else Path(root)
+
+
+def tasks_path(root: str | Path | None = None) -> Path:
+    return workspace_root(root) / "datasphere" / "tasks"
+
+
+def results_path(root: str | Path | None = None) -> Path:
+    return workspace_root(root) / "datasphere" / "results"
+
+
+def task_path(command: str, root: str | Path | None = None) -> Path:
+    return tasks_path(root) / TASK_FILES[command].filename
+
+
+_MAX_SPACE_SLUG_LENGTH = 80
+_SPACE_HASH_LENGTH = 10
+
+
+def safe_space_slug(space: str) -> str:
+    """Return a bounded, traversal-safe filename component for a space."""
+    normalized = unicodedata.normalize("NFKD", space)
+    ascii_space = normalized.encode("ascii", "ignore").decode("ascii")
+    readable = re.sub(r"[^A-Za-z0-9_-]+", "_", ascii_space).strip("_-")
+    digest = hashlib.sha256(space.encode("utf-8")).hexdigest()
+    hash_suffix = digest[:_SPACE_HASH_LENGTH]
+    readable_length = _MAX_SPACE_SLUG_LENGTH - len(hash_suffix) - 1
+    readable = readable[:readable_length].rstrip("_-") or "space"
+    return f"{readable}_{hash_suffix}"
+
+
+def result_path(
+    command: str,
+    root: str | Path | None = None,
+    *,
+    space: str | None = None,
+) -> Path:
+    definition = RESULT_FILES[command]
+    filename = definition.filename
+    if space is not None:
+        file_path = Path(filename)
+        filename = (
+            f"{file_path.stem}_{safe_space_slug(space)}{file_path.suffix}"
         )
+    return results_path(root) / filename
 
-    # Create missing directories
-    for directory in ALL_PATHS.values():
-        os.makedirs(directory, exist_ok=True)
 
-    # Create missing task files
-    new_task_files_created = False
-    for file in filter(
-        lambda file: file["path"] == ALL_PATHS["TASKS"],
-        ALL_FILES.values(),
-    ):
-        if not os.path.isfile(file["absolute_path"]):
-            new_task_files_created = True  # if new file was created
-            with open(file["absolute_path"], "w", encoding="utf-8") as f:
-                if file["columns"] is not None:
-                    writer = csv.DictWriter(f, fieldnames=file["columns"])
-                    writer.writeheader()
-
-    # Check if restart is required
-    if new_task_files_created:
-        logger.info("New files were created. Please restart the program.")
-        sys.exit()
-
-    # Create / overwrite all export and result files
-    for file in filter(
-        lambda file: file["path"]
-        in [
-            ALL_PATHS["EXPORTS"],
-            ALL_PATHS["RESULTS"],
-        ],
-        ALL_FILES.values(),
-    ):
-        if "csv" in file["name"]:
-            with open(file["absolute_path"], "w", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=file["columns"])
-                writer.writeheader()
-        elif "json" in file["name"]:
-            with open(file["absolute_path"], "w", encoding="utf-8") as f:
-                json.dump({}, f, indent=4)
+def file_setup(root: str | Path | None = None) -> None:
+    """Create workspace directories and any missing task templates."""
+    task_directory = tasks_path(root)
+    results_path(root).mkdir(parents=True, exist_ok=True)
+    task_directory.mkdir(parents=True, exist_ok=True)
+    for command, definition in TASK_FILES.items():
+        path = task_path(command, root)
+        if path.exists():
+            continue
+        with path.open("w", newline="", encoding="utf-8") as task_file:
+            writer = csv.DictWriter(
+                task_file,
+                fieldnames=definition.columns or (),
+            )
+            writer.writeheader()
