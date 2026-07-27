@@ -1,9 +1,10 @@
 import logging
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import ValidationError
 from rich.text import Text
@@ -26,7 +27,8 @@ try:
 except PackageNotFoundError:
     _APP_VERSION = "dev"
 
-from datasphere_core import DatasphereSession
+from datasphere_core import CommandContext, DatasphereSession
+from datasphere_core.models.common import CommandProgress
 
 from datasphere_cli import actions
 from datasphere_cli.cli.logo import ASCII_LOGO
@@ -43,133 +45,127 @@ from datasphere_cli.settings import (
 from datasphere_cli.utils.tokens import TokenStore
 
 # Mapping of all menu categories, sub-categories and its options
-type MenuOption = dict[str, Callable]
+type Action = Callable[..., Awaitable[object]]
+type MenuOption = dict[str, Action]
 type SubCategory = dict[str, MenuOption]
+
+type ParameterType = Literal["str", "optional_str", "int", "bool", "choice"]
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterDefinition:
+    """Definition of one Textual parameter prompt."""
+
+    name: str
+    label: str
+    type: ParameterType
+    choices: tuple[str, ...] = ()
+    default: object = None
+
+
 MENU_OPTIONS: dict[str, MenuOption | SubCategory] = {
     "Analytical Models": {
-        "Export all models with views": (
-            actions.get_all_views_for_analytical_models
+        "Export model view dependencies": (
+            actions.export_analytical_model_view_dependencies
         ),
-        "Export all models with views (by space)": (
-            actions.get_all_views_for_analytical_models_in_space
-        ),
-        "Save runtime of all views of models": (
-            actions.check_runtime_for_all_views_of_analytical_models
+        "Measure model view persistence from file": (
+            actions.measure_analytical_model_view_persistence_from_file
         ),
     },
     "Remote Tables": {
-        "Create statistics for all tables": actions.create_statistics,
-        "Refresh statistics for all tables": actions.refresh_statistics,
+        "Configure statistics for all tables": (
+            actions.configure_remote_table_statistics
+        ),
+        "Refresh statistics for all tables": (
+            actions.refresh_remote_table_statistics
+        ),
     },
     "Task Chains": {
-        "Run task chains": actions.run_task_chains,
+        "Run task chains from file": actions.run_task_chains_from_file,
     },
     "Views": {
         "Analytics": {
-            "Export views with persistence score 10": (
-                actions.create_view_analytics
+            "Export persistence candidates": (
+                actions.export_view_persistence_candidates
             ),
-            "Export views where attribute contains": (
-                actions.get_all_views_where_attribute_contains
+            "Export matching attributes": (
+                actions.export_view_attribute_matches
             ),
         },
         "Partitions": {
-            "Create Partitions": actions.create_partitioning_for_views,
-            "Remove Partitions": actions.remove_partitioning_for_views,
-            "Lock Partitions until Year": actions.lock_partitions_until_year,
-            "Unlock All Partitions": actions.unlock_all_partitions,
+            "Create partitions from file": (
+                actions.create_view_partitioning_from_file
+            ),
+            "Delete partitions from file": (
+                actions.delete_view_partitioning_from_file
+            ),
+            "Lock partitions from file": (
+                actions.lock_view_partitions_from_file
+            ),
+            "Unlock partitions from file": (
+                actions.unlock_view_partitions_from_file
+            ),
         },
         "Persistence": {
-            "Persist Views": actions.persist_views,
-            "Unpersist Views": actions.unpersist_views,
+            "Persist views from file": actions.persist_views_from_file,
+            "Unpersist views from file": actions.unpersist_views_from_file,
         },
     },
 }
 
-# Default thread count per action (all others default to 1)
-DEFAULT_THREAD_COUNTS: dict[Callable, int] = {
-    actions.create_statistics: 5,
-    actions.refresh_statistics: 5,
-}
+DEFAULT_MAX_CONCURRENCY = 4
 
 # Method-specific parameter definitions
-# List of dicts, where every dict represents a question/prompt
-# Available options:
-#   name     – the method's keyword argument name
-#   label    – text to display above the entry form
-#   type     – "str" | "int" | "bool" | "choice"
-#   choices  – list of strings (only for type "choice")
-#   default  – optional default value
-PARAM_DEFINITIONS: dict[Callable, list[dict]] = {
-    actions.get_all_views_for_analytical_models: [
-        {
-            "name": "skip_duplicates",
-            "label": "Skip duplicates?",
-            "type": "bool",
-            "default": False,
-        },
+PARAM_DEFINITIONS: dict[Action, list[ParameterDefinition]] = {
+    actions.export_analytical_model_view_dependencies: [
+        ParameterDefinition(
+            "space",
+            "Space (leave empty for all spaces):",
+            "optional_str",
+        ),
+        ParameterDefinition(
+            "deduplicate_views",
+            "Deduplicate views?",
+            "bool",
+            default=False,
+        ),
     ],
-    actions.get_all_views_for_analytical_models_in_space: [
-        {
-            "name": "space_name",
-            "label": "Space name (e.g. CENTRAL_IT):",
-            "type": "str",
-        },
-        {
-            "name": "skip_duplicates",
-            "label": "Skip duplicates?",
-            "type": "bool",
-            "default": False,
-        },
+    actions.configure_remote_table_statistics: [
+        ParameterDefinition("space", "Space:", "str"),
+        ParameterDefinition(
+            "statistics_type",
+            "Statistics type",
+            "choice",
+            choices=("RECORD_COUNT", "SIMPLE", "HISTOGRAM"),
+            default="HISTOGRAM",
+        ),
     ],
-    actions.create_statistics: [
-        {
-            "name": "statistics_type",
-            "label": "Statistics type",
-            "type": "choice",
-            "choices": ["RECORD_COUNT", "SIMPLE", "HISTOGRAM"],
-            "default": "HISTOGRAM",
-        },
+    actions.refresh_remote_table_statistics: [
+        ParameterDefinition("space", "Space:", "str"),
     ],
-    actions.get_all_views_where_attribute_contains: [
-        {
-            "name": "word",
-            "label": "Search word:",
-            "type": "str",
-        },
+    actions.export_view_attribute_matches: [
+        ParameterDefinition(
+            "attribute_substring",
+            "Attribute substring:",
+            "str",
+        ),
     ],
-    actions.create_partitioning_for_views: [
-        {
-            "name": "partition_start",
-            "label": "Lower bound of first partition (>=):",
-            "type": "int",
-        },
-        {
-            "name": "partition_end",
-            "label": "Upper bound of last partition (<):",
-            "type": "int",
-        },
-        {
-            "name": "overwrite_existing_partitions",
-            "label": "Overwrite existing partitions?",
-            "type": "bool",
-            "default": False,
-        },
+    actions.create_view_partitioning_from_file: [
+        ParameterDefinition("start_year", "Start year:", "int"),
+        ParameterDefinition("end_year", "End year:", "int"),
+        ParameterDefinition(
+            "overwrite_existing",
+            "Overwrite existing partitions?",
+            "bool",
+            default=False,
+        ),
     ],
-    actions.lock_partitions_until_year: [
-        {
-            "name": "year",
-            "label": "Year (locked up to and including):",
-            "type": "int",
-        },
-    ],
-    actions.persist_views: [
-        {
-            "name": "timer",
-            "label": "Save runtime?",
-            "type": "bool",
-            "default": False,
-        },
+    actions.lock_view_partitions_from_file: [
+        ParameterDefinition(
+            "until_year",
+            "Year (locked up to and including):",
+            "int",
+        ),
     ],
 }
 
@@ -365,7 +361,7 @@ class EntryScreen(BaseScreen):
             parts = option_id[4:].split("::")
             if len(parts) == 2:
                 category, action = parts
-                method = cast(Callable, MENU_OPTIONS[category][action])
+                method = cast(Action, MENU_OPTIONS[category][action])
             elif len(parts) == 3:
                 category, subcat, action = parts
                 subcontent = cast(SubCategory, MENU_OPTIONS[category])
@@ -381,22 +377,23 @@ class ParamScreen(BaseScreen):
     Shows one question at a time (wizard-style).
     """
 
-    def __init__(self, action: Callable) -> None:
+    def __init__(self, action: Action) -> None:
         super().__init__()
         self._action = action
         self._step: int = 0
         self._answers: dict[str, Any] = {}
 
-        # Build list with all questions/prompts
-        # Thread count is always the final prompt before starting the method
-        self._steps: list[dict] = list(PARAM_DEFINITIONS.get(action, []))
+        # Build the prompts and always ask for bounded concurrency last.
+        self._steps: list[ParameterDefinition] = list(
+            PARAM_DEFINITIONS.get(action, [])
+        )
         self._steps.append(
-            {
-                "name": "thread_count",
-                "label": "Number of threads:",
-                "type": "int",
-                "default": DEFAULT_THREAD_COUNTS.get(action, 1),
-            }
+            ParameterDefinition(
+                "max_concurrency",
+                "Maximum concurrency:",
+                "int",
+                default=DEFAULT_MAX_CONCURRENCY,
+            )
         )
 
     def compose_content(self) -> ComposeResult:
@@ -422,17 +419,22 @@ class ParamScreen(BaseScreen):
         """
         await self._show_step()
 
-    def _build_widget(self, step: dict) -> Input | OptionList:
+    def _build_widget(
+        self,
+        step: ParameterDefinition,
+    ) -> Input | OptionList:
         """
         Builds the input widget for the current step, pre-filled with any
         previously entered answer or the parameter default.
         """
-        name = step["name"]
-        param_type = step["type"]
-        value = self._answers.get(name, step.get("default", ""))
+        name = step.name
+        param_type = step.type
+        value = self._answers.get(name, step.default)
 
         # Input prompt for strings
-        if param_type in ("str", "int"):
+        if param_type in ("str", "optional_str", "int"):
+            if param_type == "optional_str" and value is None:
+                value = ""
             return Input(
                 value=str(value) if value != "" else "",
                 id="current-widget",
@@ -448,7 +450,7 @@ class ParamScreen(BaseScreen):
 
         # Option list for type "choice"
         return OptionList(
-            *[Option(c, id=f"opt-{i}") for i, c in enumerate(step["choices"])],
+            *[Option(c, id=f"opt-{i}") for i, c in enumerate(step.choices)],
             id="current-widget",
         )
 
@@ -464,7 +466,7 @@ class ParamScreen(BaseScreen):
         self.query_one("#step-counter", Static).update(
             f"Step {self._step + 1} of {len(self._steps)}"
         )
-        self.query_one("#param-label", Static).update(f"\n{step['label']}\n")
+        self.query_one("#param-label", Static).update(f"\n{step.label}\n")
 
         # Reset any error messages
         self.query_one("#param-error", Static).update("")
@@ -493,15 +495,16 @@ class ParamScreen(BaseScreen):
         # Handle option lists and restore previous selection if one was made
         # already, else set to default
         elif isinstance(widget, OptionList):
-            ptype = step["type"]
+            ptype = step.type
             if ptype == "bool":
                 val = self._answers.get(
-                    step["name"], step.get("default", True)
+                    step.name,
+                    step.default if step.default is not None else True,
                 )
                 widget.highlighted = 0 if bool(val) else 1
             elif ptype == "choice":
-                current = self._answers.get(step["name"], step.get("default"))
-                choices = step["choices"]
+                current = self._answers.get(step.name, step.default)
+                choices = step.choices
                 widget.highlighted = (
                     choices.index(current) if current in choices else 0
                 )
@@ -517,16 +520,18 @@ class ParamScreen(BaseScreen):
             Validated value or None on validation error.
         """
         step = self._steps[self._step]
-        param_type = step["type"]
+        param_type = step.type
 
         # Clear error message
         error = self.query_one("#param-error", Static)
         error.update("")
 
         # Check for errors
-        if param_type in ("str", "int"):
+        if param_type in ("str", "optional_str", "int"):
             raw = self.query_one("#current-widget", Input).value.strip()
-            if param_type == "str":
+            if param_type in ("str", "optional_str"):
+                if param_type == "optional_str" and not raw:
+                    return None
                 if not raw:
                     error.update("This field must not be empty.")
                     return None
@@ -547,7 +552,7 @@ class ParamScreen(BaseScreen):
         if idx is None:
             error.update("Please select an option.")
             return None
-        return step["choices"][idx]
+        return step.choices[idx]
 
     async def _handle_confirm(self) -> None:
         """
@@ -555,28 +560,20 @@ class ParamScreen(BaseScreen):
         step or pushes ExecutionScreen on the final step.
         """
         # Check for errors (value=None)
+        step = self._steps[self._step]
         value = self._validate_current()
-        if value is None:
+        if value is None and step.type != "optional_str":
             return
 
         # Get current step and add answer
-        step = self._steps[self._step]
-        self._answers[step["name"]] = value
+        self._answers[step.name] = value
 
         # On final step: Convert all answers to pass it as args to the method
         if self._step == len(self._steps) - 1:
             params = dict(self._answers)
 
-            # Convert partition range to the list expected by the method
-            if "partition_start" in params and "partition_end" in params:
-                start = params.pop("partition_start")
-                end = params.pop("partition_end")
-                params["partitions"] = [str(y) for y in range(start, end + 1)]
-
             # Start ExecutionScreen to execute method
-            self.app.push_screen(
-                ExecutionScreen(self._action, params)
-            )
+            self.app.push_screen(ExecutionScreen(self._action, params))
 
         # On any other steps: increase step count and display next step
         else:
@@ -625,7 +622,7 @@ class ExecutionScreen(BaseScreen):
 
     def __init__(
         self,
-        action: Callable,
+        action: Action,
         params: dict[str, Any],
     ) -> None:
         super().__init__()
@@ -677,14 +674,29 @@ class ExecutionScreen(BaseScreen):
             await session.authenticate(
                 interactive=True,
             )
-            await self._action(session.client, **self._params)
+
+            async def report_progress(update: CommandProgress) -> None:
+                message = update.message or update.phase.replace("_", " ")
+                if update.completed_items is not None:
+                    total = (
+                        str(update.total_items)
+                        if update.total_items is not None
+                        else "?"
+                    )
+                    message = f"{message}: {update.completed_items}/{total}"
+                log_widget.write(f"{update.command}: {message}")
+
+            context = CommandContext(
+                client=session.client,
+                progress_callback=report_progress,
+            )
+            await self._action(context, **self._params)
             status.update("Done. Press Enter or Escape to return to the menu.")
 
         # Stop on any unhandled exceptions
         except Exception as e:
             status.update(
-                f"[b][#AA0808]Error: {e}[/]\n"
-                f"Press Enter or Escape to return."
+                f"[b][#AA0808]Error: {e}[/]\nPress Enter or Escape to return."
             )
 
         # Remove handler to prevent multiple handlers co-existing if this
@@ -778,9 +790,14 @@ class DatasphereApp(App):
     ]
 
     # Override unused bindings
-    def action_copy_text(self) -> None: pass
-    def action_focus_next(self) -> None: pass
-    def action_focus_previous(self) -> None: pass
+    def action_copy_text(self) -> None:
+        pass
+
+    def action_focus_next(self) -> None:
+        pass
+
+    def action_focus_previous(self) -> None:
+        pass
 
     def action_open_settings(self) -> None:
         self.push_screen(SettingsScreen())

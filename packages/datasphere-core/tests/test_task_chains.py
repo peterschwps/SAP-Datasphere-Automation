@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from typing import Any, Protocol, cast
 
@@ -7,14 +8,23 @@ from datasphere_api import (
     TaskChainCancelled,
     TaskChainTimeout,
 )
-from datasphere_core import (
-    CommandCancelledError,
-    CommandContext,
+from datasphere_core import CommandCancelledError, CommandContext
+from datasphere_core.commands.task_chains import (
+    run_task_chain,
+    run_task_chain_batch,
+)
+from datasphere_core.models.common import (
+    MAXIMUM_BATCH_CONCURRENCY,
+    BatchSummary,
     CommandProgress,
-    CommandTimeoutError,
-    StartTaskChainRequest,
-    StartTaskChainResult,
-    start_task_chain,
+    CommandProgressPhase,
+)
+from datasphere_core.models.task_chains import (
+    RunTaskChainBatchRequest,
+    RunTaskChainBatchResult,
+    RunTaskChainRequest,
+    RunTaskChainResult,
+    TaskChainStatus,
 )
 
 
@@ -35,7 +45,7 @@ def _client(run: RunTaskChain) -> DatasphereClient:
     )
 
 
-async def test_start_task_chain_maps_completed_result() -> None:
+async def test_run_task_chain_maps_completed_result() -> None:
     async def run(
         chain: str,
         space: str,
@@ -44,33 +54,39 @@ async def test_start_task_chain_maps_completed_result() -> None:
     ) -> tuple[bool, dict[str, Any]]:
         assert (chain, space) == ("CHAIN_A", "SPACE_A")
         assert timeout_seconds == 3600.0
-        return True, {"status": "COMPLETED", "runTime": 65432}
+        return True, {
+            "status": "COMPLETED",
+            "runTime": 65432,
+            "logId": 123,
+        }
 
-    result = await start_task_chain(
+    result = await run_task_chain(
         CommandContext(client=_client(run)),
-        StartTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
+        RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
     )
 
-    assert result == StartTaskChainResult(
+    assert result == RunTaskChainResult(
         chain="CHAIN_A",
         space="SPACE_A",
-        status="completed",
+        status=TaskChainStatus.COMPLETED,
         sap_status="COMPLETED",
+        log_id="123",
         runtime_seconds=65,
     )
 
 
 @pytest.mark.parametrize(
-    ("details", "status", "sap_status"),
+    ("details", "expected_status", "sap_status", "log_id"),
     [
-        ({}, "start_failed", None),
-        ({"status": "FAILED"}, "failed", "FAILED"),
+        ({}, "start_failed", None, None),
+        ({"status": "FAILED", "logId": "42"}, "failed", "FAILED", "42"),
     ],
 )
-async def test_start_task_chain_maps_failures(
+async def test_run_task_chain_maps_expected_failures(
     details: dict[str, Any],
-    status: str,
+    expected_status: str,
     sap_status: str | None,
+    log_id: str | None,
 ) -> None:
     async def run(
         chain: str,
@@ -80,17 +96,18 @@ async def test_start_task_chain_maps_failures(
     ) -> tuple[bool, dict[str, Any]]:
         return False, details
 
-    result = await start_task_chain(
+    result = await run_task_chain(
         CommandContext(client=_client(run)),
-        StartTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
+        RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
     )
 
-    assert result.status == status
+    assert result.status == expected_status
     assert result.sap_status == sap_status
+    assert result.log_id == log_id
     assert result.runtime_seconds is None
 
 
-async def test_start_task_chain_reports_progress() -> None:
+async def test_run_task_chain_reports_canonical_lifecycle() -> None:
     progress: list[CommandProgress] = []
 
     async def report(update: CommandProgress) -> None:
@@ -104,23 +121,24 @@ async def test_start_task_chain_reports_progress() -> None:
     ) -> tuple[bool, dict[str, Any]]:
         return True, {"status": "COMPLETED", "runTime": 1000}
 
-    await start_task_chain(
-        CommandContext(client=_client(run), progress=report),
-        StartTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
+    await run_task_chain(
+        CommandContext(client=_client(run), progress_callback=report),
+        RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
     )
 
     assert progress == [
-        CommandProgress(command="taskchain.start", phase="started"),
-        CommandProgress(command="taskchain.start", phase="completed"),
+        CommandProgress(
+            command="task_chains.run",
+            phase=CommandProgressPhase.STARTED,
+        ),
+        CommandProgress(
+            command="task_chains.run",
+            phase=CommandProgressPhase.COMPLETED,
+        ),
     ]
 
 
-async def test_start_task_chain_times_out() -> None:
-    progress: list[CommandProgress] = []
-
-    async def report(update: CommandProgress) -> None:
-        progress.append(update)
-
+async def test_run_task_chain_timeout_retains_log_id() -> None:
     async def run(
         chain: str,
         space: str,
@@ -129,55 +147,24 @@ async def test_start_task_chain_times_out() -> None:
     ) -> tuple[bool, dict[str, Any]]:
         raise TaskChainTimeout(chain, space, log_id=42)
 
-    with pytest.raises(CommandTimeoutError) as error:
-        await start_task_chain(
-            CommandContext(client=_client(run), progress=report),
-            StartTaskChainRequest(
-                chain="CHAIN_A",
-                space="SPACE_A",
-                timeout_seconds=0.001,
-            ),
-        )
+    result = await run_task_chain(
+        CommandContext(client=_client(run)),
+        RunTaskChainRequest(
+            chain="CHAIN_A",
+            space="SPACE_A",
+            timeout_seconds=0.001,
+        ),
+    )
 
-    assert error.value.operation_id == "42"
-    assert progress == [
-        CommandProgress(command="taskchain.start", phase="started"),
-        CommandProgress(command="taskchain.start", phase="timed_out"),
-    ]
-
-
-async def test_start_task_chain_propagates_unexpected_error() -> None:
-    progress: list[CommandProgress] = []
-
-    async def report(update: CommandProgress) -> None:
-        progress.append(update)
-
-    async def run(
-        chain: str,
-        space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> tuple[bool, dict[str, Any]]:
-        raise RuntimeError("SAP request failed")
-
-    with pytest.raises(RuntimeError, match="SAP request failed"):
-        await start_task_chain(
-            CommandContext(client=_client(run), progress=report),
-            StartTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
-        )
-
-    assert progress == [
-        CommandProgress(command="taskchain.start", phase="started"),
-        CommandProgress(command="taskchain.start", phase="failed"),
-    ]
+    assert result == RunTaskChainResult(
+        chain="CHAIN_A",
+        space="SPACE_A",
+        status=TaskChainStatus.TIMED_OUT,
+        log_id="42",
+    )
 
 
-async def test_start_task_chain_cancellation_retains_log_id() -> None:
-    progress: list[CommandProgress] = []
-
-    async def report(update: CommandProgress) -> None:
-        progress.append(update)
-
+async def test_run_task_chain_cancellation_retains_log_id() -> None:
     async def run(
         chain: str,
         space: str,
@@ -187,38 +174,249 @@ async def test_start_task_chain_cancellation_retains_log_id() -> None:
         raise TaskChainCancelled(chain, space, log_id=43)
 
     with pytest.raises(CommandCancelledError) as error:
-        await start_task_chain(
-            CommandContext(client=_client(run), progress=report),
-            StartTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
+        await run_task_chain(
+            CommandContext(client=_client(run)),
+            RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
         )
 
-    assert error.value.operation_id == "43"
-    assert progress[0] == CommandProgress(
-        command="taskchain.start",
-        phase="started",
+    assert error.value.log_id == "43"
+
+
+async def test_run_task_chain_batch_is_bounded_ordered_and_typed() -> None:
+    active = 0
+    maximum_active = 0
+    progress: list[CommandProgress] = []
+    release_first_item = asyncio.Event()
+
+    async def report(update: CommandProgress) -> None:
+        progress.append(update)
+
+    async def run(
+        chain: str,
+        space: str,
+        *,
+        timeout_seconds: float | None,
+    ) -> tuple[bool, dict[str, Any]]:
+        nonlocal active, maximum_active
+        active += 1
+        maximum_active = max(maximum_active, active)
+        try:
+            if chain == "A":
+                await release_first_item.wait()
+            if chain == "C":
+                raise TaskChainTimeout(chain, space, log_id=103)
+            if chain == "B":
+                return False, {"status": "FAILED", "logId": 102}
+            if chain == "D":
+                release_first_item.set()
+                return False, {}
+            return True, {
+                "status": "COMPLETED",
+                "runTime": 1000,
+                "logId": 101,
+            }
+        finally:
+            active -= 1
+
+    requests = tuple(
+        RunTaskChainRequest(chain=chain, space="SPACE_A")
+        for chain in ("A", "B", "C", "D")
     )
-    assert progress[1].phase == "cancelled"
-    assert "log ID: 43" in (progress[1].message or "")
+    result = await run_task_chain_batch(
+        CommandContext(client=_client(run), progress_callback=report),
+        RunTaskChainBatchRequest(requests=requests, max_concurrency=2),
+    )
+
+    assert result == RunTaskChainBatchResult(
+        results=(
+            RunTaskChainResult(
+                chain="A",
+                space="SPACE_A",
+                status=TaskChainStatus.COMPLETED,
+                sap_status="COMPLETED",
+                log_id="101",
+                runtime_seconds=1,
+            ),
+            RunTaskChainResult(
+                chain="B",
+                space="SPACE_A",
+                status=TaskChainStatus.FAILED,
+                sap_status="FAILED",
+                log_id="102",
+            ),
+            RunTaskChainResult(
+                chain="C",
+                space="SPACE_A",
+                status=TaskChainStatus.TIMED_OUT,
+                log_id="103",
+            ),
+            RunTaskChainResult(
+                chain="D",
+                space="SPACE_A",
+                status=TaskChainStatus.START_FAILED,
+            ),
+        ),
+        summary=BatchSummary(
+            total=4,
+            succeeded=1,
+            failed=2,
+            skipped=0,
+            timed_out=1,
+        ),
+    )
+    assert maximum_active == 2
+    assert [update.phase for update in progress] == [
+        "started",
+        "advanced",
+        "advanced",
+        "advanced",
+        "advanced",
+        "timed_out",
+    ]
+    assert progress == [
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.STARTED,
+            completed_items=0,
+            total_items=4,
+            succeeded_items=0,
+            failed_items=0,
+            skipped_items=0,
+            timed_out_items=0,
+        ),
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.ADVANCED,
+            completed_items=1,
+            total_items=4,
+            succeeded_items=0,
+            failed_items=1,
+            skipped_items=0,
+            timed_out_items=0,
+            item_index=1,
+        ),
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.ADVANCED,
+            completed_items=2,
+            total_items=4,
+            succeeded_items=0,
+            failed_items=1,
+            skipped_items=0,
+            timed_out_items=1,
+            item_index=2,
+        ),
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.ADVANCED,
+            completed_items=3,
+            total_items=4,
+            succeeded_items=0,
+            failed_items=2,
+            skipped_items=0,
+            timed_out_items=1,
+            item_index=3,
+        ),
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.ADVANCED,
+            completed_items=4,
+            total_items=4,
+            succeeded_items=1,
+            failed_items=2,
+            skipped_items=0,
+            timed_out_items=1,
+            item_index=0,
+        ),
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.TIMED_OUT,
+            completed_items=4,
+            total_items=4,
+            succeeded_items=1,
+            failed_items=2,
+            skipped_items=0,
+            timed_out_items=1,
+        ),
+    ]
+
+
+async def test_run_task_chain_batch_cancellation_is_terminal() -> None:
+    operation_started = asyncio.Event()
+    progress: list[CommandProgress] = []
+
+    async def report(update: CommandProgress) -> None:
+        progress.append(update)
+
+    async def run(
+        chain: str,
+        space: str,
+        *,
+        timeout_seconds: float | None,
+    ) -> tuple[bool, dict[str, Any]]:
+        operation_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("Unreachable")
+
+    task = asyncio.create_task(
+        run_task_chain_batch(
+            CommandContext(client=_client(run), progress_callback=report),
+            RunTaskChainBatchRequest(
+                requests=(RunTaskChainRequest(chain="A", space="SPACE_A"),)
+            ),
+        )
+    )
+    await operation_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert [update.phase for update in progress] == [
+        "started",
+        "cancelled",
+    ]
+    assert progress[-1] == CommandProgress(
+        command="task_chains.run_batch",
+        phase=CommandProgressPhase.CANCELLED,
+        completed_items=0,
+        total_items=1,
+        succeeded_items=0,
+        failed_items=0,
+        skipped_items=0,
+        timed_out_items=0,
+    )
 
 
 @pytest.mark.parametrize(
-    ("chain", "space", "timeout"),
+    "timeout",
     [
-        ("", "SPACE_A", 1.0),
-        ("CHAIN_A", " ", 1.0),
-        ("CHAIN_A", "SPACE_A", 0.0),
-        ("CHAIN_A", "SPACE_A", 86401.0),
-        ("CHAIN_A", "SPACE_A", float("nan")),
+        0.0,
+        86401.0,
+        float("nan"),
+        float("inf"),
     ],
 )
-def test_start_task_chain_request_validates_input(
-    chain: str,
-    space: str,
+def test_run_task_chain_request_validates_timeout(
     timeout: float,
 ) -> None:
     with pytest.raises(ValueError):
-        StartTaskChainRequest(
-            chain=chain,
-            space=space,
+        RunTaskChainRequest(
+            chain="CHAIN_A",
+            space="SPACE_A",
             timeout_seconds=timeout,
+        )
+
+
+@pytest.mark.parametrize(
+    "max_concurrency",
+    [0, -1, True, 1.5, MAXIMUM_BATCH_CONCURRENCY + 1],
+)
+def test_batch_request_validates_max_concurrency(
+    max_concurrency: Any,
+) -> None:
+    with pytest.raises(ValueError):
+        RunTaskChainBatchRequest(
+            requests=(),
+            max_concurrency=max_concurrency,
         )

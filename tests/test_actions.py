@@ -1,380 +1,893 @@
 import csv
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
-from datasphere_api import DatasphereClient
+from datasphere_core import CommandContext
+from datasphere_core.models.analytical_models import (
+    AnalyticalModelDependenciesStatus,
+    AnalyticalModelDependencyStatus,
+    AnalyticalModelPersistenceStatus,
+    AnalyticalModelReference,
+    AnalyticalModelViewDependency,
+    GetAnalyticalModelViewDependenciesBatchRequest,
+    GetAnalyticalModelViewDependenciesBatchResult,
+    GetAnalyticalModelViewDependenciesResult,
+    MeasureAnalyticalModelViewPersistenceBatchRequest,
+    MeasureAnalyticalModelViewPersistenceBatchResult,
+    MeasureAnalyticalModelViewPersistenceResult,
+)
+from datasphere_core.models.common import BatchSummary
+from datasphere_core.models.remote_tables import (
+    ConfigureRemoteTableStatisticsBatchRequest,
+    ConfigureRemoteTableStatisticsBatchResult,
+    ConfigureRemoteTableStatisticsResult,
+    ConfigureRemoteTableStatisticsStatus,
+    RefreshRemoteTableStatisticsBatchRequest,
+    RefreshRemoteTableStatisticsBatchResult,
+    RefreshRemoteTableStatisticsResult,
+    RefreshRemoteTableStatisticsStatus,
+    StatisticsType,
+)
+from datasphere_core.models.task_chains import (
+    RunTaskChainBatchRequest,
+    RunTaskChainBatchResult,
+    RunTaskChainRequest,
+    RunTaskChainResult,
+    TaskChainStatus,
+)
+from datasphere_core.models.views import (
+    CreateViewPartitioningBatchRequest,
+    CreateViewPartitioningBatchResult,
+    CreateViewPartitioningRequest,
+    CreateViewPartitioningResult,
+    CreateViewPartitioningStatus,
+    DeleteViewPartitioningBatchRequest,
+    DeleteViewPartitioningBatchResult,
+    DeleteViewPartitioningRequest,
+    DeleteViewPartitioningResult,
+    DeleteViewPartitioningStatus,
+    FindViewAttributeMatchesBatchRequest,
+    FindViewAttributeMatchesBatchResult,
+    FindViewAttributeMatchesResult,
+    FindViewAttributeMatchesStatus,
+    FindViewPersistenceCandidatesBatchRequest,
+    FindViewPersistenceCandidatesBatchResult,
+    FindViewPersistenceCandidatesResult,
+    FindViewPersistenceCandidatesStatus,
+    LockViewPartitionsBatchRequest,
+    LockViewPartitionsBatchResult,
+    LockViewPartitionsRequest,
+    LockViewPartitionsResult,
+    LockViewPartitionsStatus,
+    PersistViewBatchRequest,
+    PersistViewBatchResult,
+    PersistViewRequest,
+    PersistViewResult,
+    PersistViewStatus,
+    UnlockViewPartitionsBatchRequest,
+    UnlockViewPartitionsBatchResult,
+    UnlockViewPartitionsRequest,
+    UnlockViewPartitionsResult,
+    UnlockViewPartitionsStatus,
+    UnpersistViewBatchRequest,
+    UnpersistViewBatchResult,
+    UnpersistViewRequest,
+    UnpersistViewResult,
+    UnpersistViewStatus,
+    ViewPersistenceCandidate,
+)
 
 from datasphere_cli import actions
-from datasphere_cli.files.workspace import ALL_FILES
+from datasphere_cli.actions import (
+    dispatch as dispatch_module,
+)
+from datasphere_cli.files.workspace import file_setup, result_path, task_path
 
 
-@pytest.fixture
-def data_dir(tmp_path: Path, monkeypatch) -> Path:
-    """
-    Points the task file and the runs directory into tmp_path.
-    """
-    monkeypatch.setattr(runs, "TASKS_FILE", tmp_path / "tasks.csv")
-    monkeypatch.setattr(runs, "RUNS_DIR", tmp_path / "runs")
-    return tmp_path
+def _context() -> CommandContext:
+    return CommandContext(client=cast(Any, object()))
 
 
-def _write_tasks(rows: list[dict]) -> None:
-    with open(
-        runs.TASKS_FILE, "w", newline="", encoding="utf-8"
-    ) as file:
-        writer = csv.DictWriter(file, fieldnames=runs.TASK_COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def _run_dir() -> Path:
-    run_dirs = list(runs.RUNS_DIR.iterdir())
-    assert len(run_dirs) == 1
-    return run_dirs[0]
-
-
-def _read_csv(file_name: str) -> list[dict]:
-    with open(
-        _run_dir() / file_name, newline="", encoding="utf-8"
-    ) as file:
-        return list(csv.DictReader(file))
-
-
-def _client(**resources) -> DatasphereClient:
-    return cast(DatasphereClient, SimpleNamespace(**resources))
-
-
-def test_read_tasks_creates_template(data_dir: Path) -> None:
-    # First call creates the file and returns no tasks
-    assert runs.read_tasks() == []
-    with open(runs.TASKS_FILE, newline="", encoding="utf-8") as file:
-        assert file.read() == "entity,space,attribute\r\n"
-
-    # Filled rows are returned including the optional attribute
-    _write_tasks(
-        [{"entity": "VIEW_A", "space": "SP", "attribute": "YEAR"}]
-    )
-    assert runs.read_tasks() == [
-        {"entity": "VIEW_A", "space": "SP", "attribute": "YEAR"}
-    ]
-
-
-async def test_run_task_chains_writes_results(data_dir: Path) -> None:
-    _write_tasks(
-        [
-            {"entity": "CHAIN_A", "space": "SP"},
-            {"entity": "CHAIN_B", "space": "SP"},
-        ]
+def _summary(
+    *,
+    succeeded: int = 0,
+    failed: int = 0,
+    skipped: int = 0,
+    timed_out: int = 0,
+) -> BatchSummary:
+    return BatchSummary(
+        total=succeeded + failed + skipped + timed_out,
+        succeeded=succeeded,
+        failed=failed,
+        skipped=skipped,
+        timed_out=timed_out,
     )
 
-    # Stub client that reports one success and one failure
-    async def fake_run(chain, space, *, timeout_seconds):
-        assert timeout_seconds is None
-        if chain == "CHAIN_A":
-            return True, {"runTime": 65432}
-        return False, {}
 
-    client = _client(task_chains=SimpleNamespace(run=fake_run))
-    await actions.run_task_chains(client, thread_count=1)
-
-    # Check the exact rows of the uniform result file
-    assert _read_csv("results.csv") == [
-        {
-            "entity": "CHAIN_A",
-            "space": "SP",
-            "success": "True",
-            "detail": "",
-            "runtime": "65",
-        },
-        {
-            "entity": "CHAIN_B",
-            "space": "SP",
-            "success": "False",
-            "detail": "",
-            "runtime": "",
-        },
-    ]
-
-
-async def test_persist_views_prefills_and_updates(data_dir: Path) -> None:
-    _write_tasks([{"entity": "VIEW_A", "space": "SP"}])
-
-    # Stub client that persists the view successfully
-    async def fake_persist_view(view, space):
-        assert (view, space) == ("VIEW_A", "SP")
-        return True, {"runTime": 12000}
-
-    client = _client(views=SimpleNamespace(persist_view=fake_persist_view))
-    await actions.persist_views(client, timer=True, thread_count=1)
-
-    assert _read_csv("results.csv") == [
-        {
-            "entity": "VIEW_A",
-            "space": "SP",
-            "success": "True",
-            "detail": "",
-            "runtime": "12",
-        }
-    ]
-
-
-async def test_no_run_folder_without_tasks(data_dir: Path) -> None:
-    # Task file doesn't exist yet: action creates the template and
-    # returns without creating a run folder
-    client = _client(views=SimpleNamespace())
-    await actions.persist_views(client, timer=False, thread_count=1)
-    assert runs.TASKS_FILE.is_file()
-    assert not runs.RUNS_DIR.exists()
-
-
-async def test_create_view_analytics_filters_score_10(
-    data_dir: Path,
+def _write_task(
+    command: str,
+    root: Path,
+    row: Mapping[str, object],
 ) -> None:
-    all_views = [
-        {"id": "v1", "name": "VIEW_A", "space_name": "SP"},
-        {"id": "v2", "name": "VIEW_B", "space_name": "SP"},
-    ]
+    path = task_path(command, root)
+    with path.open("a", newline="", encoding="utf-8") as task_file:
+        writer = csv.DictWriter(task_file, fieldnames=tuple(row))
+        writer.writerow(row)
 
-    # Stub client where only VIEW_A yields a score-10 candidate
-    async def fake_get_all_views():
-        return all_views
 
-    async def fake_analyze_view(view, space):
-        if view == "VIEW_A":
-            return [
-                {
-                    "entity": "VIEW_A",
-                    "space": "SP",
-                    "businessName": "View A",
-                    "isPersisted": False,
-                    "persistencyCandidateScore": 10,
-                },
-                {"entity": "OTHER", "persistencyCandidateScore": 5},
-            ]
-        return [{"entity": "VIEW_B", "persistencyCandidateScore": 3}]
+def _read_csv(command: str, root: Path) -> list[dict[str, str]]:
+    with result_path(command, root).open(
+        newline="",
+        encoding="utf-8",
+    ) as result_file:
+        return list(csv.DictReader(result_file))
 
-    client = _client(
-        views=SimpleNamespace(
-            get_all_views=fake_get_all_views,
-            analyze_view=fake_analyze_view,
-        )
+
+def _registry_entry(
+    handler: object,
+    request_type: type[object],
+    result_type: type[object],
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        handler=handler,
+        request_type=request_type,
+        result_type=result_type,
     )
-    await actions.create_view_analytics(client, thread_count=1)
-
-    assert _read_csv("export.csv") == [
-        {
-            "entity": "VIEW_A",
-            "space": "SP",
-            "businessName": "View A",
-            "isPersisted": "False",
-        }
-    ]
 
 
-async def test_create_partitioning_requires_attribute(
-    data_dir: Path,
+async def test_analytical_model_adapters_map_requests_and_json(
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
-    _write_tasks(
-        [
-            {"entity": "VIEW_A", "space": "SP", "attribute": "YEAR"},
-            {"entity": "VIEW_B", "space": "SP", "attribute": ""},
-        ]
-    )
-
-    # Stub client that accepts the partitioning
-    async def fake_create_partitioning(
-        view, space, attribute, partitions, overwrite_existing
-    ):
-        assert (view, attribute) == ("VIEW_A", "YEAR")
-        assert partitions == ["2023", "2024"]
-        return "created"
-
-    client = _client(
-        views=SimpleNamespace(
-            create_partitioning=fake_create_partitioning
-        )
-    )
-    await actions.create_partitioning_for_views(
-        client,
-        partitions=["2023", "2024"],
-        overwrite_existing_partitions=False,
-        thread_count=1,
-    )
-
-    # Rows without an attribute produce a missing_attribute result
-    assert _read_csv("results.csv") == [
-        {
-            "entity": "VIEW_A",
-            "space": "SP",
-            "success": "True",
-            "detail": "created",
-            "runtime": "",
-        },
-        {
-            "entity": "VIEW_B",
-            "space": "SP",
-            "success": "False",
-            "detail": "missing_attribute",
-            "runtime": "",
-        },
-    ]
-
-
-async def test_lock_partitions_reports_views_without_partitions(
-    data_dir: Path,
-) -> None:
-    _write_tasks(
-        [
-            {"entity": "WITH", "space": "SP"},
-            {"entity": "WITHOUT", "space": "SP"},
-        ]
-    )
-
-    # Stub client where one view has no partitions
-    async def fake_lock_partitions(view, space, until_year):
-        assert until_year == 2023
-        return "locked" if view == "WITH" else "no_partitions"
-
-    client = _client(
-        views=SimpleNamespace(lock_partitions=fake_lock_partitions)
-    )
-    await actions.lock_partitions_until_year(
-        client, year=2023, thread_count=1
-    )
-
-    # Views without partitions get a result row with the outcome
-    assert _read_csv("results.csv") == [
-        {
-            "entity": "WITH",
-            "space": "SP",
-            "success": "True",
-            "detail": "locked",
-            "runtime": "",
-        },
-        {
-            "entity": "WITHOUT",
-            "space": "SP",
-            "success": "False",
-            "detail": "no_partitions",
-            "runtime": "",
-        },
-    ]
-
-
-async def test_create_statistics_decision_matrix(data_dir: Path) -> None:
-    all_tables = {
-        "NEW": {"statisticsSupported": True, "statisticsType": None},
-        "OTHER_TYPE": {
-            "statisticsSupported": True,
-            "statisticsType": "SIMPLE",
-        },
-        "SAME_TYPE": {
-            "statisticsSupported": True,
-            "statisticsType": "HISTOGRAM",
-        },
-        "UNSUPPORTED": {
-            "statisticsSupported": False,
-            "statisticsType": None,
-        },
-    }
-    created: list[str] = []
-    updated: list[str] = []
-
-    # Stub client that records which endpoint gets called per table
-    async def fake_get_all_tables():
-        return all_tables
-
-    async def fake_create(table, statistics_type):
-        created.append(table)
-        return "created"
-
-    async def fake_update(table, statistics_type):
-        updated.append(table)
-        return "updated"
-
-    client = _client(
-        remote_tables=SimpleNamespace(
-            get_all_tables=fake_get_all_tables,
-            create_statistics=fake_create,
-            update_statistics=fake_update,
-        )
-    )
-    await actions.create_statistics(
-        client, statistics_type="HISTOGRAM", thread_count=1
-    )
-
-    # Tables without statistics are created, different types updated,
-    # same type and unsupported tables are only reported
-    assert created == ["NEW"]
-    assert updated == ["OTHER_TYPE"]
-    assert _read_csv("results.csv") == [
-        {
-            "entity": "NEW",
-            "space": "",
-            "success": "True",
-            "detail": "created",
-            "runtime": "",
-        },
-        {
-            "entity": "OTHER_TYPE",
-            "space": "",
-            "success": "True",
-            "detail": "updated",
-            "runtime": "",
-        },
-        {
-            "entity": "SAME_TYPE",
-            "space": "",
-            "success": "True",
-            "detail": "skipped_same_type",
-            "runtime": "",
-        },
-        {
-            "entity": "UNSUPPORTED",
-            "space": "",
-            "success": "False",
-            "detail": "skipped_unsupported",
-            "runtime": "",
-        },
-    ]
-
-
-async def test_export_analytical_models_writes_json(
-    data_dir: Path,
-) -> None:
-    # Stub client with one model whose views partially resolve to spaces
-    async def fake_get_all_analytical_models():
-        return [{"id": "m1", "name": "Model1", "space_name": "SP"}]
-
-    async def fake_get_views_for_analytical_model(model_id):
-        return {"m1": {"v1": "View1", "v2": "View2"}}
-
-    async def fake_get_all_views():
-        return [{"id": "v1", "space_name": "SP_V"}]
-
-    client = _client(
-        analytical_models=SimpleNamespace(
-            get_all_analytical_models=fake_get_all_analytical_models,
-            get_views_for_analytical_model=(
-                fake_get_views_for_analytical_model
+    file_setup(tmp_path)
+    dependency_result = GetAnalyticalModelViewDependenciesBatchResult(
+        results=(
+            GetAnalyticalModelViewDependenciesResult(
+                analytical_model_name="MODEL_A",
+                space="SPACE_A",
+                status=AnalyticalModelDependenciesStatus.COMPLETED,
+                analytical_model_id="model-id",
+                dependencies=(
+                    AnalyticalModelViewDependency(
+                        view_id="view-id",
+                        view_name="VIEW_A",
+                        space="VIEW_SPACE",
+                        status=AnalyticalModelDependencyStatus.RESOLVED,
+                    ),
+                ),
             ),
         ),
-        views=SimpleNamespace(get_all_views=fake_get_all_views),
+        summary=_summary(succeeded=1),
     )
-    await actions.get_all_views_for_analytical_models(
-        client, skip_duplicates=False, thread_count=1
+    measure_result = MeasureAnalyticalModelViewPersistenceBatchResult(
+        results=(
+            MeasureAnalyticalModelViewPersistenceResult(
+                analytical_model_name="MODEL_B",
+                space="SPACE_B",
+                status=(
+                    AnalyticalModelPersistenceStatus.ANALYTICAL_MODEL_NOT_FOUND
+                ),
+            ),
+        ),
+        summary=_summary(skipped=1),
+    )
+    requests: list[object] = []
+
+    async def dependencies_handler(
+        context: CommandContext,
+        request: object,
+    ) -> object:
+        assert context is command_context
+        requests.append(request)
+        return dependency_result
+
+    async def measure_handler(
+        context: CommandContext,
+        request: object,
+    ) -> object:
+        assert context.client is command_context.client
+        requests.append(request)
+        return measure_result
+
+    monkeypatch.setattr(
+        dispatch_module,
+        "COMMANDS",
+        {
+            "analytical_models.get_view_dependencies_batch": (
+                _registry_entry(
+                    dependencies_handler,
+                    GetAnalyticalModelViewDependenciesBatchRequest,
+                    GetAnalyticalModelViewDependenciesBatchResult,
+                )
+            ),
+            "analytical_models.measure_view_persistence_batch": (
+                _registry_entry(
+                    measure_handler,
+                    MeasureAnalyticalModelViewPersistenceBatchRequest,
+                    MeasureAnalyticalModelViewPersistenceBatchResult,
+                )
+            ),
+        },
+    )
+    _write_task(
+        "analytical_models.measure_view_persistence_batch",
+        tmp_path,
+        {"analytical_model": "MODEL_B", "space": "SPACE_B"},
+    )
+    command_context = _context()
+
+    await actions.export_analytical_model_view_dependencies(
+        command_context,
+        space="SPACE/A",
+        deduplicate_views=True,
+        max_concurrency=3,
+        workspace_root=tmp_path,
+    )
+    await actions.measure_analytical_model_view_persistence_from_file(
+        command_context,
+        timeout_seconds=120,
+        max_concurrency=2,
+        workspace_root=tmp_path,
     )
 
-    with open(_run_dir() / "export.json", encoding="utf-8") as file:
-        assert json.load(file) == {
-            "m1": {
-                "name": "Model1",
-                "dependencies": {
-                    "v1": ["SP_V", "View1"],
-                    "v2": "View2",
-                },
+    assert requests == [
+        GetAnalyticalModelViewDependenciesBatchRequest(
+            space="SPACE/A",
+            deduplicate_views=True,
+            max_concurrency=3,
+        ),
+        MeasureAnalyticalModelViewPersistenceBatchRequest(
+            analytical_models=(
+                AnalyticalModelReference(
+                    name="MODEL_B",
+                    space="SPACE_B",
+                ),
+            ),
+            timeout_seconds=120,
+            max_concurrency=2,
+        ),
+    ]
+    dependencies_path = result_path(
+        "analytical_models.get_view_dependencies_batch",
+        tmp_path,
+        space="SPACE/A",
+    )
+    assert json.loads(dependencies_path.read_text(encoding="utf-8")) == {
+        "results": [
+            {
+                "analytical_model": "MODEL_A",
+                "space": "SPACE_A",
+                "status": "completed",
+                "analytical_model_id": "model-id",
+                "dependencies": [
+                    {
+                        "view_id": "view-id",
+                        "view": "VIEW_A",
+                        "space": "VIEW_SPACE",
+                        "status": "resolved",
+                    }
+                ],
             }
+        ],
+        "summary": {
+            "total": 1,
+            "succeeded": 1,
+            "failed": 0,
+            "skipped": 0,
+            "timed_out": 0,
+        },
+    }
+    measure_path = result_path(
+        "analytical_models.measure_view_persistence_batch",
+        tmp_path,
+    )
+    assert json.loads(measure_path.read_text(encoding="utf-8"))["results"] == [
+        {
+            "analytical_model": "MODEL_B",
+            "space": "SPACE_B",
+            "status": "analytical_model_not_found",
+            "analytical_model_id": None,
+            "dependencies": [],
         }
+    ]
+
+
+async def test_remote_table_adapters_dispatch_batch_commands(
+    monkeypatch,
+) -> None:
+    configured = ConfigureRemoteTableStatisticsBatchResult(
+        results=(
+            ConfigureRemoteTableStatisticsResult(
+                table="TABLE_A",
+                space="SPACE_A",
+                statistics_type=StatisticsType.HISTOGRAM,
+                status=ConfigureRemoteTableStatisticsStatus.CREATED,
+            ),
+        ),
+        summary=_summary(succeeded=1),
+    )
+    refreshed = RefreshRemoteTableStatisticsBatchResult(
+        results=(
+            RefreshRemoteTableStatisticsResult(
+                table="TABLE_A",
+                space="SPACE_A",
+                status=RefreshRemoteTableStatisticsStatus.REFRESHED,
+            ),
+        ),
+        summary=_summary(succeeded=1),
+    )
+    requests: list[object] = []
+
+    async def configure_handler(
+        context: CommandContext,
+        request: object,
+    ) -> object:
+        requests.append(request)
+        return configured
+
+    async def refresh_handler(
+        context: CommandContext,
+        request: object,
+    ) -> object:
+        requests.append(request)
+        return refreshed
+
+    monkeypatch.setattr(
+        dispatch_module,
+        "COMMANDS",
+        {
+            "remote_tables.configure_statistics_batch": _registry_entry(
+                configure_handler,
+                ConfigureRemoteTableStatisticsBatchRequest,
+                ConfigureRemoteTableStatisticsBatchResult,
+            ),
+            "remote_tables.refresh_statistics_batch": _registry_entry(
+                refresh_handler,
+                RefreshRemoteTableStatisticsBatchRequest,
+                RefreshRemoteTableStatisticsBatchResult,
+            ),
+        },
+    )
+
+    configure_result = await actions.configure_remote_table_statistics(
+        _context(),
+        space="SPACE_A",
+        statistics_type="HISTOGRAM",
+        max_concurrency=5,
+    )
+    refresh_result = await actions.refresh_remote_table_statistics(
+        _context(),
+        space="SPACE_A",
+        max_concurrency=6,
+    )
+
+    assert requests == [
+        ConfigureRemoteTableStatisticsBatchRequest(
+            tables=None,
+            space="SPACE_A",
+            statistics_type=StatisticsType.HISTOGRAM,
+            max_concurrency=5,
+        ),
+        RefreshRemoteTableStatisticsBatchRequest(
+            tables=None,
+            space="SPACE_A",
+            max_concurrency=6,
+        ),
+    ]
+    assert configure_result is configured
+    assert refresh_result is refreshed
+
+
+async def test_task_chain_adapter_writes_exact_result(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    file_setup(tmp_path)
+    _write_task(
+        "task_chains.run_batch",
+        tmp_path,
+        {"task_chain": "CHAIN_A", "space": "SPACE_A"},
+    )
+    result = RunTaskChainBatchResult(
+        results=(
+            RunTaskChainResult(
+                chain="CHAIN_A",
+                space="SPACE_A",
+                status=TaskChainStatus.COMPLETED,
+                sap_status="COMPLETED",
+                log_id="operation-1",
+                runtime_seconds=15,
+            ),
+        ),
+        summary=_summary(succeeded=1),
+    )
+    requests: list[object] = []
+
+    async def handler(
+        context: CommandContext,
+        request: object,
+    ) -> object:
+        requests.append(request)
+        return result
+
+    monkeypatch.setattr(
+        dispatch_module,
+        "COMMANDS",
+        {
+            "task_chains.run_batch": _registry_entry(
+                handler,
+                RunTaskChainBatchRequest,
+                RunTaskChainBatchResult,
+            )
+        },
+    )
+
+    await actions.run_task_chains_from_file(
+        _context(),
+        timeout_seconds=90,
+        max_concurrency=2,
+        workspace_root=tmp_path,
+    )
+
+    assert requests == [
+        RunTaskChainBatchRequest(
+            requests=(
+                RunTaskChainRequest(
+                    chain="CHAIN_A",
+                    space="SPACE_A",
+                    timeout_seconds=90,
+                ),
+            ),
+            max_concurrency=2,
+        )
+    ]
+    assert _read_csv("task_chains.run_batch", tmp_path) == [
+        {
+            "task_chain": "CHAIN_A",
+            "space": "SPACE_A",
+            "status": "completed",
+            "sap_status": "COMPLETED",
+            "log_id": "operation-1",
+            "runtime_seconds": "15",
+        }
+    ]
+
+
+async def test_task_chain_failure_preserves_previous_result(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    file_setup(tmp_path)
+    _write_task(
+        "task_chains.run_batch",
+        tmp_path,
+        {"task_chain": "CHAIN_A", "space": "SPACE_A"},
+    )
+    previous_path = result_path("task_chains.run_batch", tmp_path)
+    previous_path.write_text("previous result\n", encoding="utf-8")
+
+    async def handler(context: CommandContext, request: object) -> object:
+        raise RuntimeError("command failed")
+
+    monkeypatch.setattr(
+        dispatch_module,
+        "COMMANDS",
+        {
+            "task_chains.run_batch": _registry_entry(
+                handler,
+                RunTaskChainBatchRequest,
+                RunTaskChainBatchResult,
+            )
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="command failed"):
+        await actions.run_task_chains_from_file(
+            _context(),
+            workspace_root=tmp_path,
+        )
+
+    assert previous_path.read_text(encoding="utf-8") == "previous result\n"
+
+
+async def test_view_export_adapters_preserve_boundary_details(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    file_setup(tmp_path)
+    candidates = FindViewPersistenceCandidatesBatchResult(
+        results=(
+            FindViewPersistenceCandidatesResult(
+                view="SOURCE_A",
+                space="SPACE_A",
+                status=FindViewPersistenceCandidatesStatus.COMPLETED,
+                candidates=(
+                    ViewPersistenceCandidate(
+                        view="CANDIDATE_A",
+                        space="SPACE_B",
+                        score=10,
+                        business_name="Candidate A",
+                        is_persisted=False,
+                    ),
+                ),
+                log_id="analysis-1",
+            ),
+            FindViewPersistenceCandidatesResult(
+                view="SOURCE_B",
+                space="SPACE_A",
+                status=FindViewPersistenceCandidatesStatus.TIMED_OUT,
+                candidates=(),
+                log_id="analysis-2",
+            ),
+        ),
+        summary=_summary(succeeded=1, timed_out=1),
+    )
+    attributes = FindViewAttributeMatchesBatchResult(
+        results=(
+            FindViewAttributeMatchesResult(
+                view="VIEW_A",
+                space="SPACE_A",
+                business_name="View A",
+                status=FindViewAttributeMatchesStatus.COMPLETED,
+                attributes=("VALID_FROM",),
+            ),
+        ),
+        summary=_summary(succeeded=1),
+    )
+    requests: list[object] = []
+
+    async def candidate_handler(
+        context: CommandContext,
+        request: object,
+    ) -> object:
+        requests.append(request)
+        return candidates
+
+    async def attribute_handler(
+        context: CommandContext,
+        request: object,
+    ) -> object:
+        requests.append(request)
+        return attributes
+
+    monkeypatch.setattr(
+        dispatch_module,
+        "COMMANDS",
+        {
+            "views.find_persistence_candidates_batch": _registry_entry(
+                candidate_handler,
+                FindViewPersistenceCandidatesBatchRequest,
+                FindViewPersistenceCandidatesBatchResult,
+            ),
+            "views.find_attribute_matches_batch": _registry_entry(
+                attribute_handler,
+                FindViewAttributeMatchesBatchRequest,
+                FindViewAttributeMatchesBatchResult,
+            ),
+        },
+    )
+
+    await actions.export_view_persistence_candidates(
+        _context(),
+        candidate_score=10,
+        timeout_seconds=45,
+        max_concurrency=2,
+        workspace_root=tmp_path,
+    )
+    await actions.export_view_attribute_matches(
+        _context(),
+        attribute_substring="valid",
+        case_sensitive=True,
+        max_concurrency=3,
+        workspace_root=tmp_path,
+    )
+
+    assert requests == [
+        FindViewPersistenceCandidatesBatchRequest(
+            candidate_score=10,
+            timeout_seconds=45,
+            max_concurrency=2,
+        ),
+        FindViewAttributeMatchesBatchRequest(
+            substring="valid",
+            case_sensitive=True,
+            max_concurrency=3,
+        ),
+    ]
+    assert _read_csv("views.find_persistence_candidates_batch", tmp_path) == [
+        {
+            "source_view": "SOURCE_A",
+            "source_space": "SPACE_A",
+            "view": "CANDIDATE_A",
+            "space": "SPACE_B",
+            "business_name": "Candidate A",
+            "score": "10",
+            "is_persisted": "False",
+            "status": "completed",
+            "log_id": "analysis-1",
+        },
+        {
+            "source_view": "SOURCE_B",
+            "source_space": "SPACE_A",
+            "view": "",
+            "space": "",
+            "business_name": "",
+            "score": "",
+            "is_persisted": "",
+            "status": "timed_out",
+            "log_id": "analysis-2",
+        },
+    ]
+    assert _read_csv("views.find_attribute_matches_batch", tmp_path) == [
+        {
+            "view": "VIEW_A",
+            "space": "SPACE_A",
+            "business_name": "View A",
+            "attribute": "VALID_FROM",
+            "status": "completed",
+        }
+    ]
+
+
+async def test_view_file_adapters_map_every_batch_request(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    file_setup(tmp_path)
+    commands_and_rows = {
+        "views.create_partitioning_batch": {
+            "view": "VIEW_A",
+            "space": "SPACE_A",
+            "attribute": "DATE_A",
+        },
+        "views.delete_partitioning_batch": {
+            "view": "VIEW_B",
+            "space": "SPACE_B",
+        },
+        "views.persist_batch": {"view": "VIEW_C", "space": "SPACE_C"},
+        "views.unpersist_batch": {"view": "VIEW_D", "space": "SPACE_D"},
+        "views.lock_partitions_batch": {
+            "view": "VIEW_E",
+            "space": "SPACE_E",
+        },
+        "views.unlock_partitions_batch": {
+            "view": "VIEW_F",
+            "space": "SPACE_F",
+        },
+    }
+    for command, row in commands_and_rows.items():
+        _write_task(command, tmp_path, row)
+
+    results: dict[str, object] = {
+        "views.create_partitioning_batch": (
+            CreateViewPartitioningBatchResult(
+                results=(
+                    CreateViewPartitioningResult(
+                        view="VIEW_A",
+                        space="SPACE_A",
+                        status=CreateViewPartitioningStatus.CREATED,
+                    ),
+                ),
+                summary=_summary(succeeded=1),
+            )
+        ),
+        "views.delete_partitioning_batch": DeleteViewPartitioningBatchResult(
+            results=(
+                DeleteViewPartitioningResult(
+                    view="VIEW_B",
+                    space="SPACE_B",
+                    status=DeleteViewPartitioningStatus.DELETED,
+                ),
+            ),
+            summary=_summary(succeeded=1),
+        ),
+        "views.persist_batch": PersistViewBatchResult(
+            results=(
+                PersistViewResult(
+                    view="VIEW_C",
+                    space="SPACE_C",
+                    status=PersistViewStatus.COMPLETED,
+                    sap_status="COMPLETED",
+                    log_id="persist-1",
+                    runtime_seconds=20,
+                ),
+            ),
+            summary=_summary(succeeded=1),
+        ),
+        "views.unpersist_batch": UnpersistViewBatchResult(
+            results=(
+                UnpersistViewResult(
+                    view="VIEW_D",
+                    space="SPACE_D",
+                    status=UnpersistViewStatus.ALREADY_ABSENT,
+                ),
+            ),
+            summary=_summary(skipped=1),
+        ),
+        "views.lock_partitions_batch": LockViewPartitionsBatchResult(
+            results=(
+                LockViewPartitionsResult(
+                    view="VIEW_E",
+                    space="SPACE_E",
+                    status=LockViewPartitionsStatus.NO_PARTITIONS,
+                ),
+            ),
+            summary=_summary(skipped=1),
+        ),
+        "views.unlock_partitions_batch": UnlockViewPartitionsBatchResult(
+            results=(
+                UnlockViewPartitionsResult(
+                    view="VIEW_F",
+                    space="SPACE_F",
+                    status=UnlockViewPartitionsStatus.UNLOCKED,
+                ),
+            ),
+            summary=_summary(succeeded=1),
+        ),
+    }
+    requests: dict[str, object] = {}
+    registry: dict[str, SimpleNamespace] = {}
+    request_types: dict[str, type[object]] = {
+        "views.create_partitioning_batch": CreateViewPartitioningBatchRequest,
+        "views.delete_partitioning_batch": DeleteViewPartitioningBatchRequest,
+        "views.persist_batch": PersistViewBatchRequest,
+        "views.unpersist_batch": UnpersistViewBatchRequest,
+        "views.lock_partitions_batch": LockViewPartitionsBatchRequest,
+        "views.unlock_partitions_batch": UnlockViewPartitionsBatchRequest,
+    }
+    for command, result in results.items():
+
+        async def handler(
+            context: CommandContext,
+            request: object,
+            *,
+            command: str = command,
+            result: object = result,
+        ) -> object:
+            requests[command] = request
+            return result
+
+        registry[command] = _registry_entry(
+            handler,
+            request_types[command],
+            type(result),
+        )
+    monkeypatch.setattr(dispatch_module, "COMMANDS", registry)
+
+    await actions.create_view_partitioning_from_file(
+        _context(),
+        start_year=2020,
+        end_year=2025,
+        overwrite_existing=True,
+        max_concurrency=2,
+        workspace_root=tmp_path,
+    )
+    await actions.delete_view_partitioning_from_file(
+        _context(), max_concurrency=3, workspace_root=tmp_path
+    )
+    await actions.persist_views_from_file(
+        _context(),
+        timeout_seconds=100,
+        max_concurrency=4,
+        workspace_root=tmp_path,
+    )
+    await actions.unpersist_views_from_file(
+        _context(),
+        timeout_seconds=200,
+        max_concurrency=5,
+        workspace_root=tmp_path,
+    )
+    await actions.lock_view_partitions_from_file(
+        _context(),
+        until_year=2023,
+        max_concurrency=6,
+        workspace_root=tmp_path,
+    )
+    await actions.unlock_view_partitions_from_file(
+        _context(), max_concurrency=7, workspace_root=tmp_path
+    )
+
+    assert requests == {
+        "views.create_partitioning_batch": (
+            CreateViewPartitioningBatchRequest(
+                requests=(
+                    CreateViewPartitioningRequest(
+                        view="VIEW_A",
+                        space="SPACE_A",
+                        attribute="DATE_A",
+                        start_year=2020,
+                        end_year=2025,
+                        overwrite_existing=True,
+                    ),
+                ),
+                max_concurrency=2,
+            )
+        ),
+        "views.delete_partitioning_batch": DeleteViewPartitioningBatchRequest(
+            requests=(
+                DeleteViewPartitioningRequest(view="VIEW_B", space="SPACE_B"),
+            ),
+            max_concurrency=3,
+        ),
+        "views.persist_batch": PersistViewBatchRequest(
+            requests=(
+                PersistViewRequest(
+                    view="VIEW_C",
+                    space="SPACE_C",
+                    timeout_seconds=100,
+                ),
+            ),
+            max_concurrency=4,
+        ),
+        "views.unpersist_batch": UnpersistViewBatchRequest(
+            requests=(
+                UnpersistViewRequest(
+                    view="VIEW_D",
+                    space="SPACE_D",
+                    timeout_seconds=200,
+                ),
+            ),
+            max_concurrency=5,
+        ),
+        "views.lock_partitions_batch": LockViewPartitionsBatchRequest(
+            requests=(
+                LockViewPartitionsRequest(
+                    view="VIEW_E",
+                    space="SPACE_E",
+                    until_year=2023,
+                ),
+            ),
+            max_concurrency=6,
+        ),
+        "views.unlock_partitions_batch": UnlockViewPartitionsBatchRequest(
+            requests=(
+                UnlockViewPartitionsRequest(view="VIEW_F", space="SPACE_F"),
+            ),
+            max_concurrency=7,
+        ),
+    }
+    assert _read_csv("views.create_partitioning_batch", tmp_path) == [
+        {
+            "view": "VIEW_A",
+            "space": "SPACE_A",
+            "attribute": "DATE_A",
+            "status": "created",
+        }
+    ]
+    assert _read_csv("views.persist_batch", tmp_path) == [
+        {
+            "view": "VIEW_C",
+            "space": "SPACE_C",
+            "status": "completed",
+            "sap_status": "COMPLETED",
+            "log_id": "persist-1",
+            "runtime_seconds": "20",
+        }
+    ]
+    assert _read_csv("views.delete_partitioning_batch", tmp_path) == [
+        {"view": "VIEW_B", "space": "SPACE_B", "status": "deleted"}
+    ]
+    assert _read_csv("views.unpersist_batch", tmp_path) == [
+        {
+            "view": "VIEW_D",
+            "space": "SPACE_D",
+            "status": "already_absent",
+            "sap_status": "",
+            "log_id": "",
+            "runtime_seconds": "",
+        }
+    ]
+    assert _read_csv("views.lock_partitions_batch", tmp_path) == [
+        {
+            "view": "VIEW_E",
+            "space": "SPACE_E",
+            "status": "no_partitions",
+        }
+    ]
+    assert _read_csv("views.unlock_partitions_batch", tmp_path) == [
+        {"view": "VIEW_F", "space": "SPACE_F", "status": "unlocked"}
+    ]

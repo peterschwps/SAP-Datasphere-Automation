@@ -1,4 +1,4 @@
-# SAP Datasphere CLI
+# SAP-Datasphere-CLI
 
 [![PyPI](https://img.shields.io/pypi/v/Datasphere-CLI?label=PyPI)](https://pypi.org/project/Datasphere-CLI/)
 [![Python](https://img.shields.io/pypi/pyversions/Datasphere-CLI?label=Python)](https://pypi.org/project/Datasphere-CLI/)
@@ -10,7 +10,7 @@ analytical models, remote tables, task chains and views.
 
 ![Preview of the CLI](./docs/images/cli.png)
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#-overview)
 - [Features](#-features)
@@ -23,7 +23,7 @@ analytical models, remote tables, task chains and views.
 - [Notes](#-notes)
 - [Disclaimer](#-disclaimer)
 
-## 🎯 Overview
+## Overview
 
 This program enables the automation of recurring tasks in SAP Datasphere. It
 provides scripts for managing:
@@ -33,13 +33,13 @@ provides scripts for managing:
 - Task Chains
 - Views
 
-## ✨ Features
+## Features
 
 ### Analytical Models
 
-- Export all analytical models with their views
-- Export all analytical models of a specific space with their views
-- Runtime analysis for persisting all views of analytical models
+- Get analytical-model dependencies and their views
+- Measure analytical-model view persistence
+- Measure persistence for all views of analytical models
 
 ### Remote Tables
 
@@ -52,8 +52,8 @@ provides scripts for managing:
 
 ### Views
 
-- Export all views with a perfect persistence score of 10 (using view analyzer)
-- Export all views that have an attribute that contains a specific substring
+- Find views with a selected persistence score
+- Find views with an attribute containing a specific substring
 - Create partitions by year
 - Remove partitions
 - Lock partitions up to a specific year
@@ -61,12 +61,12 @@ provides scripts for managing:
 - Persist views
 - Unpersist views
 
-## 🔧 Prerequisites
+## Prerequisites
 
 - **Python**: Version 3.12 or newer
 - **Package Installer**: [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/stable/)
 
-## 📦 Installation
+## Installation
 
 ### Quick Start
 
@@ -82,14 +82,10 @@ provides scripts for managing:
     pipx install datasphere-cli
     ```
 
-2. Run it from the terminal **using any of the following commands**:
+2. Run it from the terminal:
 
     ```bash
     datasphere
-    ```
-
-    ```bash
-    datasphere-cli
     ```
 
 Update to the latest release with `uv tool upgrade datasphere-cli`
@@ -97,27 +93,28 @@ Update to the latest release with `uv tool upgrade datasphere-cli`
 
 ----
 
-### Command Layer
+### Shared Command Layer
 
-The presentation-independent command layer can be installed without Textual
-or Rich. It is intended for integrations such as Datasphere-MCP:
+`datasphere-core` is the shared, presentation-independent command layer used by
+the CLI and Datasphere-MCP. It contains typed commands, batch orchestration,
+bounded concurrency, progress handling, and shared local session handling. It
+can be installed without Textual or Rich:
 
 ```bash
 pip install datasphere-core
 ```
 
-The full `datasphere-cli` package continues to include the TUI and depends on
-this command layer.
+The full `datasphere-cli` package includes the TUI and uses this shared layer.
 
 ### Direct Commands
 
-Providing no arguments continues to open the TUI. Individual operations can
-also be executed directly:
+Providing no arguments opens the TUI. The canonical direct task-chain command
+is:
 
 ```bash
-datasphere taskchain start TC_TEST_DEV --space DEV
-datasphere taskchain start TC_TEST_DEV --space DEV --timeout 600
-datasphere taskchain start TC_TEST_DEV --space DEV --output json
+datasphere task-chains run TC_TEST_DEV --space DEV
+datasphere task-chains run TC_TEST_DEV --space DEV --timeout 600
+datasphere task-chains run TC_TEST_DEV --space DEV --output json
 ```
 
 The task-chain command waits for the terminal SAP status. It exits with code
@@ -165,7 +162,7 @@ zero only when the run completes successfully. JSON output is written only to
     uv run playwright install
     ```
 
-## 🔧 Configuration
+## Configuration
 
 The configuration is quite similar to the
 [official SAP Datasphere CLI](Configuration). In Datasphere you need to create
@@ -228,18 +225,14 @@ client_id = ""
 secret = ""
 ```
 
-## 🚀 Usage
+## Usage
 
 ### Execution
 
-Run it from the terminal **using any of the following commands**:
+Run it from the terminal:
 
 ```bash
 datasphere
-```
-
-```bash
-datasphere-cli
 ```
 
 ### First Run / Expired Tokens
@@ -265,34 +258,14 @@ The program starts with an interactive menu:
 
 ### Directory Structure
 
-The `datasphere/` folder will be created in the directory where you run the
-program:
+The `datasphere/` folder is created in the directory where you run the program.
+It contains two workspace directories:
 
-```
-datasphere/
-  tasks.csv                             # shared task list (input)
-  runs/
-    2026-07-12_14-30-05_persist-views/  # one folder per executed action
-      results.csv                       # uniform result report
-      export.json / export.csv          # extracted data (export actions only)
-```
-
-- **`tasks.csv`**: One shared task list for all task-driven actions with the
-                   columns `entity`, `space` and `attribute`. The `entity`
-                   column holds the view, task chain or analytical model name
-                   depending on the action. `attribute` is only required for
-                   creating partitions and can be left empty otherwise. The
-                   file is created automatically on first use.
-- **`runs/`**: Every executed action writes into its own timestamped folder —
-               previous results are never overwritten.
-- **`results.csv`**: Same columns for every action: `entity`, `space`,
-                     `success`, `detail` and `runtime`. `detail` explains
-                     skips and outcomes (e.g. `no_partitions`,
-                     `missing_attribute`, `skipped_same_type`), `runtime` is
-                     in seconds where measured.
-- **`export.json` / `export.csv`**: Data extracted by the export actions
-                                    (action-specific structure, see the
-                                    function overview below).
+- **`datasphere/tasks/`**: CSV input files that specify what should be processed.
+  Missing task templates are created with their required headers.
+- **`datasphere/results/`**: CSV and JSON results written by command adapters.
+  Existing files are preserved at startup and replaced only when a command
+  writes its complete result.
 
 ### Threading
 
@@ -305,18 +278,18 @@ A thread count of 5-10 has proven to work well.
 
 You can stop program execution at any time by pressing `Ctrl + C`.
 
-## 📖 Detailed Function Overview
+## Detailed Function Overview
 
 ### 1. Analytical Models
 
 <details>
 <summary>
     <strong>
-        1.1 Export All Analytical Models with their Views
+        1.1 Get Analytical-Model View Dependencies
     </strong>
 </summary>
 
-Creates an overview of **ALL** analytical models with their views in JSON format.
+Creates an overview of analytical models and their views in JSON format.
 
 **Required task file:** None
 
@@ -326,25 +299,30 @@ Creates an overview of **ALL** analytical models with their views in JSON format
                                 multiple analytical models are only saved once
                                 and not for every model.
 
-**Output file:** `export.json` in the run folder
+**Output file:** `datasphere/results/analytical_models_get_view_dependencies.json`
 
 **Example output:**
 
 ```json
 {
-    "6BB18AB407AC02FH23804E421859F129": {
-        "name": "Sales Analytical Model",
-        "dependencies": {
-            "606E8AB407FG02FB18004E438092F770": [
-                "SALES_DEPARTMENT",
-                "Sales2025"
-            ],
-            "606E8AB407FG02FB58929E438092F771": [
-                "MASTER_DATA",
-                "Customers"
+    "results": [
+        {
+            "analytical_model": "Sales Analytical Model",
+            "space": "SALES_DEPARTMENT",
+            "status": "completed",
+            "analytical_model_id": "6BB18AB407AC02FH23804E421859F129",
+            "dependencies": [
+                {
+                    "view_id": "606E8AB407FG02FB18004E438092F770",
+                    "view": "Sales2025",
+                    "space": "SALES_DEPARTMENT",
+                    "status": "completed"
+                }
             ]
         }
-    }
+    ],
+    "summary": {"total": 1, "succeeded": 1, "failed": 0,
+                 "skipped": 0, "timed_out": 0}
 }
 ```
 
@@ -353,7 +331,7 @@ Creates an overview of **ALL** analytical models with their views in JSON format
 <details>
 <summary>
     <strong>
-        1.2 Export All Analytical Models of a Specific Space with their Views
+        1.2 Get Analytical-Model View Dependencies for a Space
     </strong>
 </summary>
 
@@ -369,25 +347,26 @@ specific space.
                                 multiple analytical models are only saved once
                                 and not for every model.
 
-**Output file:** `export_<space_name>.json` in the run folder
+**Output file:** `datasphere/results/analytical_models_get_view_dependencies.json`
+
+For a space-scoped run, the implementation adds a safe space suffix before the
+`.json` extension.
 
 **Example output:**
 
 ```json
 {
-    "6BB18AB407AC02FH23804E421859F129": {
-        "name": "Sales Analytical Model",
-        "dependencies": {
-            "606E8AB407FG02FB18004E438092F770": [
-                "SALES_DEPARTMENT",
-                "Sales2025"
-            ],
-            "606E8AB407FG02FB58929E438092F771": [
-                "MASTER_DATA",
-                "Customers"
-            ]
+    "results": [
+        {
+            "analytical_model": "Sales Analytical Model",
+            "space": "SALES_DEPARTMENT",
+            "status": "completed",
+            "analytical_model_id": "6BB18AB407AC02FH23804E421859F129",
+            "dependencies": []
         }
-    }
+    ],
+    "summary": {"total": 1, "succeeded": 1, "failed": 0,
+                 "skipped": 0, "timed_out": 0}
 }
 ```
 
@@ -396,48 +375,56 @@ specific space.
 <details>
 <summary>
     <strong>
-        1.3 Runtime Analysis for Persisting All Views of Analytical Models
+        1.3 Measure Persistence for Analytical-Model Views
     </strong>
 </summary>
 
-Checks the persistence time for all views of the analytical models listed in
-the task file.
+Measures persistence for all views of the analytical models listed in the task
+file.
 
-**Required task file:** `datasphere/tasks.csv` (`entity` = analytical model
-name)
+**Required task file:**
+`datasphere/tasks/analytical_models_measure_view_persistence.csv`
+
+**Task headers:** `analytical_model,space`
 
 **Parameters:** None
 
-**Output file:** `export.json` in the run folder
+**Output file:**
+`datasphere/results/analytical_models_measure_view_persistence.json`
 
 **Example output:**
 
 ```json
 {
-    "6BB18AB407AC02FH23804E421859F129": {
-        "name": "Sales Analytical Model",
-        "dependencies": {
-            "606E8AB407FG02FB18004E438092F770": {
-                "space": "SALES_DEPARTMENT",
-                "name": "Sales2025",
-                "runtime": 78,
-                "alreadyPersisted": true,
-                "removedPersistency": false
-            },
-            "606E8AB407FG02FB58929E438092F771": {
-                "space": "MASTER_DATA",
-                "name": "Customers",
-                "runtime": 123,
-                "alreadyPersisted": false,
-                "removedPersistency": true
-            }
+    "results": [
+        {
+            "analytical_model": "Sales Analytical Model",
+            "space": "SALES_DEPARTMENT",
+            "status": "completed",
+            "analytical_model_id": "6BB18AB407AC02FH23804E421859F129",
+            "dependencies": [
+                {
+                    "view_id": "606E8AB407FG02FB18004E438092F770",
+                    "view": "Sales2025",
+                    "space": "SALES_DEPARTMENT",
+                    "status": "completed",
+                    "previously_persisted": true,
+                    "runtime_seconds": 78,
+                    "persistence_removed": false,
+                    "manual_intervention": false
+                }
+            ]
         }
-    }
+    ],
+    "summary": {"total": 1, "succeeded": 1, "failed": 0,
+                 "skipped": 0, "timed_out": 0}
 }
 ```
 
-**Note:** A `runtime` value of `null` indicates an error occurred (or the
-          program is still running if the file is opened during execution).
+**Note:** A `runtime_seconds` value of `null` indicates that no runtime was
+           available. Persistence and cleanup log IDs are included when
+          SAP provides them; `manual_intervention` is `true` if cleanup may
+          still be required.
 
 </details>
 
@@ -507,19 +494,21 @@ LEGACY_TABLE,,False,skipped_no_statistics,
 <details>
 <summary><strong>3.1 Run Task Chains</strong></summary>
 
-Runs all task chains in the task file and exports the results of the runs.
+Runs all task chains in the task file and writes the complete run results.
 
-**Required task file:** `datasphere/tasks.csv` (`entity` = task chain name)
+**Required task file:** `datasphere/tasks/task_chains_run.csv`
+
+**Task headers:** `task_chain,space`
 
 **Parameters:** None
 
-**Output file:** `results.csv` in the run folder
+**Output file:** `datasphere/results/task_chains_run.csv`
 
 **Example output:**
 
 ```csv
-entity,space,success,detail,runtime
-AnalyzeSales2025,SALES_DEPARTMENT,True,,1025
+task_chain,space,status,sap_status,log_id,runtime_seconds
+AnalyzeSales2025,SALES_DEPARTMENT,completed,COMPLETED,operation-1,1025
 ```
 
 </details>
@@ -529,25 +518,28 @@ AnalyzeSales2025,SALES_DEPARTMENT,True,,1025
 <details>
 <summary>
     <strong>
-        4.1 Export All Views with a Perfect Persistence Score of 10
+        4.1 Find Views with a Perfect Persistence Score of 10
             (Using View Analyzer)
     </strong>
 </summary>
 
-Performs view analysis on all views and saves all views with a perfect
+Performs view analysis on all views and saves the views with a perfect
 persistence score of 10.
 
 **Required task file:** None
 
 **Parameters:** None
 
-**Output file:** `export.csv` in the run folder
+**Output file:** `datasphere/results/views_find_persistence_candidates.csv`
+
+**Result headers:**
+`source_view,source_space,view,space,business_name,score,is_persisted,status,log_id`
 
 **Example output:**
 
 ```csv
-entity,space,businessName,isPersisted
-Sales2025,SALES_DEPARTMENT,Sales (2025),True
+source_view,source_space,view,space,business_name,score,is_persisted,status,log_id
+Sales2025,SALES_DEPARTMENT,Sales2025,SALES_DEPARTMENT,Sales (2025),10,false,completed,operation-1
 ```
 
 </details>
@@ -555,7 +547,7 @@ Sales2025,SALES_DEPARTMENT,Sales (2025),True
 <details>
 <summary>
     <strong>
-        4.2 Export All Views That Have an Attribute That Contains a Specific
+        4.2 Find Views That Have an Attribute Containing a Specific
             Substring
     </strong>
 </summary>
@@ -568,14 +560,16 @@ Finds all views that have an attribute containing a specific substring.
 
 - **Search word**: The substring to search for (e.g., `YEAR`)
 
-**Output file:** `export.csv` in the run folder
+**Output file:** `datasphere/results/views_find_attribute_matches.csv`
+
+**Result headers:** `view,space,business_name,attribute,status`
 
 **Example output (searching for "YEAR"):**
 
 ```csv
-entity,space,businessName,attribute
-Sales2025,SALES_DEPARTMENT,Sales (2025),FISCAL_YEAR
-Customers,SALES_DEPARTMENT,All Customers,YEAR
+view,space,business_name,attribute,status
+Sales2025,SALES_DEPARTMENT,Sales (2025),FISCAL_YEAR,completed
+Customers,SALES_DEPARTMENT,All Customers,YEAR,completed
 ```
 
 </details>
@@ -586,8 +580,9 @@ Customers,SALES_DEPARTMENT,All Customers,YEAR
 Creates partitions for views based on a yearly interval. Only columns with full
 year numbers can be used (in Datasphere: `STRING(4)`).
 
-**Required task file:** `datasphere/tasks.csv` (`entity` = view name,
-`attribute` = column to partition by)
+**Required task file:** `datasphere/tasks/views_create_partitioning.csv`
+
+**Task headers:** `view,space,attribute`
 
 **Parameters:**
 
@@ -603,14 +598,16 @@ year numbers can be used (in Datasphere: `STRING(4)`).
 - ...
 - Partition 40: `>= 2039 AND < 2040`
 
-**Output file:** `results.csv` in the run folder
+**Output file:** `datasphere/results/views_create_partitioning.csv`
+
+**Result headers:** `view,space,attribute,status`
 
 **Example output:**
 
 ```csv
-entity,space,success,detail,runtime
-Sales2025,SALES_DEPARTMENT,True,created,
-Customers,SALES_DEPARTMENT,False,missing_attribute,
+view,space,attribute,status
+Sales2025,SALES_DEPARTMENT,FISCAL_YEAR,created
+Customers,SALES_DEPARTMENT,YEAR,created
 ```
 
 </details>
@@ -620,17 +617,21 @@ Customers,SALES_DEPARTMENT,False,missing_attribute,
 
 Removes all existing partitions from specified views.
 
-**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
+**Required task file:** `datasphere/tasks/views_delete_partitioning.csv`
+
+**Task headers:** `view,space`
 
 **Parameters:** None
 
-**Output file:** `results.csv` in the run folder
+**Output file:** `datasphere/results/views_delete_partitioning.csv`
+
+**Result headers:** `view,space,status`
 
 **Example output:**
 
 ```csv
-entity,space,success,detail,runtime
-Sales2025,SALES_DEPARTMENT,True,,
+view,space,status
+Sales2025,SALES_DEPARTMENT,deleted
 ```
 
 </details>
@@ -642,21 +643,24 @@ Locks partitions up to and including a specific year (<= year entered).
 Requires that the views already have partitions. Only partitions with yearly
 values can be locked (in Datasphere `STRING(4)`).
 
-**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
+**Required task file:** `datasphere/tasks/views_lock_partitions.csv`
+
+**Task headers:** `view,space`
 
 **Parameters:**
 
 - **Year**: The year up to which partitions should be locked
             (the entered year is also locked)
 
-**Output file:** `results.csv` in the run folder
+**Output file:** `datasphere/results/views_lock_partitions.csv`
+
+**Result headers:** `view,space,status`
 
 **Example output:**
 
 ```csv
-entity,space,success,detail,runtime
-Sales2025,SALES_DEPARTMENT,True,locked,
-Customers,SALES_DEPARTMENT,False,no_partitions,
+view,space,status
+Sales2025,SALES_DEPARTMENT,locked
 ```
 
 </details>
@@ -666,17 +670,21 @@ Customers,SALES_DEPARTMENT,False,no_partitions,
 
 Unlocks all existing partitions for specified views.
 
-**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
+**Required task file:** `datasphere/tasks/views_unlock_partitions.csv`
+
+**Task headers:** `view,space`
 
 **Parameters:** None
 
-**Output file:** `results.csv` in the run folder
+**Output file:** `datasphere/results/views_unlock_partitions.csv`
+
+**Result headers:** `view,space,status`
 
 **Example output:**
 
 ```csv
-entity,space,success,detail,runtime
-Sales2025,SALES_DEPARTMENT,True,unlocked,
+view,space,status
+Sales2025,SALES_DEPARTMENT,unlocked
 ```
 
 </details>
@@ -686,20 +694,22 @@ Sales2025,SALES_DEPARTMENT,True,unlocked,
 
 Persists all views listed in the task file.
 
-**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
+**Required task file:** `datasphere/tasks/views_persist.csv`
 
-**Parameters:**
+**Task headers:** `view,space`
 
-- **Save runtime** (yes/no): Whether to record and save the persistence runtime
+**Parameters:** None. Runtime is always recorded when SAP returns it.
 
-**Output file:** `results.csv` in the run folder
+**Output file:** `datasphere/results/views_persist.csv`
+
+**Result headers:** `view,space,status,sap_status,log_id,runtime_seconds`
 
 **Example output:**
 
 ```csv
-entity,space,success,detail,runtime
-Sales2025,SALES_DEPARTMENT,True,,37
-Customers,SALES_DEPARTMENT,True,,9
+view,space,status,sap_status,log_id,runtime_seconds
+Sales2025,SALES_DEPARTMENT,completed,COMPLETED,operation-1,37
+Customers,SALES_DEPARTMENT,completed,COMPLETED,operation-2,9
 ```
 
 </details>
@@ -709,22 +719,26 @@ Customers,SALES_DEPARTMENT,True,,9
 
 Removes persistence from all views listed in the task file.
 
-**Required task file:** `datasphere/tasks.csv` (`entity` = view name)
+**Required task file:** `datasphere/tasks/views_unpersist.csv`
+
+**Task headers:** `view,space`
 
 **Parameters:** None
 
-**Output file:** `results.csv` in the run folder
+**Output file:** `datasphere/results/views_unpersist.csv`
+
+**Result headers:** `view,space,status,sap_status,log_id,runtime_seconds`
 
 **Example output:**
 
 ```csv
-entity,space,success,detail,runtime
-Sales2025,SALES_DEPARTMENT,True,,
+view,space,status,sap_status,log_id,runtime_seconds
+Sales2025,SALES_DEPARTMENT,completed,COMPLETED,operation-1,37
 ```
 
 </details>
 
-## 👨‍💻 Development
+## Development
 
 ### Code Quality
 
@@ -755,7 +769,7 @@ The project uses:
 The program uses logging. Log files are created for each day and saved in the
 `.logs/` folder of the directory where you run the program.
 
-## 📃 Notes
+## Notes
 
 - **Credentials**: OAuth tokens are stored in the operating system credential
                    store, separated by tenant and OAuth client ID. The client
@@ -765,16 +779,16 @@ The program uses logging. Log files are created for each day and saved in the
                         before an action starts. A browser opens only when no
                         valid stored session is available.
 - **Threading**: "Parallel" execution is implemented using asynchronous
-                 requests. Running tasks simoultaneously can improve
+                 requests. Running tasks simultaneously can improve
                  performance but should be used with caution to avoid
                  triggering rate limits.
-- **Export/Results**: All files in `exports/` and `results/` are overwritten on
-                      the next program start. You can either move or rename
-                      them to prevent results being overwritten.
+- **Workspace files**: Task templates are created when missing. Result files
+                       are retained at startup and replaced atomically when a
+                       command completes.
 - **Browser**: Browser authentication uses a temporary Playwright context and
                a loopback-only OAuth callback.
 
-## 🚨 Disclaimer
+## Disclaimer
 
 **Important Note**: This tool is designed for use with SAP Datasphere. Please
                     ensure you have the necessary permissions before executing

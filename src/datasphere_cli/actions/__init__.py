@@ -1,37 +1,21 @@
+# ruff: noqa: F401
+
 from datasphere_cli.actions.analytical_models import (
-    check_runtime_for_all_views_of_analytical_models,
-    get_all_views_for_analytical_models,
-    get_all_views_for_analytical_models_in_space,
+    export_analytical_model_view_dependencies,
+    measure_analytical_model_view_persistence_from_file,
 )
 from datasphere_cli.actions.remote_tables import (
-    create_statistics,
-    refresh_statistics,
+    configure_remote_table_statistics,
+    refresh_remote_table_statistics,
 )
-from datasphere_cli.actions.task_chains import run_task_chains
+from datasphere_cli.actions.task_chains import run_task_chains_from_file
 from datasphere_cli.actions.views import (
-    create_partitioning_for_views,
-    create_view_analytics,
-    get_all_views_where_attribute_contains,
-    lock_partitions_until_year,
-    persist_views,
-    remove_partitioning_for_views,
-    unlock_all_partitions,
-    unpersist_views,
+    create_view_partitioning_from_file,
+    delete_view_partitioning_from_file,
+    export_view_attribute_matches,
+    export_view_persistence_candidates,
+    lock_view_partitions_from_file,
+    persist_views_from_file,
+    unlock_view_partitions_from_file,
+    unpersist_views_from_file,
 )
-
-__all__ = [
-    "check_runtime_for_all_views_of_analytical_models",
-    "create_partitioning_for_views",
-    "create_statistics",
-    "create_view_analytics",
-    "get_all_views_for_analytical_models",
-    "get_all_views_for_analytical_models_in_space",
-    "get_all_views_where_attribute_contains",
-    "lock_partitions_until_year",
-    "persist_views",
-    "refresh_statistics",
-    "remove_partitioning_for_views",
-    "run_task_chains",
-    "unlock_all_partitions",
-    "unpersist_views",
-]

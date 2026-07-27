@@ -1,105 +1,130 @@
-from typing import TypedDict
+from typing import Literal, TypedDict
 
-# ===== Task file rows =====
 
-class ViewRef(TypedDict):
-    entity: str
+class AnalyticalModelTaskRecord(TypedDict):
+    analytical_model: str
     space: str
 
 
-class PartitionTask(TypedDict):
-    entity: str
+class TaskChainTaskRecord(TypedDict):
+    task_chain: str
     space: str
+
+
+class ViewTaskRecord(TypedDict):
+    view: str
+    space: str
+
+
+class ViewPartitioningTaskRecord(ViewTaskRecord):
     attribute: str
 
 
-class ModelRef(TypedDict):
-    modelname: str
+class TaskChainResultRecord(TypedDict):
+    task_chain: str
     space: str
+    status: str
+    sap_status: str | None
+    log_id: str | None
+    runtime_seconds: int | None
 
 
-# ===== Result file rows =====
-
-class ViewAttributeMatch(TypedDict):
-    entity: str
+class ViewPersistenceResultRecord(TypedDict):
+    view: str
     space: str
-    businessName: str
+    status: str
+    sap_status: str | None
+    log_id: str | None
+    runtime_seconds: int | None
+
+
+class ViewStatusResultRecord(TypedDict):
+    view: str
+    space: str
+    status: str
+
+
+class ViewPartitioningResultRecord(TypedDict):
+    view: str
+    space: str
     attribute: str
+    status: str
 
 
-class PersistenceCandidate(TypedDict):
-    entity: str
+class ViewAttributeResultRecord(TypedDict):
+    view: str
     space: str
-    businessName: str
-    isPersisted: bool
-
-
-class PartitionCreateResult(TypedDict):
-    entity: str
-    space: str
+    business_name: str
     attribute: str
-    createdPartition: bool
+    status: str
 
 
-class PartitionDeleteResult(TypedDict):
-    entity: str
+class ViewPersistenceCandidateResultRecord(TypedDict):
+    source_view: str
+    source_space: str
+    view: str | None
+    space: str | None
+    business_name: str | None
+    score: int | float | None
+    is_persisted: bool | None
+    status: str
+    log_id: str | None
+
+
+class BatchSummaryRecord(TypedDict):
+    total: int
+    succeeded: int
+    failed: int
+    skipped: int
+    timed_out: int
+
+
+class AnalyticalModelDependencyRecord(TypedDict):
+    view_id: str
+    view: str
+    space: str | None
+    status: str
+
+
+class AnalyticalModelDependenciesResultRecord(TypedDict):
+    analytical_model: str
     space: str
-    removedPartition: bool
+    status: str
+    analytical_model_id: str | None
+    dependencies: list[AnalyticalModelDependencyRecord]
 
 
-class PartitionLockResult(TypedDict):
-    entity: str
+class AnalyticalModelDependenciesBatchRecord(TypedDict):
+    results: list[AnalyticalModelDependenciesResultRecord]
+    summary: BatchSummaryRecord
+
+
+class AnalyticalModelPersistenceItemRecord(TypedDict):
+    view_id: str
+    view: str
+    space: str | None
+    status: str
+    previously_persisted: bool | None
+    runtime_seconds: int | None
+    persistence_sap_status: str | None
+    persistence_log_id: str | None
+    cleanup_sap_status: str | None
+    cleanup_log_id: str | None
+    persistence_removed: bool | None
+    manual_intervention: bool
+
+
+class AnalyticalModelPersistenceResultRecord(TypedDict):
+    analytical_model: str
     space: str
-    lockedPartitions: bool
+    status: str
+    analytical_model_id: str | None
+    dependencies: list[AnalyticalModelPersistenceItemRecord]
 
 
-class PartitionUnlockResult(TypedDict):
-    entity: str
-    space: str
-    unlockedPartitions: bool
+class AnalyticalModelPersistenceBatchRecord(TypedDict):
+    results: list[AnalyticalModelPersistenceResultRecord]
+    summary: BatchSummaryRecord
 
 
-class PersistResult(TypedDict):
-    entity: str
-    space: str
-    isPersisted: bool
-    runtime: int | None
-
-
-class UnpersistResult(TypedDict):
-    entity: str
-    space: str
-    isRemoved: bool
-
-
-class TaskChainRunResult(TypedDict):
-    entity: str
-    space: str
-    isCompleted: bool
-    runtime: int | None
-
-
-# ===== Analytical model exports =====
-
-class ModelWithViews(TypedDict):
-    name: str
-    dependencies: dict[str, str | tuple[str, str]]
-
-
-type ModelsWithViews = dict[str, ModelWithViews]
-
-
-class ViewRuntimeDetails(TypedDict):
-    space: str
-    name: str
-    runtime: int | None
-    alreadyPersisted: bool
-    removedPersistence: bool
-
-
-class ModelRuntimeReport(TypedDict):
-    name: str
-    dependencies: dict[str, ViewRuntimeDetails]
-
-
-type ModelsRuntimeReport = dict[str, ModelRuntimeReport]
+type StatisticsType = Literal["RECORD_COUNT", "SIMPLE", "HISTOGRAM"]

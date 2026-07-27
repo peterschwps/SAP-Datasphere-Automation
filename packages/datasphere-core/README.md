@@ -16,13 +16,9 @@ pip install datasphere-core
 ```python
 import asyncio
 
-from datasphere_core import (
-    CommandContext,
-    DatasphereSession,
-    SessionConfig,
-    StartTaskChainRequest,
-    start_task_chain,
-)
+from datasphere_core import CommandContext, DatasphereSession, SessionConfig
+from datasphere_core.commands.task_chains import run_task_chain
+from datasphere_core.models.task_chains import RunTaskChainRequest
 
 
 async def main() -> None:
@@ -36,9 +32,9 @@ async def main() -> None:
 
     async with DatasphereSession(config) as session:
         await session.authenticate(interactive=True)
-        result = await start_task_chain(
+        result = await run_task_chain(
             CommandContext(client=session.client),
-            StartTaskChainRequest(
+            RunTaskChainRequest(
                 chain="TC_TEST_DEV",
                 space="DEV",
                 timeout_seconds=600,

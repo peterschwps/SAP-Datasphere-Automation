@@ -1,135 +1,104 @@
-from datasphere_api import DatasphereClient
-from datasphere_api.models import StatisticsType
+from datasphere_core import CommandContext
+from datasphere_core.models.remote_tables import (
+    ConfigureRemoteTableStatisticsBatchRequest,
+    ConfigureRemoteTableStatisticsBatchResult,
+    RefreshRemoteTableStatisticsBatchRequest,
+    RefreshRemoteTableStatisticsBatchResult,
+)
+from datasphere_core.models.remote_tables import (
+    StatisticsType as CoreStatisticsType,
+)
 
-from datasphere_cli.concurrency import run_async_tasks
+from datasphere_cli.actions.dispatch import dispatch_command
+from datasphere_cli.files.records import StatisticsType
 from datasphere_cli.logging import logger
 
+_CONFIGURE_COMMAND = "remote_tables.configure_statistics_batch"
+_REFRESH_COMMAND = "remote_tables.refresh_statistics_batch"
 
-async def create_statistics(
-    client: DatasphereClient,
+
+def _log_results(
+    command: str,
+    result: ConfigureRemoteTableStatisticsBatchResult
+    | RefreshRemoteTableStatisticsBatchResult,
+) -> None:
+    for item in result.results:
+        logger.info(
+            "%s for table '%s' in '%s': %s.",
+            command,
+            item.table,
+            item.space,
+            item.status,
+        )
+    logger.info(
+        "%s: %s succeeded, %s failed, %s skipped.",
+        command,
+        result.summary.succeeded,
+        result.summary.failed,
+        result.summary.skipped,
+    )
+
+
+async def configure_remote_table_statistics(
+    context: CommandContext,
+    space: str,
     statistics_type: StatisticsType,
-    thread_count: int,
-) -> None:
-    """
-    Creates statistics for all remote tables and saves the results.
-    Tables that don't support statistics or already have statistics of
-    the given type are skipped.
+    max_concurrency: int = 4,
+) -> ConfigureRemoteTableStatisticsBatchResult:
+    """Configures remote-table statistics through the Core batch command.
 
     Args:
-        client (DatasphereClient): Authenticated client.
-        statistics_type (StatisticsType): Type of the statistic.
-        thread_count (int): Amount of concurrent asynchronous requests.
+        context (CommandContext): Core context with the authenticated client.
+        space (str): Datasphere space containing the remote tables.
+        statistics_type (StatisticsType): Statistics type to configure.
+        max_concurrency (int, optional): Maximum concurrent SAP operations.
+
+    Returns:
+        ConfigureRemoteTableStatisticsBatchResult: Configuration results.
     """
-    all_tables = await client.remote_tables.get_all_tables()
-    run = Run("create-statistics")
-
-    # Function to create or update the statistics of a table
-    async def create_statistics_for_table(table: str) -> None:
-        # Skip tables that don't support statistics or already have
-        # statistics of the given type
-        if not all_tables[table]["statisticsSupported"]:
-            run.append_result(
-                {
-                    "entity": table,
-                    "success": False,
-                    "detail": "skipped_unsupported",
-                }
-            )
-            return
-        if all_tables[table]["statisticsType"] == statistics_type:
-            run.append_result(
-                {
-                    "entity": table,
-                    "success": True,
-                    "detail": "skipped_same_type",
-                }
-            )
-            return
-
-        # Create new statistics or update the existing type
-        if all_tables[table]["statisticsType"] is None:
-            outcome = await client.remote_tables.create_statistics(
-                table, statistics_type
-            )
-        else:
-            outcome = await client.remote_tables.update_statistics(
-                table, statistics_type
-            )
-
-        # Log the outcome (errors are logged by the client)
-        if outcome == "already_exists":
-            logger.debug(
-                "Statistics for table '%s' already exists. Skipping...",
-                table,
-            )
-        elif outcome in ("created", "updated"):
-            logger.info("Created statistics for table '%s'.", table)
-        run.append_result(
-            {
-                "entity": table,
-                "success": outcome in ("created", "updated"),
-                "detail": outcome,
-            }
-        )
-
-    await run_async_tasks(
-        all_tables, create_statistics_for_table, thread_count
+    request = ConfigureRemoteTableStatisticsBatchRequest(
+        tables=None,
+        space=space,
+        statistics_type=CoreStatisticsType(statistics_type),
+        max_concurrency=max_concurrency,
     )
-    run.log_saved()
+    result = await dispatch_command(
+        _CONFIGURE_COMMAND,
+        context,
+        request,
+        ConfigureRemoteTableStatisticsBatchRequest,
+        ConfigureRemoteTableStatisticsBatchResult,
+    )
+    _log_results(_CONFIGURE_COMMAND, result)
+    return result
 
 
-async def refresh_statistics(
-    client: DatasphereClient,
-    thread_count: int,
-) -> None:
-    """
-    Refreshes statistics for all remote tables and saves the results.
-    Tables that don't support statistics or don't have statistics are
-    skipped.
+async def refresh_remote_table_statistics(
+    context: CommandContext,
+    space: str,
+    max_concurrency: int = 4,
+) -> RefreshRemoteTableStatisticsBatchResult:
+    """Refresh remote-table statistics through the Core batch command.
 
     Args:
-        client (DatasphereClient): Authenticated client.
-        thread_count (int): Amount of concurrent asynchronous requests.
+        context (CommandContext): Core context with the authenticated client.
+        space (str): Datasphere space containing the remote tables.
+        max_concurrency (int, optional): Maximum concurrent SAP operations.
+
+    Returns:
+        RefreshRemoteTableStatisticsBatchResult: Statistics operation results.
     """
-    all_tables = await client.remote_tables.get_all_tables()
-    run = Run("refresh-statistics")
-
-    # Function to refresh the statistics of a table
-    async def refresh_statistics_for_table(table: str) -> None:
-        # Skip tables that don't support statistics or don't have
-        # statistics
-        if not all_tables[table]["statisticsSupported"]:
-            run.append_result(
-                {
-                    "entity": table,
-                    "success": False,
-                    "detail": "skipped_unsupported",
-                }
-            )
-            return
-        if all_tables[table]["statisticsType"] is None:
-            run.append_result(
-                {
-                    "entity": table,
-                    "success": False,
-                    "detail": "skipped_no_statistics",
-                }
-            )
-            return
-
-        # Refresh the statistics (errors are logged by the client)
-        refreshed = await client.remote_tables.refresh_statistics(table)
-        if refreshed:
-            logger.info("Refreshed statistics for table '%s'.", table)
-        run.append_result(
-            {
-                "entity": table,
-                "success": refreshed,
-                "detail": "refreshed" if refreshed else "failed",
-            }
-        )
-
-    await run_async_tasks(
-        all_tables, refresh_statistics_for_table, thread_count
+    request = RefreshRemoteTableStatisticsBatchRequest(
+        tables=None,
+        space=space,
+        max_concurrency=max_concurrency,
     )
-    run.log_saved()
+    result = await dispatch_command(
+        _REFRESH_COMMAND,
+        context,
+        request,
+        RefreshRemoteTableStatisticsBatchRequest,
+        RefreshRemoteTableStatisticsBatchResult,
+    )
+    _log_results(_REFRESH_COMMAND, result)
+    return result
