@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.0](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.4.0...v0.5.0) (2026-07-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* unified task input and per-run result folders
+
+### Features
+
+* took over session token persistence from the library ([adbdbb9](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/adbdbb9d68f7a7dbe4aae516e3c0184f48c57bd8))
+* unified task input and per-run result folders ([a1ea4c5](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/a1ea4c543d20053a6fa22d629ba1b2bca53272f0))
+
+
+### Bug Fixes
+
+* removed doubled Datasphere folder in the Windows user dirs ([4c0bb08](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/4c0bb08ffc737b06d42984a324bf4d1fea230cd4))
+
+
+### Documentation
+
+* corrected settings, token and log file paths in the readme ([2f52c80](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/2f52c8007d6cbfc0957219ceb7b114018b0f8db6))
+
 ## [0.4.0](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.3.2...v0.4.0) (2026-07-08)
 
 
