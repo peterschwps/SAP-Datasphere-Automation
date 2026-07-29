@@ -185,7 +185,17 @@ class DatasphereSession:
             await self._client.aclose()
 
     async def __aenter__(self) -> "DatasphereSession":
+        """
+        Enters the session context.
+
+        Returns:
+            DatasphereSession: The session itself.
+        """
         return self
 
     async def __aexit__(self, *args: object) -> None:
+        """
+        Closes the API client when leaving the session context.
+        """
+        _ = args
         await self.aclose()
