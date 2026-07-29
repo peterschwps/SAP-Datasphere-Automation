@@ -9,7 +9,6 @@ from datasphere_core.context import (
 from datasphere_core.credentials import KeyringTokenStore, TokenStore
 from datasphere_core.definitions import (
     CommandDefinition,
-    CommandHandler,
     CommandRegistry,
 )
 from datasphere_core.errors import (
@@ -20,8 +19,11 @@ from datasphere_core.errors import (
     TokenStoreError,
 )
 from datasphere_core.execution import (
-    execute_batch,
-    execute_command,
+    CommandHandler,
+    batch_command,
+    command,
     execute_with_concurrency_limit,
+    report_batch_results,
+    run_batch,
 )
 from datasphere_core.registry import COMMANDS
