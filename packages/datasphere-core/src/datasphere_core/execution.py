@@ -1,279 +1,342 @@
 import asyncio
+from collections import Counter
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import cast
+from dataclasses import replace
+from functools import wraps
+from typing import Any, Protocol
 
 from datasphere_core.context import CommandContext
 from datasphere_core.errors import CommandTimeoutError
 from datasphere_core.models.common import (
-    BatchItemFinalStatus,
     BatchItemResult,
     BatchSummary,
     CommandProgress,
     CommandProgressPhase,
+    CommandStatus,
+    Outcome,
     validate_max_concurrency,
 )
 
-type CommandOperation[RequestT, ResultT] = Callable[
+# Type alias for a command handler: receives RequestT and returns ResultT
+type CommandHandler[RequestT, ResultT] = Callable[
     [CommandContext, RequestT],
     Awaitable[ResultT],
 ]
-type BatchOperation[RequestT, ResultT] = Callable[
-    [BatchExecution, RequestT],
-    Awaitable[ResultT],
-]
+
+# Lifecycle phase each outcome ends in. Skipped items are not a failure, so
+# they complete like a success.
+_TERMINAL_PHASES = {
+    Outcome.SUCCEEDED: CommandProgressPhase.COMPLETED,
+    Outcome.SKIPPED: CommandProgressPhase.COMPLETED,
+    Outcome.FAILED: CommandProgressPhase.FAILED,
+    Outcome.TIMED_OUT: CommandProgressPhase.TIMED_OUT,
+}
 
 
-@dataclass(slots=True)
-class BatchProgressState:
+class StatusResult(Protocol):
     """
-    Mutable dataclass to hold metadata information about a batch run.
+    Structural type of every single item result. This includes single commands
+    as well as the items within a batch.
     """
-    total_items: int | None = None
-    succeeded: int = 0
-    failed: int = 0
-    skipped: int = 0
-    timed_out: int = 0
 
     @property
-    def completed_items(self) -> int:
-        return self.succeeded + self.failed + self.skipped + self.timed_out
-
-    def record(self, status: BatchItemFinalStatus) -> None:
+    def status(self) -> CommandStatus:
         """
-        Records the outcome of one completed batch item by adding it to the
-        corresponding counter.
-
-        Args:
-            status (BatchItemFinalStatus): Status of the batch item execution.
+        Returns the status of the command result.
         """
-        match status:
-            case BatchItemFinalStatus.SUCCEEDED:
-                self.succeeded += 1
-            case BatchItemFinalStatus.FAILED:
-                self.failed += 1
-            case BatchItemFinalStatus.SKIPPED:
-                self.skipped += 1
-            case BatchItemFinalStatus.TIMED_OUT:
-                self.timed_out += 1
-
-    def to_summary(self) -> BatchSummary:
-        """
-        Creates a summary from the recorded batch outcomes. This summary
-        displays the result of the full batch exection.
-
-        Returns:
-            BatchSummary: Aggregate outcome counts for completed items.
-        """
-        return BatchSummary(
-            total=self.completed_items,
-            succeeded=self.succeeded,
-            failed=self.failed,
-            skipped=self.skipped,
-            timed_out=self.timed_out,
-        )
+        ...
 
 
-@dataclass(slots=True)
-class BatchExecution:
+class BatchResult(Protocol):
     """
-    Runtime state and shared operations for batch executions. Supplied to the
-    all batch operations.
+    Structural type for the final result of a batch command.
     """
-    context: CommandContext
-    command: str
-    progress_state: BatchProgressState
-    _progress_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    def set_total_items(self, total_items: int) -> None:
+    @property
+    def summary(self) -> BatchSummary:
         """
-        Sets the total number of items within the batch.
-
-        Args:
-            total_items (int): Total number of items in the batch.
+        Returns the aggregate outcome counts of the batch.
         """
-        self.progress_state.total_items = total_items
-
-    async def complete_item(
-        self,
-        *,
-        item_index: int,
-        final_status: BatchItemFinalStatus,
-        result: object,
-    ) -> None:
-        """
-        Records and reports one completed batch item and its result. Reports
-        will only be delivered if the caller supplied callbacks.
-
-        Args:
-            item_index (int): Index of the completed batch item.
-            final_status (BatchItemFinalStatus): Final status of the completed
-                                                 batch item.
-            result (object): Command-specific batch item result.
-
-        Raises:
-            RuntimeError: If the total number of items is not known.
-        """
-        total_items = self.progress_state.total_items
-        if total_items is None:
-            raise RuntimeError(
-                "Cannot report a batch item result without a total item count."
-            )
-        async with self._progress_lock:
-            # Add result to counter of internal progress state
-            self.progress_state.record(final_status)
-            # Report phase 'advanced' for each completed batch item
-            await self.context.report(
-                CommandProgress(
-                    command=self.command,
-                    phase=CommandProgressPhase.ADVANCED,
-                    completed_items=self.progress_state.completed_items,
-                    total_items=total_items,
-                    succeeded_items=self.progress_state.succeeded,
-                    failed_items=self.progress_state.failed,
-                    skipped_items=self.progress_state.skipped,
-                    timed_out_items=self.progress_state.timed_out,
-                    item_index=item_index,
-                )
-            )
-            # Report actual result to the caller (if callback supplied)
-            # This could be use to persist results of batch items while the
-            # batch itself is still running
-            await self.context.report_batch_item_result(
-                BatchItemResult(
-                    command=self.command,
-                    item_index=item_index,
-                    total_items=total_items,
-                    result=result,
-                )
-            )
-
-    async def execute_items[ItemT, ResultT](
-        self,
-        items: tuple[ItemT, ...],
-        operation: CommandOperation[ItemT, ResultT],
-        *,
-        max_concurrency: int,
-        classify: Callable[[ResultT], BatchItemFinalStatus],
-    ) -> tuple[ResultT, ...]:
-        """
-        Handles the execution of all items in a batch. Calls the required
-        methods to report status updates and results.
-
-        Args:
-            items (tuple[ItemT, ...]): Items to execute.
-            operation (CommandOperation[ItemT, ResultT]): Operation to apply to
-                                                          items.
-            max_concurrency (int): Maximum number of concurrent operations.
-            classify (Callable[[ResultT], BatchItemFinalStatus]): Callable to
-                                                                  categorize
-                                                                  each item
-                                                                  result.
-
-        Returns:
-            tuple[ResultT, ...]: Item results in input order.
-        """
-        self.set_total_items(len(items))
-
-        async def execute_indexed(indexed_item: tuple[int, ItemT]) -> ResultT:
-            """
-            Executes one batch item and handles its result. This function is
-            used to handle all batch items in the async loop.
-
-            Args:
-                indexed_item (tuple[int, ItemT]): Tuple with the index of the
-                                                  batch item and the item
-                                                  itself.
-
-            Returns:
-                ResultT: Result of the operation.
-            """
-            index, item = indexed_item
-            result = await operation(self.context, item)
-            await self.complete_item(
-                item_index=index,
-                final_status=classify(result),
-                result=result,
-            )
-            return result
-
-        return await execute_with_concurrency_limit(
-            items=tuple(enumerate(items)),
-            operation=execute_indexed,
-            max_concurrency=max_concurrency,
-        )
-
-    def to_summary(self) -> BatchSummary:
-        """
-        Creates a summary from the recorded batch outcomes. This summary
-        displays the result of the full batch exection.
-
-        Returns:
-            BatchSummary: Aggregate outcome counts for completed items.
-        """
-        return self.progress_state.to_summary()
+        ...
 
 
-def _lifecycle_progress(
-    command: str,
-    phase: CommandProgressPhase,
-    *,
-    message: str | None = None,
-    batch_progress_state: BatchProgressState | None = None,
-) -> CommandProgress:
+def summarize(counts: Counter[Outcome]) -> BatchSummary:
     """
-    Build a CommandProgress object from the supplied arguments. Differentiates
-    between the progress of a single command execution (e.g. persisting a view)
-    and the progress of a batch execution (e.g. persisting multiple views).
+    Builds the summary of a batch run from its recorded outcomes.
 
     Args:
-        command (str): Name of the command (e.g. 'views.persist').
-        phase (CommandProgressPhase): Phase of the command. If the command is a
-                                      batch execution it refers to the whole
-                                      batch, not a single item.
-        message (str | None, optional): Message to provide feedback to the
-                                        caller. This can be used to reroute an
-                                        error message. Defaults to None.
-        batch_progress_state (BatchProgressState | None, optional):
-            Object holding metadata information about a batch execution.
-            Defaults to None.
+        counts (Counter[Outcome]): Number of items recorded per outcome.
 
     Returns:
-        CommandProgress: Object representing the current progress of a command
-                         execution.
+        BatchSummary: Aggregate outcome counts of the batch.
     """
-    # If the progress only belongs to a single command execution
-    if batch_progress_state is None:
-        return CommandProgress(
-            command=command,
-            phase=phase,
-            message=message,
-        )
-
-    # If the progress belongs to a batch execution
-    return CommandProgress(
-        command=command,
-        phase=phase,
-        message=message,
-        completed_items=batch_progress_state.completed_items,
-        total_items=batch_progress_state.total_items,
-        succeeded_items=batch_progress_state.succeeded,
-        failed_items=batch_progress_state.failed,
-        skipped_items=batch_progress_state.skipped,
-        timed_out_items=batch_progress_state.timed_out,
+    return BatchSummary(
+        total=sum(counts.values()),
+        succeeded=counts[Outcome.SUCCEEDED],
+        failed=counts[Outcome.FAILED],
+        skipped=counts[Outcome.SKIPPED],
+        timed_out=counts[Outcome.TIMED_OUT],
     )
 
 
-def batch_result_phase(summary: BatchSummary) -> CommandProgressPhase:
+def batch_progress(
+    command: str,
+    phase: CommandProgressPhase,
+    summary: BatchSummary,
+    *,
+    total_items: int | None = None,
+    item_index: int | None = None,
+) -> CommandProgress:
     """
-    Maps a batch summary to its exact terminal lifecycle phase. Checks if any
-    items failed or timed out.
+    Builds a progress update that carries the current batch counters.
+
+    Args:
+        command (str): Name of the command (e.g. 'views.persist_batch').
+        phase (CommandProgressPhase): Phase to report. Refers to the whole
+                                      batch, except for 'advanced' which
+                                      reports one completed item.
+        summary (BatchSummary): Outcome counts recorded so far.
+        total_items (int | None, optional): Total number of items in the batch.
+                                            Falls back to the recorded items,
+                                            which is exact once the batch
+                                            finished. Defaults to None.
+        item_index (int | None, optional): Index of the completed batch item.
+                                           Defaults to None.
+
+    Returns:
+        CommandProgress: Progress update including the batch counters.
+    """
+    return CommandProgress(
+        command=command,
+        phase=phase,
+        completed_items=summary.total,
+        total_items=summary.total if total_items is None else total_items,
+        succeeded_items=summary.succeeded,
+        failed_items=summary.failed,
+        skipped_items=summary.skipped,
+        timed_out_items=summary.timed_out,
+        item_index=item_index,
+    )
+
+
+async def _execute[ResultT](
+    context: CommandContext,
+    command: str,
+    operation: Awaitable[ResultT],
+    terminal: Callable[[ResultT], CommandProgress],
+) -> ResultT:
+    """
+    Reports the lifecycle of one command execution around its operation.
+
+    Args:
+        context (CommandContext): CommandContext object to report updates to.
+        command (str): Command name to use for the lifecycle updates.
+        operation (Awaitable[ResultT]): Awaitable that executes the actual
+                                        command.
+        terminal (Callable[[ResultT], CommandProgress]): Callable building the
+                                                         final progress update
+                                                         from the result.
+
+    Returns:
+        ResultT: Result of the executed operation.
+    """
+    # Report start of the command
+    await context.report(
+        CommandProgress(command=command, phase=CommandProgressPhase.STARTED)
+    )
+
+    # Run the command and handle possible errors
+    # IMPORTANT: CommandTimeoutError must be checked before Exception,
+    #            otherwise it would be reported as a plain failure.
+    try:
+        result = await operation
+
+    except CommandTimeoutError as error:
+        await context.report(
+            CommandProgress(
+                command=command,
+                phase=CommandProgressPhase.TIMED_OUT,
+                message=str(error),
+            )
+        )
+        raise
+
+    except asyncio.CancelledError as error:
+        await context.report(
+            CommandProgress(
+                command=command,
+                phase=CommandProgressPhase.CANCELLED,
+                message=str(error) or None,
+            )
+        )
+        raise
+
+    except Exception:
+        await context.report(
+            CommandProgress(
+                command=command,
+                phase=CommandProgressPhase.FAILED,
+            )
+        )
+        raise
+
+    # Report the outcome of the completed command
+    await context.report(terminal(result))
+    return result
+
+
+def command[RequestT, ResultT: StatusResult](
+    name: str,
+) -> Callable[
+    [CommandHandler[RequestT, ResultT]],
+    CommandHandler[RequestT, ResultT],
+]:
+    """
+    Decorator fabric that turns a command handler into a registered single
+    command. The decorated function reports its own lifecycle and derives the
+    final phase from the outcome of its result status.
+
+    **Example:** The command ``REFRESH_REMOTE_TABLE_STATISTICS_COMMAND_NAME``
+    refers to the string ``remote_tables.refresh_statistics``. The decorator
+    ``@command(REFRESH_REMOTE_TABLE_STATISTICS_COMMAND_NAME)`` is used to wrap
+    the function ``refresh_remote_table_statistics`` that executes the
+    business logic, This passes the name of the command as the ``name`` of this
+    function and return a new decorator ``decorate(handler)``. All of this
+    happens during the import time, once per command.
+    The new decorator will only be triggered when the underlying function is
+    called. In that case it will wrap the function implementing the business
+    logic with the ``execute`` method. Since the
+    ``refresh_remote_table_statistics`` method only returns an awaitable, the
+    actual operation won't be started until it is await within the ``_execute``
+    method that the decorator calls.
+
+    Args:
+        name (str): Command name to use for the lifecycle updates.
+
+    Returns:
+        Callable: Decorator wrapping the handler with lifecycle reporting.
+    """
+
+    def decorate(
+        handler: CommandHandler[RequestT, ResultT],
+    ) -> CommandHandler[RequestT, ResultT]:
+        """
+        Wraps one command handler with its lifecycle reporting.
+
+        Args:
+            handler (CommandHandler[RequestT, ResultT]): Handler doing the
+                                                         actual work.
+
+        Returns:
+            CommandHandler[RequestT, ResultT]: Handler reporting its own
+                                               lifecycle.
+        """
+
+        @wraps(handler)
+        async def execute(
+            context: CommandContext,
+            request: RequestT,
+        ) -> ResultT:
+            """
+            Runs the handler and reports the lifecycle around it.
+
+            Args:
+                context (CommandContext): CommandContext object to report
+                                          updates to.
+                request (RequestT): Request passed to the handler.
+
+            Returns:
+                ResultT: Result of the handler.
+            """
+            return await _execute(
+                context=context,
+                command=name,
+                operation=handler(context, request),
+                terminal=lambda result: CommandProgress(
+                    command=name,
+                    phase=_TERMINAL_PHASES[result.status.outcome],
+                ),
+            )
+
+        return execute
+
+    return decorate
+
+
+def batch_command[RequestT, ResultT: BatchResult](
+    name: str,
+) -> Callable[
+    [CommandHandler[RequestT, ResultT]],
+    CommandHandler[RequestT, ResultT],
+]:
+    """
+    Decorator fabric that turns a command handler into a registered batch
+    command. The decorated function reports its own lifecycle and derives the
+    final phase from the summary of its batch result.
+
+    Args:
+        name (str): Command name to use for the lifecycle updates.
+
+    Returns:
+        Callable: Decorator wrapping the handler with lifecycle reporting.
+    """
+
+    def decorate(
+        handler: CommandHandler[RequestT, ResultT],
+    ) -> CommandHandler[RequestT, ResultT]:
+        """
+        Wraps one command handler with its lifecycle reporting.
+
+        Args:
+            handler (CommandHandler[RequestT, ResultT]): Handler doing the
+                                                         actual work.
+
+        Returns:
+            CommandHandler[RequestT, ResultT]: Handler reporting its own
+                                               lifecycle.
+        """
+
+        @wraps(handler)
+        async def execute(
+            context: CommandContext,
+            request: RequestT,
+        ) -> ResultT:
+            """
+            Runs the handler and reports the lifecycle around it.
+
+            Args:
+                context (CommandContext): CommandContext object to report
+                                          updates to.
+                request (RequestT): Request passed to the handler.
+
+            Returns:
+                ResultT: Result of the handler.
+            """
+            return await _execute(
+                context=context,
+                command=name,
+                operation=handler(context, request),
+                terminal=lambda result: batch_progress(
+                    command=name,
+                    phase=_batch_phase(result.summary),
+                    summary=result.summary,
+                ),
+            )
+
+        return execute
+
+    return decorate
+
+
+def _batch_phase(summary: BatchSummary) -> CommandProgressPhase:
+    """
+    Maps a batch summary to the terminal lifecycle phase of the batch.
 
     Args:
         summary (BatchSummary): Result summary of a completed batch run.
 
     Returns:
-        CommandProgressPhase: Phase of a command execution.
+        CommandProgressPhase: Timed out, failed, or completed phase.
     """
     if summary.timed_out:
         return CommandProgressPhase.TIMED_OUT
@@ -282,178 +345,25 @@ def batch_result_phase(summary: BatchSummary) -> CommandProgressPhase:
     return CommandProgressPhase.COMPLETED
 
 
-async def execute_command[RequestT, ResultT](
-    context: CommandContext,
-    command: str,
-    request: RequestT,
-    operation: CommandOperation[RequestT, ResultT],
-    *,
-    result_phase: Callable[[ResultT], CommandProgressPhase] | None = None,
-) -> ResultT:
+async def _gather(tasks: list[asyncio.Task[Any]]) -> list[Any]:
     """
-    Initiates the execution of a single operation. The handling of the
-    execution itself is done by the 'operation'.
+    Awaits every task and cancels the remaining ones if any task fails.
 
     Args:
-        context (CommandContext): CommandContext object to report updates to.
-        command (str): Command name used for lifecycle updates.
-        request (RequestT): Request passed to the command operation.
-        operation (CommandOperation[RequestT, ResultT]): Callable that executes
-                                                         the single command.
-        result_phase (Callable[[ResultT], CommandProgressPhase] | None, optional):
-            Optional callable that evaluates the result of the operation and
-            returns a CommandProgressPhase. Defaults to None.
+        tasks (list[asyncio.Task[Any]]): Tasks to await.
 
     Returns:
-        ResultT: Result of the executed operation.
-    """  # noqa: E501
-    async def run_operation() -> ResultT:
-        return await operation(context, request)
-
-    return await _handle_operation_lifecycle(
-        context=context,
-        command=command,
-        operation=run_operation,
-        result_phase=result_phase,
-    )
-
-
-async def execute_batch[RequestT, ResultT](
-    context: CommandContext,
-    command: str,
-    request: RequestT,
-    operation: BatchOperation[RequestT, ResultT],
-    *,
-    total_items: int | None = None,
-    result_phase: Callable[[ResultT], CommandProgressPhase] | None = None,
-) -> ResultT:
+        list[Any]: Results of all tasks in the order of the input tasks.
     """
-    Initiates the execution of a batch operation. The handling of the execution
-    itself is done by the 'operation'.
-
-    Args:
-        context (CommandContext): CommandContext object to report updates to.
-        command (str): Command name used for lifecycle updates.
-        request (RequestT): Request passed to the batch operation.
-        operation (BatchOperation[RequestT, ResultT]): Callable that executes
-                                                       the batch.
-        total_items (int | None, optional): Initial number of items in the
-                                            batch. Defaults to None.
-        result_phase (Callable[[ResultT], CommandProgressPhase] | None, optional):
-            Optional callable that evaluates the result of the operation and
-            returns a CommandProgressPhase. Defaults to None.
-
-    Returns:
-        ResultT: Result of the executed batch operation.
-    """  # noqa: E501
-    progress_state = BatchProgressState(total_items=total_items)
-    execution = BatchExecution(
-        context=context,
-        command=command,
-        progress_state=progress_state,
-    )
-
-    async def run_operation() -> ResultT:
-        """
-        Calls the batch operation.
-
-        Returns:
-            ResultT: Result of the fully executed batch operation.
-        """
-        return await operation(execution, request)
-
-    return await _handle_operation_lifecycle(
-        context=context,
-        command=command,
-        operation=run_operation,
-        result_phase=result_phase,
-        batch_progress_state=progress_state,
-    )
-
-
-async def _handle_operation_lifecycle[ResultT](
-    context: CommandContext,
-    command: str,
-    operation: Callable[[], Awaitable[ResultT]],
-    *,
-    result_phase: Callable[[ResultT], CommandProgressPhase] | None,
-    batch_progress_state: BatchProgressState | None = None,
-) -> ResultT:
-    """
-    Executes an operation and reports its lifecycle updates. An operation can
-    be the execution of a single command/tasks or running multiple tasks as a
-    batch.
-
-    Args:
-        context (CommandContext): CommandContext object to report updates to.
-        command (str): Command name used for lifecycle updates.
-        operation (Callable[[], Awaitable[ResultT]]): Operation to execute.
-        result_phase (Callable[[ResultT], CommandProgressPhase] | None):
-            Optional callable that evaluates the operation result.
-        batch_progress_state (BatchProgressState | None, optional):
-            Progress state for a batch operation. Defaults to None.
-
-    Returns:
-        ResultT: Result of the executed operation.
-    """
-    # Report start of operation
-    command_progress = _lifecycle_progress(
-        command=command,
-        phase=CommandProgressPhase.STARTED,
-        batch_progress_state=batch_progress_state,
-    )
-    await context.report(command_progress)
-
-    # Execute operation and report errors / cancellations
-    # This operation function either handles a single command or a batch with
-    # all its items!
     try:
-        result = await operation()
+        return await asyncio.gather(*tasks)
 
-    except CommandTimeoutError as error:
-        command_progress = _lifecycle_progress(
-            command=command,
-            phase=CommandProgressPhase.TIMED_OUT,
-            message=str(error),
-            batch_progress_state=batch_progress_state,
-        )
-        await context.report(command_progress)
-        raise
-
-    except asyncio.CancelledError as error:
-        command_progress = _lifecycle_progress(
-            command=command,
-            phase=CommandProgressPhase.CANCELLED,
-            message=str(error) or None,
-            batch_progress_state=batch_progress_state,
-        )
-        await context.report(command_progress)
-        raise
-
-    except Exception:
-        command_progress = _lifecycle_progress(
-            command=command,
-            phase=CommandProgressPhase.FAILED,
-            batch_progress_state=batch_progress_state,
-        )
-        await context.report(command_progress)
-        raise
-
-    # Evaluate result with supplied callback function or set to 'completed'
-    phase = (
-        result_phase(result)
-        if result_phase is not None
-        else CommandProgressPhase.COMPLETED
-    )
-
-    # Report end of operation
-    command_progress = _lifecycle_progress(
-        command=command,
-        phase=phase,
-        batch_progress_state=batch_progress_state,
-    )
-    await context.report(command_progress)
-    return result
+    # Cancel all pending tasks on BaseException (includes CancelledError)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise  # to re-raise the exception
 
 
 async def execute_with_concurrency_limit[InputT, OutputT](
@@ -463,65 +373,198 @@ async def execute_with_concurrency_limit[InputT, OutputT](
     max_concurrency: int,
 ) -> tuple[OutputT, ...]:
     """
-    Executes an asynchronous operation for each input item.
-    Runs at most 'max_concurrency' tasks simultaneously.
+    Simple wrapper that executes an asynchronous operation for each input item
+    without reporting any progress to the callback or creating a summary. Can
+    be used to run concurrent tasks at places, where the outcome of the
+    execution is needed to further process the batch and should not be reported
+    to the caller.
+    Runs at most ``max_concurrency`` operations simultaneously.
 
     Args:
-        items (tuple[InputT, ...]): Tuple of items to use when applying the
-                                    specified operation.
+        items (tuple[InputT, ...]): Items to apply the operation to.
         operation (Callable[[InputT], Awaitable[OutputT]]): Asynchronous
-                                                            function that
-                                                            receives an item as
-                                                            the input and
-                                                            returns an
-                                                            awaitable output.
-        max_concurrency (int): Maximum amount of concurrent tasks.
-
-    Raises:
-        RuntimeError: If results are missing after completing all tasks.
+                                                            function receiving
+                                                            one item and
+                                                            returning its
+                                                            result.
+        max_concurrency (int): Maximum amount of concurrent operations.
 
     Returns:
-        tuple[OutputT, ...]: Tuple with all results of the operations. Results
-                             retain the same order as the items input.
+        tuple[OutputT, ...]: Results of all operations. Results retain the same
+                             order as the items input.
     """
-    # Validation of input params
     validate_max_concurrency(max_concurrency)
-    if not items:
-        return ()
+    semaphore = asyncio.Semaphore(max_concurrency)
 
-    # Create unique object as placeholder for missing results ("sentinel")
-    missing = object()
-    results: list[OutputT | object] = [missing] * len(items)
-    next_index = 0
-
-    async def worker() -> None:
+    async def execute(item: InputT) -> OutputT:
         """
-        Executes an operation using an item of items at next_index and saves
-        the result to the same index in the results list.
+        Runs the operation for one item once the semaphore admits it.
+
+        Args:
+            item (InputT): Item to apply the operation to.
+
+        Returns:
+            OutputT: Result of the operation.
         """
-        nonlocal next_index  # to increase variable of the surrounding function
-        while next_index < len(items):
-            index = next_index
-            next_index += 1
-            results[index] = await operation(items[index])
+        async with semaphore:
+            return await operation(item)
 
-    # Create workers
-    worker_count = min(max_concurrency, len(items))
-    workers = [asyncio.create_task(worker()) for _ in range(worker_count)]
+    tasks = [asyncio.create_task(execute(item)) for item in items]
+    return tuple(await _gather(tasks))
 
-    # Execute all tasks
-    try:
-        await asyncio.gather(*workers)
 
-    # Cancel all workers on BaseException (includes asyncio.CancelledError)
-    except BaseException:
-        for task in workers:
-            task.cancel()
-        await asyncio.gather(*workers, return_exceptions=True)
-        raise  # to re-raise the exception
+async def run_batch[ItemT, ItemResultT: StatusResult](
+    context: CommandContext,
+    command: str,
+    items: tuple[ItemT, ...],
+    operation: Callable[[CommandContext, ItemT], Awaitable[ItemResultT]],
+    *,
+    max_concurrency: int,
+) -> tuple[tuple[ItemResultT, ...], BatchSummary]:
+    """
+    Runs one operation for every batch item with bounded concurrency and
+    reports each completed item to the caller.
 
-    # Check for any missing results
-    if any(result is missing for result in results):
-        raise RuntimeError("Bounded operation did not produce every result.")
+    The operation may be a registered command. Items therefore run with their
+    progress muted, so a batch reports its own 'advanced' updates instead of
+    one nested command lifecycle per item.
 
-    return cast(tuple[OutputT, ...], tuple(results))
+    Args:
+        context (CommandContext): CommandContext object to report updates to.
+        command (str): Command name used for the progress updates.
+        items (tuple[ItemT, ...]): Items to execute.
+        operation (Callable[[CommandContext, ItemT], Awaitable[ItemResultT]]):
+            Operation to apply to every item.
+        max_concurrency (int): Maximum amount of concurrent operations.
+
+    Returns:
+        tuple[tuple[ItemResultT, ...], BatchSummary]: Item results in input
+                                                      order and the summary of
+                                                      the batch.
+    """
+    validate_max_concurrency(max_concurrency)
+    total_items = len(items)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    lock = asyncio.Lock()
+    counts: Counter[Outcome] = Counter()
+
+    # Create new context which disables the per-item progress callback.
+    # Otherwise each item would report phases like started, failed, etc.
+    # During batch processing only 'advanced' is reported for each completed
+    # item. All other phases like started, failed only refer to the back as a
+    # whole.
+    # This way the single-command functions can be reused during batch
+    # processing.
+    item_context = replace(context, progress_callback=None)
+
+    async def execute(item_index: int, item: ItemT) -> ItemResultT:
+        """
+        Runs the operation for one item and reports the completed item.
+
+        Args:
+            item_index (int): Index of the batch item.
+            item (ItemT): Item to apply the operation to.
+
+        Returns:
+            ItemResultT: Result of the operation.
+        """
+        async with semaphore:
+            result = await operation(item_context, item)
+
+        # Record and report under a lock to keep the counters consistent
+        async with lock:
+            counts[result.status.outcome] += 1
+            await _report_item(
+                context,
+                command,
+                item_index=item_index,
+                total_items=total_items,
+                result=result,
+                counts=counts,
+            )
+        return result
+
+    tasks = [
+        asyncio.create_task(execute(item_index, item))
+        for item_index, item in enumerate(items)
+    ]
+    results: tuple[ItemResultT, ...] = tuple(await _gather(tasks))
+    return results, summarize(counts)
+
+
+async def report_batch_results[ItemResultT: StatusResult](
+    context: CommandContext,
+    command: str,
+    results: tuple[ItemResultT, ...],
+) -> BatchSummary:
+    """
+    Records and reports results that were already computed. This is needed by
+    commands that can only classify their items once every result is known
+    (e.g. after deduplicating views across analytical models).
+
+    Args:
+        context (CommandContext): CommandContext object to report updates to.
+        command (str): Command name used for the progress updates.
+        results (tuple[ItemResultT, ...]): Completed results to report.
+
+    Returns:
+        BatchSummary: Aggregate outcome counts of the reported results.
+    """
+    total_items = len(results)
+    counts: Counter[Outcome] = Counter()
+    for item_index, result in enumerate(results):
+        counts[result.status.outcome] += 1
+        await _report_item(
+            context,
+            command,
+            item_index=item_index,
+            total_items=total_items,
+            result=result,
+            counts=counts,
+        )
+    return summarize(counts)
+
+
+async def _report_item(
+    context: CommandContext,
+    command: str,
+    *,
+    item_index: int,
+    total_items: int,
+    result: object,
+    counts: Counter[Outcome],
+) -> None:
+    """
+    Reports one completed batch item and its result to the caller. Reports are
+    only delivered if the caller supplied the matching callbacks.
+
+    Args:
+        context (CommandContext): CommandContext object to report updates to.
+        command (str): Command name used for the progress updates.
+        item_index (int): Index of the completed batch item.
+        total_items (int): Total number of items in the batch.
+        result (object): Command-specific batch item result.
+        counts (Counter[Outcome]): Outcomes recorded so far.
+    """
+    # Report phase 'advanced' for the completed batch item
+    await context.report(
+        batch_progress(
+            command,
+            CommandProgressPhase.ADVANCED,
+            summarize(counts),
+            total_items=total_items,
+            item_index=item_index,
+        )
+    )
+
+    # Report the actual result to the caller (if a callback was supplied)
+    # This can be used to persist results of batch items while the batch
+    # itself is still running.
+    await context.report_batch_item_result(
+        BatchItemResult(
+            command=command,
+            item_index=item_index,
+            total_items=total_items,
+            result=result,
+        )
+    )
