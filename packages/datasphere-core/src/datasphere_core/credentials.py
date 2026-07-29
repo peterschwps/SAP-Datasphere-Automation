@@ -28,11 +28,36 @@ class TokenStore(Protocol):
     Simple protocol for credential stores that handle OAuth tokens
     (e.g. KeyringTokenStore or MemoryTokenStore).
     """
-    async def load_tokens(self, key: str) -> TokenDict | None: ...
+    async def load_tokens(self, key: str) -> TokenDict | None:
+        """
+        Loads the stored tokens of one tenant and client.
 
-    async def save_tokens(self, key: str, tokens: TokenDict) -> None: ...
+        Args:
+            key (str): Credential key of the tenant and client.
 
-    async def delete_tokens(self, key: str) -> None: ...
+        Returns:
+            TokenDict | None: Stored tokens, or None if none exist.
+        """
+        ...
+
+    async def save_tokens(self, key: str, tokens: TokenDict) -> None:
+        """
+        Stores the tokens of one tenant and client.
+
+        Args:
+            key (str): Credential key of the tenant and client.
+            tokens (TokenDict): Tokens to store.
+        """
+        ...
+
+    async def delete_tokens(self, key: str) -> None:
+        """
+        Deletes the stored tokens of one tenant and client.
+
+        Args:
+            key (str): Credential key of the tenant and client.
+        """
+        ...
 
 
 class KeyringTokenStore:
