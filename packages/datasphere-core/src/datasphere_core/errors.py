@@ -11,7 +11,16 @@ class CommandTimeoutError(CommandError):
     """
     Raised when a command exceeds its configured timeout.
     """
+
     def __init__(self, message: str, log_id: str | None = None) -> None:
+        """
+        Initializes the error with the log ID of the timed-out run.
+
+        Args:
+            message (str): Message describing the timeout.
+            log_id (str | None, optional): Log ID of the remote run.
+                                           Defaults to None.
+        """
         self.log_id = log_id
         super().__init__(message)
 
@@ -34,6 +43,16 @@ class CommandCancelledError(asyncio.CancelledError):
     Example: Task chain was started but the user cancelled the command before
     it completed.
     """
+
     def __init__(self, message: str, log_id: str | None = None) -> None:
+        """
+        Initializes the error with the log ID of the started run.
+
+        Args:
+            message (str): Message describing the cancellation.
+            log_id (str | None, optional): Log ID of the remote run
+                                           that may still continue.
+                                           Defaults to None.
+        """
         self.log_id = log_id
         super().__init__(message)
