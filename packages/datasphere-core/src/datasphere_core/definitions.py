@@ -1,21 +1,14 @@
-import math
 import re
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from datasphere_core.context import CommandContext
+from datasphere_core.execution import CommandHandler
 
 # Command name pattern: lowercase words separated by underscores, with a single
 #                       dot separating the adapter and command names
 _COMMAND_NAME_PATTERN = re.compile(r"[a-z]+(?:_[a-z]+)*\.[a-z]+(?:_[a-z]+)*")
-
-# Type alias for command handler: receives RequestT and returns ResultT
-type CommandHandler[RequestT, ResultT] = Callable[
-    [CommandContext, RequestT],
-    Awaitable[ResultT],
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,48 +30,15 @@ class CommandDefinition[RequestT, ResultT]:
 
     def __post_init__(self) -> None:
         """
-        Simple validation of the command definition to catch mistakes.
+        Validates the command name to catch typos in the registry at import
+        time.
 
         Raises:
             ValueError: If the command name is invalid.
-            ValueError: If the description is empty.
-            ValueError: If the default timeout is not a positive number.
-            ValueError: If the maximum timeout is not finite or less than the
-                        default.
-            ValueError: If a read-only command is marked as destructive.
         """
-        # Check command name
         if _COMMAND_NAME_PATTERN.fullmatch(self.name) is None:
             raise ValueError(f"Invalid command name: {self.name!r}.")
 
-        # Check description
-        if not self.description.strip():
-            raise ValueError("Description must not be empty.")
-
-        # Check default timeout
-        if (
-            isinstance(self.default_timeout_seconds, bool)
-            or not math.isfinite(self.default_timeout_seconds)
-            or self.default_timeout_seconds <= 0
-        ):
-            raise ValueError("Default timeout must be a positive number.")
-
-        # Check maximum timeout
-        if (
-            isinstance(self.maximum_timeout_seconds, bool)
-            or not math.isfinite(self.maximum_timeout_seconds)
-            or self.maximum_timeout_seconds
-            < self.default_timeout_seconds
-        ):
-            raise ValueError(
-                "Maximum timeout must be finite and at least the default."
-            )
-
-        # Check read-only and destructive flags
-        if self.read_only and self.destructive:
-            raise ValueError(
-                "A read-only command cannot be marked as destructive."
-            )
 
 # Mapping of command names to their definitions
 type CommandRegistry = Mapping[str, CommandDefinition[Any, Any]]
