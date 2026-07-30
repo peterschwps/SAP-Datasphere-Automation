@@ -1,21 +1,12 @@
-import math
 from typing import Any
 
 from datasphere_api import TaskChainCancelled, TaskChainTimeout
 
 from datasphere_core.context import CommandContext
+from datasphere_core.conversion import runtime_to_seconds, to_text
 from datasphere_core.definitions import CommandDefinition
 from datasphere_core.errors import CommandCancelledError
-from datasphere_core.execution import (
-    BatchExecution,
-    batch_result_phase,
-    execute_batch,
-    execute_command,
-)
-from datasphere_core.models.common import (
-    BatchItemFinalStatus,
-    CommandProgressPhase,
-)
+from datasphere_core.execution import batch_command, command, run_batch
 from datasphere_core.models.task_chains import (
     DEFAULT_TASK_CHAIN_TIMEOUT_SECONDS,
     MAXIMUM_TASK_CHAIN_TIMEOUT_SECONDS,
@@ -30,112 +21,24 @@ RUN_TASK_CHAIN_COMMAND_NAME = "task_chains.run"
 RUN_TASK_CHAIN_BATCH_COMMAND_NAME = "task_chains.run_batch"
 
 
-def _get_log_status(log_details: dict[str, Any]) -> str | None:
-    """
-    Reads the status from the task chain log details.
-
-    Args:
-        log_details (dict[str, Any]): Log details to inspect.
-
-    Returns:
-        str | None: Status if present as a string.
-    """
-    status = log_details.get("status")
-    return status if isinstance(status, str) else None
-
-
-def _get_log_id(log_details: dict[str, Any]) -> str | None:
-    """
-    Reads and normalizes a task chain log identifier.
-
-    Args:
-        log_details (dict[str, Any]): Log details to inspect.
-
-    Returns:
-        str | None: Log ID or None for invalid values.
-    """
-    log_id = log_details.get("logId")
-    if isinstance(log_id, bool) or not isinstance(log_id, (int, str)):
-        return None
-    return str(log_id)
-
-
-def _get_runtime_seconds(log_details: dict[str, Any]) -> int | None:
-    """
-    Converts a millisecond runtime to rounded seconds.
-
-    Args:
-        log_details (dict[str, Any]): Log details containing 'runTime'.
-
-    Returns:
-        int | None: Rounded runtime in seconds, or None if the key is missing
-                    or its value invalid.
-    """
-    runtime = log_details.get("runTime")
-    if (
-        not isinstance(runtime, (int, float))
-        or isinstance(runtime, bool)
-        or not math.isfinite(runtime)
-        or runtime < 0
-    ):
-        return None
-    return round(runtime / 1000)
-
-
-def _map_result_to_command_progress_phase(
-        result: RunTaskChainResult
-    ) -> CommandProgressPhase:
-    """
-    Maps a task chain result to its lifecycle progress phase.
-
-    Args:
-        result (RunTaskChainResult): Result to classify.
-
-    Returns:
-        CommandProgressPhase: Corresponding command progress phase.
-    """
-    if result.status is TaskChainStatus.COMPLETED:
-        return CommandProgressPhase.COMPLETED
-    if result.status is TaskChainStatus.TIMED_OUT:
-        return CommandProgressPhase.TIMED_OUT
-    return CommandProgressPhase.FAILED
-
-
-def _map_result_to_batch_item_final_status(
-        result: RunTaskChainResult
-    ) -> BatchItemFinalStatus:
-    """
-    Maps a task chain result of a batch run to its batch item status.
-
-    Args:
-        result (RunTaskChainResult): Result to classify.
-
-    Returns:
-        BatchItemFinalStatus: Corresponding batch item status.
-    """
-    if result.status is TaskChainStatus.COMPLETED:
-        return BatchItemFinalStatus.SUCCEEDED
-    if result.status is TaskChainStatus.TIMED_OUT:
-        return BatchItemFinalStatus.TIMED_OUT
-    return BatchItemFinalStatus.FAILED
-
-
-async def _run_task_chain(
+@command(RUN_TASK_CHAIN_COMMAND_NAME)
+async def run_task_chain(
     context: CommandContext,
     request: RunTaskChainRequest,
 ) -> RunTaskChainResult:
     """
-    Runs one task chain.
+    Runs one task chain and waits for its result.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
         request (RunTaskChainRequest): Input for the task chain execution.
 
+    Raises:
+        CommandCancelledError: If the command was cancelled after the task
+                               chain had already started remotely.
+
     Returns:
         RunTaskChainResult: Result of the task chain run.
-
-    Raises:
-        CommandCancelledError: If the command itself was cancelled.
     """
     # Execute task chain
     try:
@@ -149,11 +52,12 @@ async def _run_task_chain(
             chain=request.chain,
             space=request.space,
             status=TaskChainStatus.TIMED_OUT,
-            log_id=_get_log_id({"logId": error.log_id}),
+            log_id=to_text(error.log_id),
         )
     except TaskChainCancelled as error:
-        raise CommandCancelledError(str(error),
-            log_id=str(error.log_id),
+        raise CommandCancelledError(
+            message=str(error),
+            log_id=to_text(error.log_id),
         ) from None
 
     # Set status
@@ -169,96 +73,42 @@ async def _run_task_chain(
         chain=request.chain,
         space=request.space,
         status=status,
-        sap_status=_get_log_status(log_details),
-        log_id=_get_log_id(log_details),
+        sap_status=to_text(log_details.get("status")),
+        log_id=to_text(log_details.get("logId")),
         runtime_seconds=(
-            _get_runtime_seconds(log_details) if success else None
+            runtime_to_seconds(log_details) if success else None
         ),
     )
 
 
-async def run_task_chain(
-    context: CommandContext,
-    request: RunTaskChainRequest,
-) -> RunTaskChainResult:
-    """
-    Runs one task chain.
-
-    Args:
-        context (CommandContext): Authenticated client and progress callbacks.
-        request (RunTaskChainRequest): Input for the task chain execution.
-
-    Returns:
-        RunTaskChainResult: Result of the task chain run.
-
-    Raises:
-        CommandCancelledError: If the command itself was cancelled.
-    """
-    return await execute_command(
-        context=context,
-        command=RUN_TASK_CHAIN_COMMAND_NAME,
-        request=request,
-        operation=_run_task_chain,
-        result_phase=_map_result_to_command_progress_phase,
-    )
-
-
-async def _run_task_chain_batch(
-    execution: BatchExecution,
-    request: RunTaskChainBatchRequest,
-) -> RunTaskChainBatchResult:
-    """
-    Runs all requested task chains with concurrency.
-
-    Args:
-        execution (BatchExecution): Runtime state and shared operations for the
-                                    batch execution.
-        request (RunTaskChainBatchRequest): Input for the task chain
-                                            executions with concurrency.
-
-    Returns:
-        RunTaskChainBatchResult: Ordered results of the task chain runs.
-
-    """
-    results = await execution.execute_items(
-        items=request.requests,
-        operation=_run_task_chain,
-        max_concurrency=request.max_concurrency,
-        classify=_map_result_to_batch_item_final_status,
-    )
-    return RunTaskChainBatchResult(
-        results=results,
-        summary=execution.to_summary(),
-    )
-
-
+@batch_command(RUN_TASK_CHAIN_BATCH_COMMAND_NAME)
 async def run_task_chain_batch(
     context: CommandContext,
     request: RunTaskChainBatchRequest,
 ) -> RunTaskChainBatchResult:
     """
-    Runs multiple task chains with concurrency.
+    Runs multiple task chains with concurrency and waits for their results.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (RunTaskChainBatchRequest): Input for the task chain
-                                            executions with concurrency.
+        request (RunTaskChainBatchRequest): Input for the task chain executions
+                                            with concurrency.
+
+    Raises:
+        CommandCancelledError: If the command was cancelled after a task chain
+                               had already started remotely.
 
     Returns:
         RunTaskChainBatchResult: Ordered results of the task chain runs.
-
-    Raises:
-        CommandCancelledError: If the command itself was cancelled.
     """
-
-    return await execute_batch(
+    results, summary = await run_batch(
         context=context,
         command=RUN_TASK_CHAIN_BATCH_COMMAND_NAME,
-        request=request,
-        operation=_run_task_chain_batch,
-        total_items=len(request.requests),
-        result_phase=lambda result: batch_result_phase(result.summary),
+        items=request.requests,
+        operation=run_task_chain,
+        max_concurrency=request.max_concurrency,
     )
+    return RunTaskChainBatchResult(results=results, summary=summary)
 
 
 # Define all commands
