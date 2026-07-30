@@ -3,6 +3,8 @@ from enum import StrEnum
 
 from datasphere_core.models.common import (
     BatchSummary,
+    CommandStatus,
+    Outcome,
     validate_max_concurrency,
 )
 
@@ -18,28 +20,28 @@ class StatisticsType(StrEnum):
     HISTOGRAM = "HISTOGRAM"
 
 
-class ConfigureRemoteTableStatisticsStatus(StrEnum):
+class ConfigureRemoteTableStatisticsStatus(CommandStatus):
     """
-    Result status of configuring remote tables statistics.
+    Result status of configuring remote table statistics.
     """
-    CREATED = "created"
-    UPDATED = "updated"
-    ALREADY_CONFIGURED = "already_configured"
-    UNSUPPORTED = "unsupported"
-    UNSUPPORTED_TYPE = "unsupported_type"
-    ALREADY_EXISTS = "already_exists"
-    FAILED = "failed"
+    CREATED = "created", Outcome.SUCCEEDED
+    UPDATED = "updated", Outcome.SUCCEEDED
+    ALREADY_CONFIGURED = "already_configured", Outcome.SUCCEEDED
+    ALREADY_EXISTS = "already_exists", Outcome.SUCCEEDED
+    UNSUPPORTED = "unsupported", Outcome.SKIPPED
+    UNSUPPORTED_TYPE = "unsupported_type", Outcome.SKIPPED
+    FAILED = "failed", Outcome.FAILED
 
 
-class RefreshRemoteTableStatisticsStatus(StrEnum):
+class RefreshRemoteTableStatisticsStatus(CommandStatus):
     """
     Result status of refreshing remote table statistics.
     """
-    REFRESHED = "refreshed"
-    NO_STATISTICS = "no_statistics"
-    UNSUPPORTED = "unsupported"
-    TABLE_NOT_FOUND = "table_not_found"
-    FAILED = "failed"
+    REFRESHED = "refreshed", Outcome.SUCCEEDED
+    NO_STATISTICS = "no_statistics", Outcome.SKIPPED
+    UNSUPPORTED = "unsupported", Outcome.SKIPPED
+    TABLE_NOT_FOUND = "table_not_found", Outcome.FAILED
+    FAILED = "failed", Outcome.FAILED
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +68,8 @@ class ConfigureRemoteTableStatisticsResult:
 @dataclass(frozen=True, slots=True)
 class ConfigureRemoteTableStatisticsBatchRequest:
     """
-    Input for configuring remote table statistics with concurrency.
+    Input for configuring remote table statistics with concurrency. Configures
+    every remote table of the space if no explicit tables are supplied.
     """
     tables: tuple[str, ...] | None
     space: str
@@ -78,7 +81,8 @@ class ConfigureRemoteTableStatisticsBatchRequest:
         Validates the batch concurrency limit.
 
         Raises:
-            ValueError: If the concurrency limit is invalid.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
         validate_max_concurrency(self.max_concurrency)
 
@@ -90,52 +94,6 @@ class ConfigureRemoteTableStatisticsBatchResult:
     """
     results: tuple[ConfigureRemoteTableStatisticsResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates result types and the exact remote table outcome categories.
-
-        Raises:
-            TypeError: If results is not a tuple of
-                       ConfigureRemoteTableStatisticsResult.
-            ValueError: If the summary does not match the result statuses.
-        """
-        if not isinstance(self.results, tuple) or not all(
-            isinstance(result, ConfigureRemoteTableStatisticsResult)
-            for result in self.results
-        ):
-            raise TypeError(
-                "Batch results must contain "
-                "ConfigureRemoteTableStatisticsResult objects."
-            )
-        expected = BatchSummary(
-            total=len(self.results),
-            succeeded=sum(
-                result.status
-                in (
-                    ConfigureRemoteTableStatisticsStatus.CREATED,
-                    ConfigureRemoteTableStatisticsStatus.UPDATED,
-                    ConfigureRemoteTableStatisticsStatus.ALREADY_CONFIGURED,
-                    ConfigureRemoteTableStatisticsStatus.ALREADY_EXISTS,
-                )
-                for result in self.results
-            ),
-            failed=sum(
-                result.status is ConfigureRemoteTableStatisticsStatus.FAILED
-                for result in self.results
-            ),
-            skipped=sum(
-                result.status
-                in (
-                    ConfigureRemoteTableStatisticsStatus.UNSUPPORTED,
-                    ConfigureRemoteTableStatisticsStatus.UNSUPPORTED_TYPE,
-                )
-                for result in self.results
-            ),
-            timed_out=0,
-        )
-        if self.summary != expected:
-            raise ValueError("Batch summary does not match batch results.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +118,8 @@ class RefreshRemoteTableStatisticsResult:
 @dataclass(frozen=True, slots=True)
 class RefreshRemoteTableStatisticsBatchRequest:
     """
-    Input for refreshing statistics with concurrency.
+    Input for refreshing statistics with concurrency. Refreshes every remote
+    table of the space if no explicit tables are supplied.
     """
     tables: tuple[str, ...] | None
     space: str
@@ -171,7 +130,8 @@ class RefreshRemoteTableStatisticsBatchRequest:
         Validates the batch concurrency limit.
 
         Raises:
-            ValueError: If the concurrency limit is invalid.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
         validate_max_concurrency(self.max_concurrency)
 
@@ -179,50 +139,7 @@ class RefreshRemoteTableStatisticsBatchRequest:
 @dataclass(frozen=True, slots=True)
 class RefreshRemoteTableStatisticsBatchResult:
     """
-    Ordered results of refreshing remote tables in a batch.
+    Ordered results of refreshing remote table statistics in a batch.
     """
     results: tuple[RefreshRemoteTableStatisticsResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates result types and the exact remote table outcome categories.
-
-        Raises:
-            TypeError: If results is not a tuple of refresh results.
-            ValueError: If the summary does not match the result statuses.
-        """
-        if not isinstance(self.results, tuple) or not all(
-            isinstance(result, RefreshRemoteTableStatisticsResult)
-            for result in self.results
-        ):
-            raise TypeError(
-                "Batch results must contain "
-                "RefreshRemoteTableStatisticsResult objects."
-            )
-        expected = BatchSummary(
-            total=len(self.results),
-            succeeded=sum(
-                result.status is RefreshRemoteTableStatisticsStatus.REFRESHED
-                for result in self.results
-            ),
-            failed=sum(
-                result.status
-                in (
-                    RefreshRemoteTableStatisticsStatus.TABLE_NOT_FOUND,
-                    RefreshRemoteTableStatisticsStatus.FAILED,
-                )
-                for result in self.results
-            ),
-            skipped=sum(
-                result.status
-                in (
-                    RefreshRemoteTableStatisticsStatus.NO_STATISTICS,
-                    RefreshRemoteTableStatisticsStatus.UNSUPPORTED,
-                )
-                for result in self.results
-            ),
-            timed_out=0,
-        )
-        if self.summary != expected:
-            raise ValueError("Batch summary does not match batch results.")

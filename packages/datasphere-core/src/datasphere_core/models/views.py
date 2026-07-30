@@ -1,10 +1,9 @@
-import math
 from dataclasses import dataclass
-from enum import StrEnum
-from typing import Protocol
 
 from datasphere_core.models.common import (
     BatchSummary,
+    CommandStatus,
+    Outcome,
     validate_max_concurrency,
 )
 
@@ -13,227 +12,96 @@ MAXIMUM_VIEW_TIMEOUT_SECONDS = 86400.0
 DEFAULT_VIEW_MAX_CONCURRENCY = 10
 
 
-class FindViewPersistenceCandidatesStatus(StrEnum):
+class FindViewPersistenceCandidatesStatus(CommandStatus):
     """
     Result status of finding persistence candidates using the view analyzer.
     """
-    COMPLETED = "completed"
-    FAILED = "failed"
-    TIMED_OUT = "timed_out"
+    COMPLETED = "completed", Outcome.SUCCEEDED
+    FAILED = "failed", Outcome.FAILED
+    TIMED_OUT = "timed_out", Outcome.TIMED_OUT
 
 
-class FindViewAttributeMatchesStatus(StrEnum):
+class FindViewAttributeMatchesStatus(CommandStatus):
     """
     Result status of finding matching view attributes.
     """
-    COMPLETED = "completed"
-    FAILED = "failed"
+    COMPLETED = "completed", Outcome.SUCCEEDED
+    FAILED = "failed", Outcome.FAILED
 
 
-class CreateViewPartitioningStatus(StrEnum):
+class CreateViewPartitioningStatus(CommandStatus):
     """
     Result status of creating view partitioning.
     """
-    CREATED = "created"
-    ALREADY_EXISTS = "already_exists"
-    INVALID_COLUMN = "invalid_column"
-    FAILED = "failed"
+    CREATED = "created", Outcome.SUCCEEDED
+    ALREADY_EXISTS = "already_exists", Outcome.SKIPPED
+    INVALID_COLUMN = "invalid_column", Outcome.FAILED
+    FAILED = "failed", Outcome.FAILED
 
 
-class DeleteViewPartitioningStatus(StrEnum):
+class DeleteViewPartitioningStatus(CommandStatus):
     """
     Result status of deleting view partitioning.
     """
-    DELETED = "deleted"
-    FAILED = "failed"
+    DELETED = "deleted", Outcome.SUCCEEDED
+    FAILED = "failed", Outcome.FAILED
 
 
-class PersistViewStatus(StrEnum):
+class PersistViewStatus(CommandStatus):
     """
     Result status of persisting a view.
     """
-    COMPLETED = "completed"
-    START_FAILED = "start_failed"
-    FAILED = "failed"
-    TIMED_OUT = "timed_out"
+    COMPLETED = "completed", Outcome.SUCCEEDED
+    START_FAILED = "start_failed", Outcome.FAILED
+    FAILED = "failed", Outcome.FAILED
+    TIMED_OUT = "timed_out", Outcome.TIMED_OUT
 
 
-class UnpersistViewStatus(StrEnum):
+class UnpersistViewStatus(CommandStatus):
     """
     Result status of removing persisted view data.
     """
-    COMPLETED = "completed"
-    ALREADY_ABSENT = "already_absent"
-    START_FAILED = "start_failed"
-    FAILED = "failed"
-    TIMED_OUT = "timed_out"
+    COMPLETED = "completed", Outcome.SUCCEEDED
+    ALREADY_ABSENT = "already_absent", Outcome.SKIPPED
+    START_FAILED = "start_failed", Outcome.FAILED
+    FAILED = "failed", Outcome.FAILED
+    TIMED_OUT = "timed_out", Outcome.TIMED_OUT
 
 
-class LockViewPartitionsStatus(StrEnum):
+class LockViewPartitionsStatus(CommandStatus):
     """
     Result status of locking view partitions.
     """
-    LOCKED = "locked"
-    NO_PARTITIONS = "no_partitions"
-    FAILED = "failed"
+    LOCKED = "locked", Outcome.SUCCEEDED
+    NO_PARTITIONS = "no_partitions", Outcome.SKIPPED
+    FAILED = "failed", Outcome.FAILED
 
 
-class UnlockViewPartitionsStatus(StrEnum):
+class UnlockViewPartitionsStatus(CommandStatus):
     """
     Result status of unlocking view partitions.
     """
-    UNLOCKED = "unlocked"
-    NO_PARTITIONS = "no_partitions"
-    FAILED = "failed"
+    UNLOCKED = "unlocked", Outcome.SUCCEEDED
+    NO_PARTITIONS = "no_partitions", Outcome.SKIPPED
+    FAILED = "failed", Outcome.FAILED
 
 
-class _StatusResult(Protocol):
+def validate_timeout(timeout_seconds: float) -> None:
     """
-    Protocol for a result dataclass. This is needed to validate batch results
-    through a generic function.
-    """
-
-    @property
-    def status(self) -> str:
-        """
-        A required attribute in all result dataclasses.
-
-        Returns:
-            str: Status value associated with the result.
-        """
-        ...
-
-
-def _validate_text(name: str, value: str) -> None:
-    """
-    Validates that a required view-related text value is not empty.
+    Validates a view operation timeout. An invalid timeout would either fail
+    immediately or keep the caller waiting far longer than intended.
 
     Args:
-        name (str): Human-readable field name for validation errors.
-        value (str): Text value to validate.
+        timeout_seconds (float): Timeout of one view operation in seconds.
 
     Raises:
-        ValueError: If the value is not a non-empty string.
+        ValueError: If the timeout is not within the supported range.
     """
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{name} must not be empty.")
-
-
-def _validate_timeout(timeout_seconds: float) -> None:
-    """
-    Validates a view operation timeout.
-
-    Args:
-        timeout_seconds (float): Positive finite timeout in seconds.
-
-    Raises:
-        ValueError: If the timeout is not positive, finite, or within the
-                    supported maximum.
-    """
-    if (
-        isinstance(timeout_seconds, bool)
-        or not isinstance(timeout_seconds, (int, float))
-        or not math.isfinite(timeout_seconds)
-        or not 0 < timeout_seconds <= MAXIMUM_VIEW_TIMEOUT_SECONDS
-    ):
+    if not 0 < timeout_seconds <= MAXIMUM_VIEW_TIMEOUT_SECONDS:
         raise ValueError(
             "Timeout must be greater than zero and at most "
             f"{MAXIMUM_VIEW_TIMEOUT_SECONDS} seconds."
         )
-
-
-def _validate_year(name: str, value: int) -> None:
-    """
-    Validates that a year parameter is an integer.
-
-    Args:
-        name (str): Human-readable field name for validation errors.
-        value (int): Year value to validate.
-
-    Raises:
-        ValueError: If the value is not an integer.
-    """
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer.")
-
-
-def _validate_batch_requests[RequestT](
-    requests: tuple[RequestT, ...],
-    request_type: type[RequestT],
-    max_concurrency: int,
-) -> None:
-    """
-    Validates request types and concurrency for a batch.
-
-    Args:
-        requests (tuple[RequestT, ...]): Requests supplied to the batch.
-        request_type (type[RequestT]): Expected request class.
-        max_concurrency (int): Maximum number of concurrent operations.
-
-    Raises:
-        TypeError: If requests is not a tuple of the expected request type.
-        ValueError: If the concurrency setting is invalid.
-    """
-    if not isinstance(requests, tuple):
-        raise TypeError("Batch requests must be a tuple.")
-    if not all(isinstance(request, request_type) for request in requests):
-        raise TypeError(
-            f"Batch requests must contain {request_type.__name__} objects."
-        )
-    validate_max_concurrency(max_concurrency)
-
-
-def _validate_batch_result[ResultT: _StatusResult](
-    results: tuple[ResultT, ...],
-    result_type: type[ResultT],
-    summary: BatchSummary,
-    *,
-    succeeded: tuple[str, ...],
-    failed: tuple[str, ...],
-    skipped: tuple[str, ...] = (),
-    timed_out: tuple[str, ...] = (),
-) -> None:
-    """
-    Validates result types, known statuses and the aggregate outcome counts.
-
-    Args:
-        results (tuple[ResultT, ...]): Results produced by the batch.
-        result_type (type[ResultT]): Expected result class.
-        summary (BatchSummary): Summary to compare with the result statuses.
-        succeeded (tuple[str, ...]): Statuses counted as successful.
-        failed (tuple[str, ...]): Statuses counted as failed.
-        skipped (tuple[str, ...], optional): Statuses counted as skipped.
-                                             Defaults to an empty tuple.
-        timed_out (tuple[str, ...], optional): Statuses counted as timed out.
-                                               Defaults to an empty tuple.
-
-    Raises:
-        TypeError: If results is not a tuple of the expected result type.
-        ValueError: If a status is unknown or the summary is inconsistent.
-    """
-    # Validate results
-    if not isinstance(results, tuple) or not all(
-        isinstance(result, result_type) for result in results
-    ):
-        raise TypeError(
-            f"Batch results must contain {result_type.__name__} objects."
-        )
-
-    # Validate status counts
-    known = set(succeeded + failed + skipped + timed_out)
-    if any(result.status not in known for result in results):
-        raise ValueError("Batch result contains an unknown status.")
-
-    # Validate summary
-    expected = BatchSummary(
-        total=len(results),
-        succeeded=sum(result.status in succeeded for result in results),
-        failed=sum(result.status in failed for result in results),
-        skipped=sum(result.status in skipped for result in results),
-        timed_out=sum(result.status in timed_out for result in results),
-    )
-    if summary != expected:
-        raise ValueError("Batch summary does not match batch results.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,22 +116,6 @@ class ViewPersistenceCandidate:
     business_name: str | None = None
     is_persisted: bool | None = None
 
-    def __post_init__(self) -> None:
-        """
-        Validates identifiers and the analyzer score.
-
-        Raises:
-            ValueError: If an identifier is empty or the score is not finite.
-        """
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
-        if (
-            isinstance(self.score, bool)
-            or not isinstance(self.score, (int, float))
-            or not math.isfinite(self.score)
-        ):
-            raise ValueError("Candidate score must be a finite number.")
-
 
 @dataclass(frozen=True, slots=True)
 class FindViewPersistenceCandidatesRequest:
@@ -277,20 +129,12 @@ class FindViewPersistenceCandidatesRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates identifiers, score, and analysis timeout.
+        Validates the analysis timeout.
 
         Raises:
-            ValueError: If an identifier, score, or timeout is invalid.
+            ValueError: If the timeout is not within the supported range.
         """
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
-        if (
-            isinstance(self.candidate_score, bool)
-            or not isinstance(self.candidate_score, (int, float))
-            or not math.isfinite(self.candidate_score)
-        ):
-            raise ValueError("Candidate score must be a finite number.")
-        _validate_timeout(self.timeout_seconds)
+        validate_timeout(self.timeout_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,27 +148,13 @@ class FindViewPersistenceCandidatesResult:
     candidates: tuple[ViewPersistenceCandidate, ...]
     log_id: str | None = None
 
-    def __post_init__(self) -> None:
-        """
-        Validates that all candidates have the expected model type.
-
-        Raises:
-            TypeError: If candidates is not a tuple of persistence candidates.
-        """
-        if not isinstance(self.candidates, tuple) or not all(
-            isinstance(candidate, ViewPersistenceCandidate)
-            for candidate in self.candidates
-        ):
-            raise TypeError(
-                "Candidates must contain ViewPersistenceCandidate objects."
-            )
-
 
 @dataclass(frozen=True, slots=True)
 class FindViewPersistenceCandidatesBatchRequest:
     """
     Input for finding persistence candidates across multiple views with
-    concurrency.
+    concurrency. Analyzes every view of the tenant if no explicit requests are
+    supplied.
     """
     requests: tuple[FindViewPersistenceCandidatesRequest, ...] | None = None
     candidate_score: int | float = 10
@@ -333,37 +163,14 @@ class FindViewPersistenceCandidatesBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates batch options and consistency of explicit requests.
+        Validates the analysis timeout and the batch concurrency limit.
 
         Raises:
-            TypeError: If explicit requests have an invalid type.
-            ValueError: If score, timeout, concurrency, or request options are
-                        inconsistent.
+            ValueError: If the timeout or the concurrency limit is not within
+                        the supported range.
         """
-        if (
-            isinstance(self.candidate_score, bool)
-            or not isinstance(self.candidate_score, (int, float))
-            or not math.isfinite(self.candidate_score)
-        ):
-            raise ValueError("Candidate score must be a finite number.")
-        _validate_timeout(self.timeout_seconds)
+        validate_timeout(self.timeout_seconds)
         validate_max_concurrency(self.max_concurrency)
-        if self.requests is None:
-            return
-        _validate_batch_requests(
-            self.requests,
-            FindViewPersistenceCandidatesRequest,
-            self.max_concurrency,
-        )
-        if any(
-            item.candidate_score != self.candidate_score
-            or item.timeout_seconds != self.timeout_seconds
-            for item in self.requests
-        ):
-            raise ValueError(
-                "Explicit requests must match the batch candidate score and "
-                "timeout."
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,23 +181,6 @@ class FindViewPersistenceCandidatesBatchResult:
     """
     results: tuple[FindViewPersistenceCandidatesResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates result statuses and the aggregate outcome counts.
-
-        Raises:
-            TypeError: If results contains an unexpected result type.
-            ValueError: If a status or summary is inconsistent.
-        """
-        _validate_batch_result(
-            self.results,
-            FindViewPersistenceCandidatesResult,
-            self.summary,
-            succeeded=(FindViewPersistenceCandidatesStatus.COMPLETED,),
-            failed=(FindViewPersistenceCandidatesStatus.FAILED,),
-            timed_out=(FindViewPersistenceCandidatesStatus.TIMED_OUT,),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,22 +195,6 @@ class FindViewAttributeMatchesRequest:
     substring: str
     case_sensitive: bool = False
 
-    def __post_init__(self) -> None:
-        """
-        Validates identifiers, search text, and case-sensitivity settings.
-
-        Raises:
-            ValueError: If required text is empty or case_sensitive is not a
-                        boolean.
-        """
-        _validate_text("View ID", self.view_id)
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
-        _validate_text("Business name", self.business_name)
-        _validate_text("Substring", self.substring)
-        if not isinstance(self.case_sensitive, bool):
-            raise ValueError("Case-sensitive must be a boolean.")
-
 
 @dataclass(frozen=True, slots=True)
 class FindViewAttributeMatchesResult:
@@ -433,24 +207,13 @@ class FindViewAttributeMatchesResult:
     status: FindViewAttributeMatchesStatus
     attributes: tuple[str, ...]
 
-    def __post_init__(self) -> None:
-        """
-        Validates that every matching attribute is a string.
-
-        Raises:
-            TypeError: If attributes is not a tuple of strings.
-        """
-        if not isinstance(self.attributes, tuple) or not all(
-            isinstance(attribute, str) for attribute in self.attributes
-        ):
-            raise TypeError("Attributes must be a tuple of strings.")
-
 
 @dataclass(frozen=True, slots=True)
 class FindViewAttributeMatchesBatchRequest:
     """
     Input for finding matching attributes across multiple views with
-    concurrency.
+    concurrency. Searches every view of the tenant if no explicit requests are
+    supplied.
     """
     substring: str
     requests: tuple[FindViewAttributeMatchesRequest, ...] | None = None
@@ -459,33 +222,13 @@ class FindViewAttributeMatchesBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates search options and consistency of explicit requests.
+        Validates the batch concurrency limit.
 
         Raises:
-            TypeError: If explicit requests have an invalid type.
-            ValueError: If search, case-sensitivity, concurrency, or request
-                        options are inconsistent.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
-        _validate_text("Substring", self.substring)
-        if not isinstance(self.case_sensitive, bool):
-            raise ValueError("Case-sensitive must be a boolean.")
         validate_max_concurrency(self.max_concurrency)
-        if self.requests is None:
-            return
-        _validate_batch_requests(
-            self.requests,
-            FindViewAttributeMatchesRequest,
-            self.max_concurrency,
-        )
-        if any(
-            item.substring != self.substring
-            or item.case_sensitive != self.case_sensitive
-            for item in self.requests
-        ):
-            raise ValueError(
-                "Explicit requests must match the batch substring and "
-                "case-sensitivity setting."
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,22 +239,6 @@ class FindViewAttributeMatchesBatchResult:
     """
     results: tuple[FindViewAttributeMatchesResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates the batch result.
-
-        Raises:
-            TypeError: If results contains an unexpected result type.
-            ValueError: If a status or summary is inconsistent.
-        """
-        _validate_batch_result(
-            self.results,
-            FindViewAttributeMatchesResult,
-            self.summary,
-            succeeded=(FindViewAttributeMatchesStatus.COMPLETED,),
-            failed=(FindViewAttributeMatchesStatus.FAILED,),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,21 +255,14 @@ class CreateViewPartitioningRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates partition identifiers, year bounds, and overwrite behavior.
+        Validates the partition year bounds. An inverted range would silently
+        create no partitions at all.
 
         Raises:
-            ValueError: If a field is invalid or the start year is not less
-                        than the end year.
+            ValueError: If the start year is not less than the end year.
         """
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
-        _validate_text("Attribute", self.attribute)
-        _validate_year("Start year", self.start_year)
-        _validate_year("End year", self.end_year)
         if self.start_year >= self.end_year:
             raise ValueError("Start year must be less than end year.")
-        if not isinstance(self.overwrite_existing, bool):
-            raise ValueError("Overwrite-existing must be a boolean.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -565,17 +285,13 @@ class CreateViewPartitioningBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates the batch request.
+        Validates the batch concurrency limit.
 
         Raises:
-            TypeError: If requests is not a tuple of partition requests.
-            ValueError: If the concurrency setting is invalid.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
-        _validate_batch_requests(
-            self.requests,
-            CreateViewPartitioningRequest,
-            self.max_concurrency,
-        )
+        validate_max_concurrency(self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
@@ -586,26 +302,6 @@ class CreateViewPartitioningBatchResult:
     results: tuple[CreateViewPartitioningResult, ...]
     summary: BatchSummary
 
-    def __post_init__(self) -> None:
-        """
-        Validates the batch result.
-
-        Raises:
-            TypeError: If results contains an unexpected result type.
-            ValueError: If a status or summary is inconsistent.
-        """
-        _validate_batch_result(
-            self.results,
-            CreateViewPartitioningResult,
-            self.summary,
-            succeeded=(CreateViewPartitioningStatus.CREATED,),
-            failed=(
-                CreateViewPartitioningStatus.INVALID_COLUMN,
-                CreateViewPartitioningStatus.FAILED,
-            ),
-            skipped=(CreateViewPartitioningStatus.ALREADY_EXISTS,),
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class DeleteViewPartitioningRequest:
@@ -614,16 +310,6 @@ class DeleteViewPartitioningRequest:
     """
     view: str
     space: str
-
-    def __post_init__(self) -> None:
-        """
-        Validates the view and space identifiers.
-
-        Raises:
-            ValueError: If the view or space identifier is empty.
-        """
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
 
 
 @dataclass(frozen=True, slots=True)
@@ -646,17 +332,13 @@ class DeleteViewPartitioningBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates the batch request.
+        Validates the batch concurrency limit.
 
         Raises:
-            TypeError: If requests is not a tuple of deletion requests.
-            ValueError: If the concurrency setting is invalid.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
-        _validate_batch_requests(
-            self.requests,
-            DeleteViewPartitioningRequest,
-            self.max_concurrency,
-        )
+        validate_max_concurrency(self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
@@ -666,22 +348,6 @@ class DeleteViewPartitioningBatchResult:
     """
     results: tuple[DeleteViewPartitioningResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates the batch result.
-
-        Raises:
-            TypeError: If results contains an unexpected result type.
-            ValueError: If a status or summary is inconsistent.
-        """
-        _validate_batch_result(
-            self.results,
-            DeleteViewPartitioningResult,
-            self.summary,
-            succeeded=(DeleteViewPartitioningStatus.DELETED,),
-            failed=(DeleteViewPartitioningStatus.FAILED,),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -695,14 +361,12 @@ class PersistViewRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates view identifiers and the persistence timeout.
+        Validates the persistence timeout.
 
         Raises:
-            ValueError: If an identifier or timeout is invalid.
+            ValueError: If the timeout is not within the supported range.
         """
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
-        _validate_timeout(self.timeout_seconds)
+        validate_timeout(self.timeout_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -728,17 +392,13 @@ class PersistViewBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates the batch request.
+        Validates the batch concurrency limit.
 
         Raises:
-            TypeError: If requests is not a tuple of persistence requests.
-            ValueError: If the concurrency setting is invalid.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
-        _validate_batch_requests(
-            self.requests,
-            PersistViewRequest,
-            self.max_concurrency,
-        )
+        validate_max_concurrency(self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
@@ -748,23 +408,6 @@ class PersistViewBatchResult:
     """
     results: tuple[PersistViewResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates the batch result.
-
-        Raises:
-            TypeError: If results contains an unexpected result type.
-            ValueError: If a status or summary is inconsistent.
-        """
-        _validate_batch_result(
-            self.results,
-            PersistViewResult,
-            self.summary,
-            succeeded=(PersistViewStatus.COMPLETED,),
-            failed=(PersistViewStatus.START_FAILED, PersistViewStatus.FAILED),
-            timed_out=(PersistViewStatus.TIMED_OUT,),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -778,14 +421,12 @@ class UnpersistViewRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates view identifiers and the unpersistence timeout.
+        Validates the unpersistence timeout.
 
         Raises:
-            ValueError: If an identifier or timeout is invalid.
+            ValueError: If the timeout is not within the supported range.
         """
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
-        _validate_timeout(self.timeout_seconds)
+        validate_timeout(self.timeout_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -811,17 +452,13 @@ class UnpersistViewBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates the batch request.
+        Validates the batch concurrency limit.
 
         Raises:
-            TypeError: If requests is not a tuple of unpersistence requests.
-            ValueError: If the concurrency setting is invalid.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
-        _validate_batch_requests(
-            self.requests,
-            UnpersistViewRequest,
-            self.max_concurrency,
-        )
+        validate_max_concurrency(self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
@@ -832,27 +469,6 @@ class UnpersistViewBatchResult:
     results: tuple[UnpersistViewResult, ...]
     summary: BatchSummary
 
-    def __post_init__(self) -> None:
-        """
-        Validates the batch result.
-
-        Raises:
-            TypeError: If results contains an unexpected result type.
-            ValueError: If a status or summary is inconsistent.
-        """
-        _validate_batch_result(
-            self.results,
-            UnpersistViewResult,
-            self.summary,
-            succeeded=(UnpersistViewStatus.COMPLETED,),
-            failed=(
-                UnpersistViewStatus.START_FAILED,
-                UnpersistViewStatus.FAILED,
-            ),
-            skipped=(UnpersistViewStatus.ALREADY_ABSENT,),
-            timed_out=(UnpersistViewStatus.TIMED_OUT,),
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class LockViewPartitionsRequest:
@@ -862,18 +478,6 @@ class LockViewPartitionsRequest:
     view: str
     space: str
     until_year: int
-
-    def __post_init__(self) -> None:
-        """
-        Validates the view, space, and year parameters.
-
-        Raises:
-            ValueError: If an identifier is empty or the year is not an
-                        integer.
-        """
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
-        _validate_year("Until year", self.until_year)
 
 
 @dataclass(frozen=True, slots=True)
@@ -897,17 +501,13 @@ class LockViewPartitionsBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates the batch request.
+        Validates the batch concurrency limit.
 
         Raises:
-            TypeError: If requests is not a tuple of lock requests.
-            ValueError: If the concurrency setting is invalid.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
-        _validate_batch_requests(
-            self.requests,
-            LockViewPartitionsRequest,
-            self.max_concurrency,
-        )
+        validate_max_concurrency(self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
@@ -919,23 +519,6 @@ class LockViewPartitionsBatchResult:
     results: tuple[LockViewPartitionsResult, ...]
     summary: BatchSummary
 
-    def __post_init__(self) -> None:
-        """
-        Validates the batch result.
-
-        Raises:
-            TypeError: If results contains an unexpected result type.
-            ValueError: If a status or summary is inconsistent.
-        """
-        _validate_batch_result(
-            self.results,
-            LockViewPartitionsResult,
-            self.summary,
-            succeeded=(LockViewPartitionsStatus.LOCKED,),
-            failed=(LockViewPartitionsStatus.FAILED,),
-            skipped=(LockViewPartitionsStatus.NO_PARTITIONS,),
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class UnlockViewPartitionsRequest:
@@ -944,16 +527,6 @@ class UnlockViewPartitionsRequest:
     """
     view: str
     space: str
-
-    def __post_init__(self) -> None:
-        """
-        Validates the view and space identifiers.
-
-        Raises:
-            ValueError: If the view or space identifier is empty.
-        """
-        _validate_text("View", self.view)
-        _validate_text("Space", self.space)
 
 
 @dataclass(frozen=True, slots=True)
@@ -976,17 +549,13 @@ class UnlockViewPartitionsBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates the batch request.
+        Validates the batch concurrency limit.
 
         Raises:
-            TypeError: If requests is not a tuple of unlock requests.
-            ValueError: If the concurrency setting is invalid.
+            ValueError: If the concurrency limit is not within the supported
+                        range.
         """
-        _validate_batch_requests(
-            self.requests,
-            UnlockViewPartitionsRequest,
-            self.max_concurrency,
-        )
+        validate_max_concurrency(self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
@@ -997,20 +566,3 @@ class UnlockViewPartitionsBatchResult:
     """
     results: tuple[UnlockViewPartitionsResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates the batch result.
-
-        Raises:
-            TypeError: If results contains an unexpected result type.
-            ValueError: If a status or summary is inconsistent.
-        """
-        _validate_batch_result(
-            self.results,
-            UnlockViewPartitionsResult,
-            self.summary,
-            succeeded=(UnlockViewPartitionsStatus.UNLOCKED,),
-            failed=(UnlockViewPartitionsStatus.FAILED,),
-            skipped=(UnlockViewPartitionsStatus.NO_PARTITIONS,),
-        )

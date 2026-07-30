@@ -1,9 +1,10 @@
-import math
 from dataclasses import dataclass
 from enum import StrEnum
 
 from datasphere_core.models.common import (
     BatchSummary,
+    CommandStatus,
+    Outcome,
     validate_max_concurrency,
 )
 
@@ -16,24 +17,17 @@ MAXIMUM_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS = 86400.0
 
 class AnalyticalModelDependencyStatus(StrEnum):
     """
-    Resolution status of one analytical model dependency.
+    Resolution status of one analytical model dependency. Dependencies are
+    parts of a result, not batch items, so they carry no outcome.
     """
     RESOLVED = "resolved"
     NOT_FOUND = "not_found"
 
 
-class AnalyticalModelDependenciesStatus(StrEnum):
-    """
-    Result status of resolving analytical model dependencies.
-    """
-    COMPLETED = "completed"
-    DEPENDENCY_NOT_FOUND = "dependency_not_found"
-    ANALYTICAL_MODEL_NOT_FOUND = "analytical_model_not_found"
-
-
 class AnalyticalModelPersistenceItemStatus(StrEnum):
     """
-    Persistence measurement status of one model dependency.
+    Persistence measurement status of one model dependency. Dependencies are
+    parts of a result, not batch items, so they carry no outcome.
     """
     COMPLETED = "completed"
     ALREADY_PERSISTED = "already_persisted"
@@ -44,105 +38,58 @@ class AnalyticalModelPersistenceItemStatus(StrEnum):
     CLEANUP_TIMED_OUT = "cleanup_timed_out"
 
 
-class AnalyticalModelPersistenceStatus(StrEnum):
+class AnalyticalModelDependenciesStatus(CommandStatus):
+    """
+    Result status of resolving the view dependencies of an analytical model.
+    """
+    COMPLETED = "completed", Outcome.SUCCEEDED
+    DEPENDENCY_NOT_FOUND = "dependency_not_found", Outcome.FAILED
+    ANALYTICAL_MODEL_NOT_FOUND = (
+        "analytical_model_not_found",
+        Outcome.SKIPPED,
+    )
+
+
+class AnalyticalModelPersistenceStatus(CommandStatus):
     """
     Aggregate persistence measurement status of one analytical model.
     """
-    COMPLETED = "completed"
-    FAILED = "failed"
-    TIMED_OUT = "timed_out"
-    ANALYTICAL_MODEL_NOT_FOUND = "analytical_model_not_found"
+    COMPLETED = "completed", Outcome.SUCCEEDED
+    FAILED = "failed", Outcome.FAILED
+    TIMED_OUT = "timed_out", Outcome.TIMED_OUT
+    ANALYTICAL_MODEL_NOT_FOUND = (
+        "analytical_model_not_found",
+        Outcome.SKIPPED,
+    )
 
 
-_DEPENDENCY_STATUSES = {
-    AnalyticalModelDependencyStatus.RESOLVED,
-    AnalyticalModelDependencyStatus.NOT_FOUND,
-}
-_DEPENDENCIES_STATUSES = {
-    AnalyticalModelDependenciesStatus.COMPLETED,
-    AnalyticalModelDependenciesStatus.DEPENDENCY_NOT_FOUND,
-    AnalyticalModelDependenciesStatus.ANALYTICAL_MODEL_NOT_FOUND,
-}
-_PERSISTENCE_ITEM_STATUSES = {
-    AnalyticalModelPersistenceItemStatus.COMPLETED,
-    AnalyticalModelPersistenceItemStatus.ALREADY_PERSISTED,
-    AnalyticalModelPersistenceItemStatus.DEPENDENCY_NOT_FOUND,
-    AnalyticalModelPersistenceItemStatus.PERSIST_FAILED,
-    AnalyticalModelPersistenceItemStatus.PERSIST_TIMED_OUT,
-    AnalyticalModelPersistenceItemStatus.CLEANUP_FAILED,
-    AnalyticalModelPersistenceItemStatus.CLEANUP_TIMED_OUT,
-}
-_PERSISTENCE_STATUSES = {
-    AnalyticalModelPersistenceStatus.COMPLETED,
-    AnalyticalModelPersistenceStatus.FAILED,
-    AnalyticalModelPersistenceStatus.TIMED_OUT,
-    AnalyticalModelPersistenceStatus.ANALYTICAL_MODEL_NOT_FOUND,
-}
-
-
-def _validate_non_empty(value: str, field: str) -> None:
+def validate_timeout(timeout_seconds: float) -> None:
     """
-    Validates that a required text value is not empty.
+    Validates an analytical model operation timeout. An invalid timeout would
+    either fail immediately or keep the caller waiting far longer than
+    intended.
 
     Args:
-        value (str): Text value to validate.
-        field (str): Human-readable field name for validation errors.
+        timeout_seconds (float): Timeout of one operation in seconds.
 
     Raises:
-        ValueError: If the value is not a non-empty string.
+        ValueError: If the timeout is not within the supported range.
     """
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field} must not be empty.")
-
-
-def _validate_optional_non_empty(value: str | None, field: str) -> None:
-    """
-    Validates an optional text value when it is present.
-
-    Args:
-        value (str | None): Optional text value to validate.
-        field (str): Human-readable field name for validation errors.
-
-    Raises:
-        ValueError: If a present value is not a non-empty string.
-    """
-    if value is not None:
-        _validate_non_empty(value, field)
-
-
-def _validate_timeout(timeout_seconds: float) -> None:
-    """
-    Validates an analytical model operation timeout.
-
-    Args:
-        timeout_seconds (float): Positive finite timeout in seconds.
-
-    Raises:
-        ValueError: If the timeout is not positive, infinite, or not within the
-                    supported maximum.
-    """
-    if (
-        isinstance(timeout_seconds, bool)
-        or not isinstance(timeout_seconds, (int, float))
-        or not math.isfinite(timeout_seconds)
-        or not 0
-        < timeout_seconds
-        <= MAXIMUM_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS
-    ):
+    maximum = MAXIMUM_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS
+    if not 0 < timeout_seconds <= maximum:
         raise ValueError(
             "Timeout must be greater than zero and at most "
-            f"{MAXIMUM_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS} "
-            "seconds."
+            f"{maximum} seconds."
         )
 
 
-def _validate_model_selection(
+def validate_model_selection(
     analytical_models: tuple["AnalyticalModelReference", ...] | None,
     space: str | None,
 ) -> None:
     """
-    Validates the analytical model selection. Either the analytical_model or
-    the space needs to be None.
+    Validates the analytical model selection. A space filter selects models by
+    discovery, so combining it with explicit models would be ambiguous.
 
     Args:
         analytical_models (tuple[AnalyticalModelReference, ...] | None):
@@ -151,24 +98,11 @@ def _validate_model_selection(
                             model references are supplied.
 
     Raises:
-        TypeError: If explicit models are not a tuple of model references.
-        ValueError: If a space is combined with explicit model references or
-                    an identifier is empty.
+        ValueError: If a space is combined with explicit model references.
     """
-    _validate_optional_non_empty(space, "Space")
-    if analytical_models is None:
-        return
-    if space is not None:
+    if analytical_models is not None and space is not None:
         raise ValueError(
             "Space cannot be combined with explicit analytical models."
-        )
-    if not isinstance(analytical_models, tuple) or not all(
-        isinstance(model, AnalyticalModelReference)
-        for model in analytical_models
-    ):
-        raise TypeError(
-            "Analytical models must be a tuple of AnalyticalModelReference "
-            "objects."
         )
 
 
@@ -180,47 +114,17 @@ class AnalyticalModelReference:
     name: str
     space: str
 
-    def __post_init__(self) -> None:
-        """
-        Validates the analytical model name and space.
-
-        Raises:
-            ValueError: If either identifier is empty.
-        """
-        _validate_non_empty(self.name, "Name")
-        _validate_non_empty(self.space, "Space")
-
 
 @dataclass(frozen=True, slots=True)
 class AnalyticalModelViewDependency:
     """
-    View dependency of an analytical model.
+    View dependency of an analytical model. The space is only known for
+    resolved dependencies.
     """
     view_id: str
     view_name: str
     space: str | None
     status: AnalyticalModelDependencyStatus
-
-    def __post_init__(self) -> None:
-        """
-        Validates the supplied attributes..
-
-        Raises:
-            ValueError: If an identifier is empty, the status is unknown, or
-                        the status does not agree with the space value.
-        """
-        _validate_non_empty(self.view_id, "View ID")
-        _validate_non_empty(self.view_name, "View name")
-        _validate_optional_non_empty(self.space, "Space")
-        if self.status not in _DEPENDENCY_STATUSES:
-            raise ValueError(f"Invalid dependency status: {self.status!r}.")
-        if (self.status is AnalyticalModelDependencyStatus.RESOLVED) != (
-            self.space is not None
-        ):
-            raise ValueError(
-                "Resolved dependencies require a space and unresolved "
-                "dependencies must not have one."
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,23 +135,11 @@ class GetAnalyticalModelViewDependenciesRequest:
     analytical_model_name: str
     space: str
 
-    def __post_init__(self) -> None:
-        """
-        Validates the analytical model name and space.
-
-        Raises:
-            ValueError: If either identifier is empty.
-        """
-        _validate_non_empty(
-            self.analytical_model_name, "Analytical model name"
-        )
-        _validate_non_empty(self.space, "Space")
-
 
 @dataclass(frozen=True, slots=True)
 class GetAnalyticalModelViewDependenciesResult:
     """
-    Result of resolving one analytical models's view dependencies.
+    Result of resolving one analytical model's view dependencies.
     """
     analytical_model_name: str
     space: str
@@ -255,63 +147,12 @@ class GetAnalyticalModelViewDependenciesResult:
     analytical_model_id: str | None = None
     dependencies: tuple[AnalyticalModelViewDependency, ...] = ()
 
-    def __post_init__(self) -> None:
-        """
-        Validates dependency result types and status-dependent invariants.
-
-        Raises:
-            TypeError: If dependencies is not a tuple of dependency objects.
-            ValueError: If identifiers, status, model ID, or dependency
-                        outcomes are inconsistent.
-        """
-        _validate_non_empty(
-            self.analytical_model_name, "Analytical model name"
-        )
-        _validate_non_empty(self.space, "Space")
-        _validate_optional_non_empty(
-            self.analytical_model_id, "Analytical model ID"
-        )
-        if self.status not in _DEPENDENCIES_STATUSES:
-            raise ValueError(
-                f"Invalid analytical model dependency status: {self.status!r}."
-            )
-        if not isinstance(self.dependencies, tuple) or not all(
-            isinstance(item, AnalyticalModelViewDependency)
-            for item in self.dependencies
-        ):
-            raise TypeError(
-                "Dependencies must be a tuple of "
-                "AnalyticalModelViewDependency objects."
-            )
-        if self.status is (
-            AnalyticalModelDependenciesStatus.ANALYTICAL_MODEL_NOT_FOUND
-        ):
-            if self.analytical_model_id is not None or self.dependencies:
-                raise ValueError(
-                    "A missing analytical model cannot have an ID or "
-                    "dependencies."
-                )
-            return
-        if self.analytical_model_id is None:
-            raise ValueError("A resolved analytical model requires an ID.")
-        has_missing = any(
-            dependency.status is AnalyticalModelDependencyStatus.NOT_FOUND
-            for dependency in self.dependencies
-        )
-        if (
-            self.status
-            is AnalyticalModelDependenciesStatus.DEPENDENCY_NOT_FOUND
-        ) != has_missing:
-            raise ValueError(
-                "Dependency status does not match the dependency results."
-            )
-
 
 @dataclass(frozen=True, slots=True)
 class GetAnalyticalModelViewDependenciesBatchRequest:
     """
-    Input for resolving view dependencies of all analytical models or selected
-    analytical models.
+    Input for resolving the view dependencies of all analytical models or of a
+    selected set of analytical models.
     """
     analytical_models: tuple[AnalyticalModelReference, ...] | None = None
     space: str | None = None
@@ -320,63 +161,25 @@ class GetAnalyticalModelViewDependenciesBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates selection, deduplication, and concurrency options.
+        Validates the model selection and the batch concurrency limit.
 
         Raises:
-            TypeError: If explicit models are not correctly typed or
-                       deduplicate_views is not boolean.
-            ValueError: If selection or concurrency settings are invalid.
+            ValueError: If a space is combined with explicit analytical models
+                        or the concurrency limit is not within the supported
+                        range.
         """
-        _validate_model_selection(self.analytical_models, self.space)
-        if not isinstance(self.deduplicate_views, bool):
-            raise TypeError("Deduplicate views must be a boolean.")
+        validate_model_selection(self.analytical_models, self.space)
         validate_max_concurrency(self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
 class GetAnalyticalModelViewDependenciesBatchResult:
     """
-    Ordered results of resolving view dependencies of all analytical models or
-    selected analytical models in a batch.
+    Ordered results of resolving the view dependencies of analytical models in
+    a batch.
     """
     results: tuple[GetAnalyticalModelViewDependenciesResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates result types and the aggregate outcome counts.
-
-        Raises:
-            TypeError: If results is not a tuple of dependency results.
-            ValueError: If the summary does not match the result statuses.
-        """
-        if not isinstance(self.results, tuple) or not all(
-            isinstance(item, GetAnalyticalModelViewDependenciesResult)
-            for item in self.results
-        ):
-            raise TypeError(
-                "Batch results must contain dependency result objects."
-            )
-        expected = BatchSummary(
-            total=len(self.results),
-            succeeded=sum(
-                result.status is AnalyticalModelDependenciesStatus.COMPLETED
-                for result in self.results
-            ),
-            failed=sum(
-                result.status
-                is AnalyticalModelDependenciesStatus.DEPENDENCY_NOT_FOUND
-                for result in self.results
-            ),
-            skipped=sum(
-                result.status
-                is AnalyticalModelDependenciesStatus.ANALYTICAL_MODEL_NOT_FOUND
-                for result in self.results
-            ),
-            timed_out=0,
-        )
-        if self.summary != expected:
-            raise ValueError("Batch summary does not match batch results.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,16 +197,13 @@ class MeasureAnalyticalModelViewPersistenceRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates model identifiers, timeout, and concurrency.
+        Validates the persistence timeout and the concurrency limit.
 
         Raises:
-            ValueError: If an identifier or timeout is invalid.
+            ValueError: If the timeout or the concurrency limit is not within
+                        the supported range.
         """
-        _validate_non_empty(
-            self.analytical_model_name, "Analytical model name"
-        )
-        _validate_non_empty(self.space, "Space")
-        _validate_timeout(self.timeout_seconds)
+        validate_timeout(self.timeout_seconds)
         validate_max_concurrency(self.max_concurrency)
 
 
@@ -426,94 +226,6 @@ class MeasureAnalyticalModelViewPersistenceItemResult:
     persistence_removed: bool | None = None
     manual_intervention: bool = False
 
-    def __post_init__(self) -> None:
-        """
-        Validates the persistence result and status-specific invariants.
-
-        Raises:
-            TypeError: If a boolean field has an invalid type.
-            ValueError: If identifiers, status, runtime, or cleanup metadata
-                        are inconsistent.
-        """
-        # Validate non-empty and optional strings
-        _validate_non_empty(self.view_id, "View ID")
-        _validate_non_empty(self.view_name, "View name")
-        _validate_optional_non_empty(self.space, "Space")
-        for value, field in (
-            (self.persistence_sap_status, "Persistence SAP status"),
-            (self.persistence_log_id, "Persistence log ID"),
-            (self.cleanup_sap_status, "Cleanup SAP status"),
-            (self.cleanup_log_id, "Cleanup log ID"),
-        ):
-            _validate_optional_non_empty(value, field)
-
-        # Validate correct status
-        if self.status not in _PERSISTENCE_ITEM_STATUSES:
-            raise ValueError(
-                f"Invalid persistence item status: {self.status!r}."
-            )
-
-        # Validate type of all (possibly) boolean values
-        for field, value in (
-            ("Previously persisted", self.previously_persisted),
-            ("Persistence removed", self.persistence_removed),
-            ("Manual intervention", self.manual_intervention),
-        ):
-            if value is not None and not isinstance(value, bool):
-                raise TypeError(f"{field} must be a boolean or None.")
-
-        # Validate runtime
-        if self.runtime_seconds is not None and (
-            isinstance(self.runtime_seconds, bool)
-            or not isinstance(self.runtime_seconds, int)
-            or self.runtime_seconds < 0
-        ):
-            raise ValueError(
-                "Runtime seconds must be a non-negative integer or None."
-            )
-
-        # Validate special cases
-        if self.status is (
-            AnalyticalModelPersistenceItemStatus.DEPENDENCY_NOT_FOUND
-        ):
-            if self.space is not None or self.previously_persisted is not None:
-                raise ValueError(
-                    "An unresolved dependency cannot have persistence data."
-                )
-            return
-        if self.space is None or self.previously_persisted is None:
-            raise ValueError(
-                "Measured dependencies require a space and prior state."
-            )
-        if (
-            self.status is AnalyticalModelPersistenceItemStatus.COMPLETED
-            and self.persistence_removed is not True
-        ):
-            raise ValueError(
-                "Completed temporary persistence must have been removed."
-            )
-        if self.status is (
-            AnalyticalModelPersistenceItemStatus.ALREADY_PERSISTED
-        ) and (
-            not self.previously_persisted
-            or self.persistence_removed is not False
-        ):
-            raise ValueError(
-                "Already-persisted results require prior persistence and "
-                "must not report removal."
-            )
-        if self.status in {
-            AnalyticalModelPersistenceItemStatus.CLEANUP_FAILED,
-            AnalyticalModelPersistenceItemStatus.CLEANUP_TIMED_OUT,
-        } and (
-            self.persistence_removed is not False
-            or not self.manual_intervention
-        ):
-            raise ValueError(
-                "Cleanup failures require manual intervention and must "
-                "report that persistence was not removed."
-            )
-
 
 @dataclass(frozen=True, slots=True)
 class MeasureAnalyticalModelViewPersistenceResult:
@@ -528,78 +240,6 @@ class MeasureAnalyticalModelViewPersistenceResult:
     dependencies: tuple[
         MeasureAnalyticalModelViewPersistenceItemResult, ...
     ] = ()
-
-    def __post_init__(self) -> None:
-        """
-        Validates result types and status-dependent persistence invariants.
-
-        Raises:
-            TypeError: If dependencies is not a tuple of persistence results.
-            ValueError: If identifiers, status, model ID, or dependency
-                        outcomes are inconsistent.
-        """
-        # Validate non-empty and optional strings
-        _validate_non_empty(
-            self.analytical_model_name, "Analytical model name"
-        )
-        _validate_non_empty(self.space, "Space")
-        _validate_optional_non_empty(
-            self.analytical_model_id, "Analytical model ID"
-        )
-
-        # Validate correct status
-        if self.status not in _PERSISTENCE_STATUSES:
-            raise ValueError(
-                f"Invalid persistence measurement status: {self.status!r}."
-            )
-
-        # Validate type of dependencies
-        if not isinstance(self.dependencies, tuple) or not all(
-            isinstance(item, MeasureAnalyticalModelViewPersistenceItemResult)
-            for item in self.dependencies
-        ):
-            raise TypeError(
-                "Dependencies must be a tuple of persistence item results."
-            )
-
-        # Validate special cases
-        if self.status is (
-            AnalyticalModelPersistenceStatus.ANALYTICAL_MODEL_NOT_FOUND
-        ):
-            if self.analytical_model_id is not None or self.dependencies:
-                raise ValueError(
-                    "A missing analytical model cannot have measurement data."
-                )
-            return
-        if self.analytical_model_id is None:
-            raise ValueError("A measured analytical model requires an ID.")
-
-        # Validate expected status
-        if any(
-            item.status
-            in {
-                AnalyticalModelPersistenceItemStatus.PERSIST_TIMED_OUT,
-                AnalyticalModelPersistenceItemStatus.CLEANUP_TIMED_OUT,
-            }
-            for item in self.dependencies
-        ):
-            expected = AnalyticalModelPersistenceStatus.TIMED_OUT
-        elif any(
-            item.status
-            not in {
-                AnalyticalModelPersistenceItemStatus.COMPLETED,
-                AnalyticalModelPersistenceItemStatus.ALREADY_PERSISTED,
-            }
-            for item in self.dependencies
-        ):
-            expected = AnalyticalModelPersistenceStatus.FAILED
-        else:
-            expected = AnalyticalModelPersistenceStatus.COMPLETED
-
-        if self.status != expected:
-            raise ValueError(
-                "Persistence status does not match dependency outcomes."
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -617,60 +257,24 @@ class MeasureAnalyticalModelViewPersistenceBatchRequest:
 
     def __post_init__(self) -> None:
         """
-        Validates selection, timeout, and concurrency options.
+        Validates the model selection, the persistence timeout, and the batch
+        concurrency limit.
 
         Raises:
-            ValueError: If selection, timeout, or concurrency settings are
-                        invalid.
+            ValueError: If a space is combined with explicit analytical models
+                        or the timeout or concurrency limit is not within the
+                        supported range.
         """
-        _validate_model_selection(self.analytical_models, self.space)
-        _validate_timeout(self.timeout_seconds)
+        validate_model_selection(self.analytical_models, self.space)
+        validate_timeout(self.timeout_seconds)
         validate_max_concurrency(self.max_concurrency)
 
 
 @dataclass(frozen=True, slots=True)
 class MeasureAnalyticalModelViewPersistenceBatchResult:
     """
-    Ordered results of measuring the persistence runtime of all view
-    dependencies of all or selected analytical models in a batch.
+    Ordered results of measuring the persistence runtime of the view
+    dependencies of analytical models in a batch.
     """
     results: tuple[MeasureAnalyticalModelViewPersistenceResult, ...]
     summary: BatchSummary
-
-    def __post_init__(self) -> None:
-        """
-        Validates result types and the aggregate outcome counts.
-
-        Raises:
-            TypeError: If results is not a tuple of persistence results.
-            ValueError: If the summary does not match the result statuses.
-        """
-        if not isinstance(self.results, tuple) or not all(
-            isinstance(item, MeasureAnalyticalModelViewPersistenceResult)
-            for item in self.results
-        ):
-            raise TypeError(
-                "Batch results must contain persistence measurement results."
-            )
-        expected = BatchSummary(
-            total=len(self.results),
-            succeeded=sum(
-                result.status is AnalyticalModelPersistenceStatus.COMPLETED
-                for result in self.results
-            ),
-            failed=sum(
-                result.status is AnalyticalModelPersistenceStatus.FAILED
-                for result in self.results
-            ),
-            skipped=sum(
-                result.status
-                is AnalyticalModelPersistenceStatus.ANALYTICAL_MODEL_NOT_FOUND
-                for result in self.results
-            ),
-            timed_out=sum(
-                result.status is AnalyticalModelPersistenceStatus.TIMED_OUT
-                for result in self.results
-            ),
-        )
-        if self.summary != expected:
-            raise ValueError("Batch summary does not match batch results.")
