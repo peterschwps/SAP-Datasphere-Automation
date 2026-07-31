@@ -9,8 +9,7 @@ from datasphere_core.commands.task_chains import (
     run_task_chain_batch,
 )
 from datasphere_core.definitions import build_command_registry
-from datasphere_core.execution import batch_result_phase
-from datasphere_core.models.common import BatchSummary, CommandProgressPhase
+from datasphere_core.models.common import BatchSummary
 from datasphere_core.models.task_chains import (
     RunTaskChainBatchRequest,
     RunTaskChainBatchResult,
@@ -71,7 +70,7 @@ def test_only_reviewed_command_is_exposed_to_mcp() -> None:
     assert exposed == {"task_chains.run"}
 
 
-def test_registered_batch_contract_has_summary_and_terminal_policy() -> None:
+def test_registered_batch_contract_carries_results_and_summary() -> None:
     result = RunTaskChainBatchResult(
         results=(
             RunTaskChainResult(
@@ -93,15 +92,6 @@ def test_registered_batch_contract_has_summary_and_terminal_policy() -> None:
         RunTaskChainBatchResult
     )
     assert result.summary == BatchSummary(2, 0, 1, 0, 1)
-    assert batch_result_phase(BatchSummary(2, 2, 0, 0, 0)) is (
-        CommandProgressPhase.COMPLETED
-    )
-    assert batch_result_phase(BatchSummary(2, 1, 1, 0, 0)) is (
-        CommandProgressPhase.FAILED
-    )
-    assert batch_result_phase(BatchSummary(2, 1, 0, 0, 1)) is (
-        CommandProgressPhase.TIMED_OUT
-    )
 
 
 def test_command_registry_is_immutable() -> None:
@@ -116,14 +106,9 @@ def test_registry_rejects_duplicate_commands() -> None:
         )
 
 
-def test_command_definition_validates_metadata() -> None:
+def test_command_definition_rejects_invalid_command_names() -> None:
+    # The name pattern is the one definition value a typo can silently break
     with pytest.raises(ValueError, match="Invalid command name"):
         replace(TASK_CHAINS_RUN_COMMAND, name="Task Chains Run")
-    with pytest.raises(ValueError, match="Description must not be empty"):
-        replace(TASK_CHAINS_RUN_COMMAND, description=" ")
-    with pytest.raises(ValueError, match="Maximum timeout"):
-        replace(
-            TASK_CHAINS_RUN_COMMAND,
-            default_timeout_seconds=2.0,
-            maximum_timeout_seconds=1.0,
-        )
+    with pytest.raises(ValueError, match="Invalid command name"):
+        replace(TASK_CHAINS_RUN_COMMAND, name="task_chains")

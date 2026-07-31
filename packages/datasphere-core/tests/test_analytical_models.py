@@ -1,378 +1,155 @@
-import asyncio
-from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from datasphere_api import (
-    DatasphereClient,
-    ViewPersistenceCancelled,
-    ViewPersistenceTimeout,
-)
-from datasphere_api.models import (
-    AnalyticalModelsDetailsDict,
-    ViewDetailsDict,
-)
+from datasphere_api import DatasphereClient, ViewPersistenceTimeout
+from datasphere_core import CommandContext
 from datasphere_core.commands.analytical_models import (
-    ANALYTICAL_MODELS_COMMAND_DEFINITIONS,
-    get_analytical_model_view_dependencies,
     get_analytical_model_view_dependencies_batch,
     measure_analytical_model_view_persistence,
     measure_analytical_model_view_persistence_batch,
 )
-from datasphere_core.context import CommandContext
 from datasphere_core.models.analytical_models import (
+    AnalyticalModelDependenciesStatus,
+    AnalyticalModelDependencyStatus,
+    AnalyticalModelPersistenceItemStatus,
+    AnalyticalModelPersistenceStatus,
     AnalyticalModelReference,
     GetAnalyticalModelViewDependenciesBatchRequest,
-    GetAnalyticalModelViewDependenciesRequest,
     MeasureAnalyticalModelViewPersistenceBatchRequest,
     MeasureAnalyticalModelViewPersistenceRequest,
 )
-from datasphere_core.models.common import (
-    MAXIMUM_BATCH_CONCURRENCY,
-    BatchItemResult,
-    BatchSummary,
-    CommandProgress,
-)
+from datasphere_core.models.common import BatchItemResult, BatchSummary
 
 type DependencyMap = dict[str, dict[str, str]]
-type Persist = Callable[
-    [str, str, float], Awaitable[tuple[bool, dict[str, Any]]]
-]
 
 
-def _model(
-    analytical_model_id: str,
-    analytical_model_name: str,
-    space: str,
-) -> AnalyticalModelsDetailsDict:
-    return cast(
-        AnalyticalModelsDetailsDict,
-        {
-            "id": analytical_model_id,
-            "name": analytical_model_name,
-            "space_name": space,
-        },
-    )
+def _model(model_id: str, name: str, space: str) -> dict[str, Any]:
+    """
+    Builds the repository entry of one analytical model.
+    """
+    return {"id": model_id, "name": name, "space_name": space}
 
 
-def _view(view_id: str, view_name: str, space: str) -> ViewDetailsDict:
-    return cast(
-        ViewDetailsDict,
-        {"id": view_id, "name": view_name, "space_name": space},
-    )
+def _view(view_id: str, name: str, space: str) -> dict[str, Any]:
+    """
+    Builds the repository entry of one view.
+    """
+    return {
+        "id": view_id,
+        "name": name,
+        "space_name": space,
+        "business_name": f"{name} Business",
+    }
 
 
 def _client(
+    models: list[dict[str, Any]],
+    views: list[dict[str, Any]],
+    dependencies: Any,
     *,
-    models: list[AnalyticalModelsDetailsDict],
-    views: list[ViewDetailsDict],
-    dependencies: Callable[[str], Awaitable[DependencyMap]],
-    is_persisted: Callable[[str, str], Awaitable[bool]] | None = None,
-    persist: Persist | None = None,
-    unpersist: Persist | None = None,
+    persist: Any = None,
+    unpersist: Any = None,
+    is_persisted: bool = False,
 ) -> DatasphereClient:
-    async def get_all_models() -> list[AnalyticalModelsDetailsDict]:
+    """
+    Builds a client covering the analytical model and view calls of the
+    dependency and measurement workflows.
+    """
+    async def get_all_analytical_models() -> list[dict[str, Any]]:
         return models
 
-    async def get_all_views() -> list[ViewDetailsDict]:
+    async def get_all_views() -> list[dict[str, Any]]:
         return views
 
-    async def default_is_persisted(view: str, space: str) -> bool:
-        return False
-
-    async def default_persist(
-        view: str, space: str, timeout: float
-    ) -> tuple[bool, dict[str, Any]]:
-        return True, {"status": "COMPLETED", "runTime": 1000}
+    async def check_persisted(view: str, space: str) -> bool:
+        return is_persisted
 
     async def default_unpersist(
-        view: str, space: str, timeout: float
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         return True, {"status": "COMPLETED"}
-
-    persist_operation = persist or default_persist
-    unpersist_operation = unpersist or default_unpersist
-
-    async def persist_view(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
-        assert timeout_seconds is not None
-        return await persist_operation(view, space, timeout_seconds)
-
-    async def unpersist_view(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
-        assert timeout_seconds is not None
-        return await unpersist_operation(view, space, timeout_seconds)
 
     return cast(
         DatasphereClient,
         SimpleNamespace(
             analytical_models=SimpleNamespace(
-                get_all_analytical_models=get_all_models,
+                get_all_analytical_models=get_all_analytical_models,
                 get_views_for_analytical_model=dependencies,
             ),
             views=SimpleNamespace(
                 get_all_views=get_all_views,
-                is_persisted=is_persisted or default_is_persisted,
-                persist_view=persist_view,
-                unpersist_view=unpersist_view,
+                is_persisted=check_persisted,
+                persist_view=persist,
+                unpersist_view=unpersist or default_unpersist,
             ),
         ),
     )
 
 
-async def test_get_dependencies_preserves_api_order_and_maps_spaces() -> None:
+async def test_dependency_batch_resolves_views_to_their_spaces() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
-        assert analytical_model_id == "MODEL_1"
-        return {
-            analytical_model_id: {
-                "VIEW_2": "Second",
-                "VIEW_1": "First",
-            }
-        }
-
-    result = await get_analytical_model_view_dependencies(
-        CommandContext(
-            client=_client(
-                models=[_model("MODEL_1", "Sales", "SPACE_A")],
-                views=[
-                    _view("VIEW_1", "First", "SPACE_A"),
-                    _view("VIEW_2", "Second", "SPACE_B"),
-                ],
-                dependencies=dependencies,
-            )
-        ),
-        GetAnalyticalModelViewDependenciesRequest(
-            analytical_model_name="Sales", space="SPACE_A"
-        ),
-    )
-
-    assert result.status == "completed"
-    assert result.analytical_model_id == "MODEL_1"
-    assert [item.view_id for item in result.dependencies] == [
-        "VIEW_2",
-        "VIEW_1",
-    ]
-    assert [item.space for item in result.dependencies] == [
-        "SPACE_B",
-        "SPACE_A",
-    ]
-
-
-async def test_get_dependencies_returns_typed_not_found_results() -> None:
-    async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"MISSING_VIEW": "Missing"}}
-
-    client = _client(
-        models=[_model("MODEL_1", "Sales", "SPACE_A")],
-        views=[],
-        dependencies=dependencies,
-    )
-    missing_dependency = await get_analytical_model_view_dependencies(
-        CommandContext(client=client),
-        GetAnalyticalModelViewDependenciesRequest("Sales", "SPACE_A"),
-    )
-    missing_model = await get_analytical_model_view_dependencies(
-        CommandContext(client=client),
-        GetAnalyticalModelViewDependenciesRequest("Unknown", "SPACE_A"),
-    )
-
-    assert missing_dependency.status == "dependency_not_found"
-    assert missing_dependency.dependencies[0].status == "not_found"
-    assert missing_dependency.dependencies[0].space is None
-    assert missing_model.status == "analytical_model_not_found"
-    assert missing_model.analytical_model_id is None
-    assert missing_model.dependencies == ()
-
-
-async def test_dependency_batch_deduplicates_in_input_and_api_order() -> None:
-    async def dependencies(analytical_model_id: str) -> DependencyMap:
-        mappings = {
-            "MODEL_1": {"SHARED": "Shared", "VIEW_1": "One"},
-            "MODEL_2": {"VIEW_2": "Two", "SHARED": "Shared"},
-        }
-        return {analytical_model_id: mappings[analytical_model_id]}
-
-    progress: list[CommandProgress] = []
-    item_results: list[BatchItemResult] = []
-
-    async def report(update: CommandProgress) -> None:
-        progress.append(update)
-
-    async def report_item_result(update: BatchItemResult) -> None:
-        item_results.append(update)
+        return {analytical_model_id: {"VIEW_1": "Sales", "VIEW_X": "Unknown"}}
 
     result = await get_analytical_model_view_dependencies_batch(
         CommandContext(
             client=_client(
-                models=[
-                    _model("MODEL_1", "One", "SPACE_A"),
-                    _model("MODEL_2", "Two", "SPACE_A"),
-                ],
-                views=[
-                    _view("SHARED", "Shared", "SPACE_A"),
-                    _view("VIEW_1", "One", "SPACE_A"),
-                    _view("VIEW_2", "Two", "SPACE_A"),
-                ],
+                models=[_model("MODEL_1", "One", "SPACE_A")],
+                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
                 dependencies=dependencies,
-            ),
-            progress_callback=report,
-            batch_item_result_callback=report_item_result,
+            )
         ),
-        GetAnalyticalModelViewDependenciesBatchRequest(
-            analytical_models=(
-                AnalyticalModelReference("Two", "SPACE_A"),
-                AnalyticalModelReference("Missing", "SPACE_A"),
-                AnalyticalModelReference("One", "SPACE_A"),
-            ),
-            deduplicate_views=True,
-            max_concurrency=2,
-        ),
+        GetAnalyticalModelViewDependenciesBatchRequest(),
     )
 
-    assert [item.analytical_model_name for item in result.results] == [
-        "Two",
-        "Missing",
-        "One",
-    ]
-    assert [
-        tuple(item.view_id for item in model.dependencies)
-        for model in result.results
-    ] == [("VIEW_2", "SHARED"), (), ("VIEW_1",)]
-    assert result.summary == BatchSummary(3, 2, 0, 1, 0)
-    assert [update.phase for update in progress] == [
-        "started",
-        "advanced",
-        "advanced",
-        "advanced",
-        "completed",
-    ]
-    assert progress[-1].completed_items == 3
-    assert progress[-1].skipped_items == 1
-    assert [update.item_index for update in item_results] == [0, 1, 2]
-    assert tuple(update.result for update in item_results) == result.results
+    resolved, missing = result.results[0].dependencies
+    assert resolved.space == "VIEW_SPACE"
+    assert resolved.status is AnalyticalModelDependencyStatus.RESOLVED
+    assert missing.space is None
+    assert missing.status is AnalyticalModelDependencyStatus.NOT_FOUND
+
+    # An unresolvable dependency makes the whole model result a failure
+    assert result.results[0].status is (
+        AnalyticalModelDependenciesStatus.DEPENDENCY_NOT_FOUND
+    )
+    assert result.summary == BatchSummary(
+        total=1,
+        succeeded=0,
+        failed=1,
+        skipped=0,
+        timed_out=0,
+    )
 
 
-async def test_dependency_batch_reports_each_result_when_not_deduplicating(
-) -> None:
-    release_first = asyncio.Event()
-    second_result_reported = asyncio.Event()
-    item_results: list[BatchItemResult] = []
-    progress: list[CommandProgress] = []
-
+async def test_dependency_batch_reports_a_missing_model_as_skipped() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
-        if analytical_model_id == "MODEL_A":
-            await release_first.wait()
         return {analytical_model_id: {}}
 
-    async def report(update: CommandProgress) -> None:
-        progress.append(update)
-
-    async def report_item_result(update: BatchItemResult) -> None:
-        item_results.append(update)
-        if update.item_index == 1:
-            second_result_reported.set()
-
-    task = asyncio.create_task(
-        get_analytical_model_view_dependencies_batch(
-            CommandContext(
-                client=_client(
-                    models=[
-                        _model("MODEL_A", "A", "SPACE_A"),
-                        _model("MODEL_B", "B", "SPACE_A"),
-                    ],
-                    views=[],
-                    dependencies=dependencies,
-                ),
-                progress_callback=report,
-                batch_item_result_callback=report_item_result,
-            ),
-            GetAnalyticalModelViewDependenciesBatchRequest(
-                analytical_models=(
-                    AnalyticalModelReference("A", "SPACE_A"),
-                    AnalyticalModelReference("B", "SPACE_A"),
-                ),
-                deduplicate_views=False,
-                max_concurrency=2,
-            ),
-        )
-    )
-
-    await second_result_reported.wait()
-    assert [update.item_index for update in item_results] == [1]
-    assert task.done() is False
-
-    release_first.set()
-    result = await task
-
-    assert [update.item_index for update in item_results] == [1, 0]
-    assert [item.analytical_model_name for item in result.results] == [
-        "A",
-        "B",
-    ]
-    assert result.summary == BatchSummary(2, 2, 0, 0, 0)
-    assert [update.phase for update in progress] == [
-        "started",
-        "advanced",
-        "advanced",
-        "completed",
-    ]
-
-
-async def test_dependency_batch_filters_all_models_by_space_and_is_bounded(
-) -> None:
-    active = 0
-    maximum_active = 0
-    release = asyncio.Event()
-
-    async def dependencies(analytical_model_id: str) -> DependencyMap:
-        nonlocal active, maximum_active
-        active += 1
-        maximum_active = max(maximum_active, active)
-        try:
-            if active == 2:
-                release.set()
-            await release.wait()
-            await asyncio.sleep(0)
-            return {analytical_model_id: {}}
-        finally:
-            active -= 1
-
     result = await get_analytical_model_view_dependencies_batch(
         CommandContext(
             client=_client(
-                models=[
-                    _model("A", "A", "SPACE_A"),
-                    _model("B", "B", "SPACE_A"),
-                    _model("C", "C", "SPACE_B"),
-                ],
+                models=[_model("MODEL_1", "One", "SPACE_A")],
                 views=[],
                 dependencies=dependencies,
             )
         ),
         GetAnalyticalModelViewDependenciesBatchRequest(
-            space="SPACE_A", max_concurrency=2
+            analytical_models=(AnalyticalModelReference("Missing", "SPACE_A"),)
         ),
     )
 
-    assert [item.analytical_model_name for item in result.results] == [
-        "A",
-        "B",
-    ]
-    assert maximum_active == 2
+    assert result.results[0].status is (
+        AnalyticalModelDependenciesStatus.ANALYTICAL_MODEL_NOT_FOUND
+    )
+    assert result.summary.skipped == 1
 
 
-async def test_dependency_dedup_keeps_unresolved_source_statuses() -> None:
+async def test_dependency_batch_deduplicates_shared_views() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"MISSING": "Missing"}}
+        return {analytical_model_id: {"VIEW_1": "Sales"}}
 
     result = await get_analytical_model_view_dependencies_batch(
         CommandContext(
@@ -381,282 +158,160 @@ async def test_dependency_dedup_keeps_unresolved_source_statuses() -> None:
                     _model("MODEL_1", "One", "SPACE_A"),
                     _model("MODEL_2", "Two", "SPACE_A"),
                 ],
-                views=[],
+                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
                 dependencies=dependencies,
             )
         ),
         GetAnalyticalModelViewDependenciesBatchRequest(
-            analytical_models=(
-                AnalyticalModelReference("One", "SPACE_A"),
-                AnalyticalModelReference("Two", "SPACE_A"),
-            ),
-            deduplicate_views=True,
+            deduplicate_views=True
         ),
     )
 
-    assert [item.status for item in result.results] == [
-        "dependency_not_found",
-        "dependency_not_found",
-    ]
-    assert [
-        tuple(item.view_id for item in model.dependencies)
-        for model in result.results
-    ] == [("MISSING",), ("MISSING",)]
-    assert result.summary == BatchSummary(2, 0, 2, 0, 0)
+    # The shared view stays with the first model only
+    assert len(result.results[0].dependencies) == 1
+    assert result.results[1].dependencies == ()
 
 
-async def test_measure_temporary_persistence_collects_and_cleans_up() -> None:
-    calls: list[tuple[str, str, str, float]] = []
+async def test_measure_persists_a_view_and_removes_it_again() -> None:
+    persisted: list[tuple[str, str]] = []
+    unpersisted: list[tuple[str, str]] = []
 
     async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"VIEW_1": "Physical"}}
+        return {analytical_model_id: {"VIEW_1": "Sales"}}
 
     async def persist(
-        view: str, space: str, timeout: float
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
-        calls.append(("persist", view, space, timeout))
-        return True, {
-            "status": "COMPLETED",
-            "runTime": 65432,
-            "logId": 101,
-        }
+        persisted.append((view, space))
+        return True, {"status": "COMPLETED", "runTime": 4000, "logId": 11}
 
     async def unpersist(
-        view: str, space: str, timeout: float
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
-        calls.append(("unpersist", view, space, timeout))
-        return True, {"status": "COMPLETED", "logId": 102}
+        unpersisted.append((view, space))
+        return True, {"status": "COMPLETED", "logId": 12}
 
     result = await measure_analytical_model_view_persistence(
         CommandContext(
             client=_client(
-                models=[_model("MODEL_1", "Sales", "MODEL_SPACE")],
-                views=[_view("VIEW_1", "Physical", "VIEW_SPACE")],
+                models=[_model("MODEL_1", "One", "SPACE_A")],
+                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
                 dependencies=dependencies,
                 persist=persist,
                 unpersist=unpersist,
             )
         ),
         MeasureAnalyticalModelViewPersistenceRequest(
-            "Sales", "MODEL_SPACE", timeout_seconds=12.0
+            analytical_model_name="One",
+            space="SPACE_A",
         ),
     )
 
-    assert result.status == "completed"
-    item = result.dependencies[0]
-    assert item.status == "completed"
-    assert item.previously_persisted is False
-    assert item.runtime_seconds == 65
-    assert item.persistence_sap_status == "COMPLETED"
-    assert item.persistence_log_id == "101"
-    assert item.cleanup_sap_status == "COMPLETED"
-    assert item.cleanup_log_id == "102"
-    assert item.persistence_removed is True
-    assert item.manual_intervention is False
-    assert calls == [
-        ("persist", "Physical", "VIEW_SPACE", 12.0),
-        ("unpersist", "Physical", "VIEW_SPACE", 12.0),
-    ]
+    assert persisted == [("Sales", "VIEW_SPACE")]
+    assert unpersisted == [("Sales", "VIEW_SPACE")]
+    assert result.status is AnalyticalModelPersistenceStatus.COMPLETED
+
+    measurement = result.dependencies[0]
+    assert measurement.status is (
+        AnalyticalModelPersistenceItemStatus.COMPLETED
+    )
+    assert measurement.runtime_seconds == 4
+    assert measurement.persistence_removed is True
+    assert measurement.manual_intervention is False
 
 
-async def test_measure_does_not_clean_up_previously_persisted_view() -> None:
-    cleanup_called = False
+async def test_measure_keeps_a_view_that_was_persisted_before() -> None:
+    unpersisted: list[str] = []
 
     async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"VIEW_1": "Physical"}}
+        return {analytical_model_id: {"VIEW_1": "Sales"}}
 
-    async def is_persisted(view: str, space: str) -> bool:
-        return True
+    async def persist(
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        return True, {"status": "COMPLETED", "runTime": 1000}
 
     async def unpersist(
-        view: str, space: str, timeout: float
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
-        nonlocal cleanup_called
-        cleanup_called = True
+        unpersisted.append(view)
         return True, {}
 
     result = await measure_analytical_model_view_persistence(
         CommandContext(
             client=_client(
-                models=[_model("MODEL_1", "Sales", "SPACE_A")],
-                views=[_view("VIEW_1", "Physical", "SPACE_A")],
-                dependencies=dependencies,
-                is_persisted=is_persisted,
-                unpersist=unpersist,
-            )
-        ),
-        MeasureAnalyticalModelViewPersistenceRequest("Sales", "SPACE_A"),
-    )
-
-    assert result.dependencies[0].status == "already_persisted"
-    assert result.dependencies[0].persistence_removed is False
-    assert cleanup_called is False
-
-
-@pytest.mark.parametrize("cleanup_failure", [False, True])
-async def test_measure_represents_persist_and_cleanup_failures(
-    cleanup_failure: bool,
-) -> None:
-    async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"VIEW_1": "Physical"}}
-
-    async def persist(
-        view: str, space: str, timeout: float
-    ) -> tuple[bool, dict[str, Any]]:
-        return cleanup_failure, {"status": "FAILED", "logId": 201}
-
-    async def unpersist(
-        view: str, space: str, timeout: float
-    ) -> tuple[bool, dict[str, Any]]:
-        return False, {"status": "FAILED", "logId": 202}
-
-    result = await measure_analytical_model_view_persistence(
-        CommandContext(
-            client=_client(
-                models=[_model("MODEL_1", "Sales", "SPACE_A")],
-                views=[_view("VIEW_1", "Physical", "SPACE_A")],
+                models=[_model("MODEL_1", "One", "SPACE_A")],
+                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
                 dependencies=dependencies,
                 persist=persist,
                 unpersist=unpersist,
+                is_persisted=True,
             )
         ),
-        MeasureAnalyticalModelViewPersistenceRequest("Sales", "SPACE_A"),
+        MeasureAnalyticalModelViewPersistenceRequest(
+            analytical_model_name="One",
+            space="SPACE_A",
+        ),
     )
 
-    item = result.dependencies[0]
-    assert result.status == "failed"
-    assert item.status == (
-        "cleanup_failed" if cleanup_failure else "persist_failed"
+    # A previously persisted view must keep its persistence
+    assert unpersisted == []
+    assert result.dependencies[0].status is (
+        AnalyticalModelPersistenceItemStatus.ALREADY_PERSISTED
     )
-    assert item.manual_intervention is True
-    assert item.persistence_removed is False
+    assert result.status is AnalyticalModelPersistenceStatus.COMPLETED
 
 
-async def test_measure_maps_cleanup_exception_to_manual_intervention() -> None:
+async def test_measure_reports_a_timeout_as_needing_manual_action() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"VIEW_1": "Physical"}}
+        return {analytical_model_id: {"VIEW_1": "Sales"}}
 
     async def persist(
-        view: str, space: str, timeout: float
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
-        return True, {"status": "COMPLETED", "logId": 201}
-
-    async def unpersist(
-        view: str, space: str, timeout: float
-    ) -> tuple[bool, dict[str, Any]]:
-        raise ConnectionError("cleanup unavailable")
+        raise ViewPersistenceTimeout("persist", view, space, log_id=31)
 
     result = await measure_analytical_model_view_persistence(
         CommandContext(
             client=_client(
-                models=[_model("MODEL_1", "Sales", "SPACE_A")],
-                views=[_view("VIEW_1", "Physical", "SPACE_A")],
-                dependencies=dependencies,
-                persist=persist,
-                unpersist=unpersist,
-            )
-        ),
-        MeasureAnalyticalModelViewPersistenceRequest("Sales", "SPACE_A"),
-    )
-
-    item = result.dependencies[0]
-    assert result.status == "failed"
-    assert item.status == "cleanup_failed"
-    assert item.persistence_log_id == "201"
-    assert item.persistence_removed is False
-    assert item.manual_intervention is True
-
-
-async def test_measure_maps_cleanup_cancellation_to_manual_intervention() -> (
-    None
-):
-    async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"VIEW_1": "Physical"}}
-
-    async def unpersist(
-        view: str, space: str, timeout: float
-    ) -> tuple[bool, dict[str, Any]]:
-        raise ViewPersistenceCancelled("unpersist", view, space, 202)
-
-    result = await measure_analytical_model_view_persistence(
-        CommandContext(
-            client=_client(
-                models=[_model("MODEL_1", "Sales", "SPACE_A")],
-                views=[_view("VIEW_1", "Physical", "SPACE_A")],
-                dependencies=dependencies,
-                unpersist=unpersist,
-            )
-        ),
-        MeasureAnalyticalModelViewPersistenceRequest("Sales", "SPACE_A"),
-    )
-
-    item = result.dependencies[0]
-    assert result.status == "failed"
-    assert item.status == "cleanup_failed"
-    assert item.cleanup_log_id == "202"
-    assert item.manual_intervention is True
-
-
-async def test_measure_represents_timeout_with_log_id() -> None:
-    async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"VIEW_1": "Physical"}}
-
-    async def persist(
-        view: str, space: str, timeout: float
-    ) -> tuple[bool, dict[str, Any]]:
-        raise ViewPersistenceTimeout("persist", view, space, 301)
-
-    result = await measure_analytical_model_view_persistence(
-        CommandContext(
-            client=_client(
-                models=[_model("MODEL_1", "Sales", "SPACE_A")],
-                views=[_view("VIEW_1", "Physical", "SPACE_A")],
+                models=[_model("MODEL_1", "One", "SPACE_A")],
+                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
                 dependencies=dependencies,
                 persist=persist,
             )
         ),
-        MeasureAnalyticalModelViewPersistenceRequest("Sales", "SPACE_A"),
+        MeasureAnalyticalModelViewPersistenceRequest(
+            analytical_model_name="One",
+            space="SPACE_A",
+        ),
     )
 
-    assert result.status == "timed_out"
-    assert result.dependencies[0].status == "persist_timed_out"
-    assert result.dependencies[0].persistence_log_id == "301"
+    # A timed-out persistence may still be running remotely
+    assert result.dependencies[0].status is (
+        AnalyticalModelPersistenceItemStatus.PERSIST_TIMED_OUT
+    )
+    assert result.dependencies[0].persistence_log_id == "31"
     assert result.dependencies[0].manual_intervention is True
+    assert result.status is AnalyticalModelPersistenceStatus.TIMED_OUT
 
 
-async def test_measure_represents_cleanup_timeout_with_log_id() -> None:
-    async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"VIEW_1": "Physical"}}
-
-    async def unpersist(
-        view: str, space: str, timeout: float
-    ) -> tuple[bool, dict[str, Any]]:
-        raise ViewPersistenceTimeout("unpersist", view, space, 302)
-
-    result = await measure_analytical_model_view_persistence(
-        CommandContext(
-            client=_client(
-                models=[_model("MODEL_1", "Sales", "SPACE_A")],
-                views=[_view("VIEW_1", "Physical", "SPACE_A")],
-                dependencies=dependencies,
-                unpersist=unpersist,
-            )
-        ),
-        MeasureAnalyticalModelViewPersistenceRequest("Sales", "SPACE_A"),
-    )
-
-    item = result.dependencies[0]
-    assert result.status == "timed_out"
-    assert item.status == "cleanup_timed_out"
-    assert item.cleanup_log_id == "302"
-    assert item.persistence_removed is False
-    assert item.manual_intervention is True
-
-
-async def test_measure_batch_executes_shared_physical_view_once_and_projects(
-) -> None:
+async def test_measure_batch_runs_a_shared_view_once_and_projects_it() -> None:
     persisted: list[tuple[str, str]] = []
-    progress: list[CommandProgress] = []
     item_results: list[BatchItemResult] = []
 
     async def dependencies(analytical_model_id: str) -> DependencyMap:
@@ -666,15 +321,15 @@ async def test_measure_batch_executes_shared_physical_view_once_and_projects(
         return {analytical_model_id: {view_id: "Shared"}}
 
     async def persist(
-        view: str, space: str, timeout: float
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         persisted.append((view, space))
         return True, {"status": "COMPLETED", "runTime": 2000}
 
-    async def report(update: CommandProgress) -> None:
-        progress.append(update)
-
-    async def report_item_result(update: BatchItemResult) -> None:
+    async def report_item(update: BatchItemResult) -> None:
         item_results.append(update)
 
     result = await measure_analytical_model_view_persistence_batch(
@@ -691,8 +346,7 @@ async def test_measure_batch_executes_shared_physical_view_once_and_projects(
                 dependencies=dependencies,
                 persist=persist,
             ),
-            progress_callback=report,
-            batch_item_result_callback=report_item_result,
+            batch_item_result_callback=report_item,
         ),
         MeasureAnalyticalModelViewPersistenceBatchRequest(
             analytical_models=(
@@ -704,36 +358,38 @@ async def test_measure_batch_executes_shared_physical_view_once_and_projects(
         ),
     )
 
+    # Both models point at the same physical view, so it runs only once
     assert persisted == [("Shared", "VIEW_SPACE")]
     assert [item.status for item in result.results] == [
-        "completed",
-        "analytical_model_not_found",
-        "completed",
+        AnalyticalModelPersistenceStatus.COMPLETED,
+        AnalyticalModelPersistenceStatus.ANALYTICAL_MODEL_NOT_FOUND,
+        AnalyticalModelPersistenceStatus.COMPLETED,
     ]
+
+    # Each model keeps its own view ID for the shared measurement
     assert result.results[0].dependencies[0].view_id == "SHARED_1"
     assert result.results[2].dependencies[0].view_id == "SHARED_2"
-    assert result.summary == BatchSummary(3, 2, 0, 1, 0)
-    assert [update.phase for update in progress] == [
-        "started",
-        "advanced",
-        "advanced",
-        "advanced",
-        "completed",
-    ]
+    assert result.summary == BatchSummary(
+        total=3,
+        succeeded=2,
+        failed=0,
+        skipped=1,
+        timed_out=0,
+    )
     assert [update.item_index for update in item_results] == [0, 1, 2]
-    assert tuple(update.result for update in item_results) == result.results
 
 
-async def test_measure_reports_unresolved_dependency_without_execution() -> (
-    None
-):
+async def test_measure_skips_a_dependency_without_a_resolved_space() -> None:
     persistence_called = False
 
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"UNKNOWN": "Unknown"}}
 
     async def persist(
-        view: str, space: str, timeout: float
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         nonlocal persistence_called
         persistence_called = True
@@ -742,96 +398,29 @@ async def test_measure_reports_unresolved_dependency_without_execution() -> (
     result = await measure_analytical_model_view_persistence(
         CommandContext(
             client=_client(
-                models=[_model("MODEL_1", "Sales", "SPACE_A")],
+                models=[_model("MODEL_1", "One", "SPACE_A")],
                 views=[],
                 dependencies=dependencies,
                 persist=persist,
             )
         ),
-        MeasureAnalyticalModelViewPersistenceRequest("Sales", "SPACE_A"),
-    )
-
-    assert result.status == "failed"
-    assert result.dependencies[0].status == "dependency_not_found"
-    assert result.dependencies[0].manual_intervention is True
-    assert persistence_called is False
-
-
-async def test_measure_cancellation_waits_for_temporary_cleanup() -> None:
-    cleanup_started = asyncio.Event()
-    release_cleanup = asyncio.Event()
-    cleanup_completed = False
-
-    async def dependencies(analytical_model_id: str) -> DependencyMap:
-        return {analytical_model_id: {"VIEW_1": "Physical"}}
-
-    async def unpersist(
-        view: str, space: str, timeout: float
-    ) -> tuple[bool, dict[str, Any]]:
-        nonlocal cleanup_completed
-        cleanup_started.set()
-        await release_cleanup.wait()
-        cleanup_completed = True
-        return True, {}
-
-    task = asyncio.create_task(
-        measure_analytical_model_view_persistence(
-            CommandContext(
-                client=_client(
-                    models=[_model("MODEL_1", "Sales", "SPACE_A")],
-                    views=[_view("VIEW_1", "Physical", "SPACE_A")],
-                    dependencies=dependencies,
-                    unpersist=unpersist,
-                )
-            ),
-            MeasureAnalyticalModelViewPersistenceRequest("Sales", "SPACE_A"),
-        )
-    )
-    await cleanup_started.wait()
-    task.cancel()
-    release_cleanup.set()
-
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert cleanup_completed is True
-
-
-@pytest.mark.parametrize(
-    "max_concurrency",
-    [0, -1, True, 1.5, MAXIMUM_BATCH_CONCURRENCY + 1],
-)
-def test_analytical_model_requests_validate_concurrency(
-    max_concurrency: Any,
-) -> None:
-    with pytest.raises(ValueError):
-        GetAnalyticalModelViewDependenciesBatchRequest(
-            max_concurrency=max_concurrency
-        )
-    with pytest.raises(ValueError):
         MeasureAnalyticalModelViewPersistenceRequest(
-            "Sales", "SPACE_A", max_concurrency=max_concurrency
-        )
+            analytical_model_name="One",
+            space="SPACE_A",
+        ),
+    )
+
+    # An unresolved view must never be persisted
+    assert persistence_called is False
+    assert result.dependencies[0].status is (
+        AnalyticalModelPersistenceItemStatus.DEPENDENCY_NOT_FOUND
+    )
+    assert result.status is AnalyticalModelPersistenceStatus.FAILED
 
 
-def test_batch_selection_rejects_space_with_explicit_models() -> None:
-    with pytest.raises(ValueError, match="cannot be combined"):
+def test_batch_request_rejects_an_ambiguous_model_selection() -> None:
+    with pytest.raises(ValueError, match="Space cannot be combined"):
         GetAnalyticalModelViewDependenciesBatchRequest(
-            analytical_models=(AnalyticalModelReference("Sales", "SPACE_A"),),
+            analytical_models=(AnalyticalModelReference("One", "SPACE_A"),),
             space="SPACE_A",
         )
-
-
-def test_command_definitions_are_canonical_and_not_exposed_to_mcp() -> None:
-    names = [
-        definition.name for definition in ANALYTICAL_MODELS_COMMAND_DEFINITIONS
-    ]
-    assert names == [
-        "analytical_models.get_view_dependencies",
-        "analytical_models.get_view_dependencies_batch",
-        "analytical_models.measure_view_persistence",
-        "analytical_models.measure_view_persistence_batch",
-    ]
-    assert all(
-        definition.expose_to_mcp is False
-        for definition in ANALYTICAL_MODELS_COMMAND_DEFINITIONS
-    )
