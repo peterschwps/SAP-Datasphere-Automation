@@ -339,7 +339,8 @@ CONFIGURE_REMOTE_TABLE_STATISTICS_BATCH_COMMAND = CommandDefinition(
     result_type=ConfigureRemoteTableStatisticsBatchResult,
     handler=configure_remote_table_statistics_batch,
     description=(
-        "Configure statistics for multiple remote tables with concurrency."
+        "Configure statistics for multiple remote tables with bounded "
+        "concurrency."
     ),
     default_timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
     maximum_timeout_seconds=_MAXIMUM_TIMEOUT_SECONDS,
@@ -369,7 +370,8 @@ REFRESH_REMOTE_TABLE_STATISTICS_BATCH_COMMAND = CommandDefinition(
     result_type=RefreshRemoteTableStatisticsBatchResult,
     handler=refresh_remote_table_statistics_batch,
     description=(
-        "Refresh statistics for multiple remote tables with concurrency."
+        "Refresh statistics for multiple remote tables with bounded "
+        "concurrency."
     ),
     default_timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
     maximum_timeout_seconds=_MAXIMUM_TIMEOUT_SECONDS,

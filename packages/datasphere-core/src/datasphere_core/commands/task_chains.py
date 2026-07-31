@@ -132,7 +132,8 @@ TASK_CHAINS_RUN_BATCH_COMMAND = CommandDefinition(
     result_type=RunTaskChainBatchResult,
     handler=run_task_chain_batch,
     description=(
-        "Run multiple task chains with concurrency and wait for their results."
+        "Run multiple task chains with bounded concurrency and wait for their "
+        "results."
     ),
     default_timeout_seconds=DEFAULT_TASK_CHAIN_TIMEOUT_SECONDS,
     maximum_timeout_seconds=MAXIMUM_TASK_CHAIN_TIMEOUT_SECONDS,
