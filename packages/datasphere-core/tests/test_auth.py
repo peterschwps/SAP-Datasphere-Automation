@@ -31,6 +31,9 @@ class MemoryTokenStore:
 
 
 def _config(client_secret: str = "secret") -> SessionConfig:
+    """
+    Builds a session configuration for the test tenant.
+    """
     return SessionConfig(
         base_url="https://tenant.example",
         authorization_url="https://auth.example/authorize",
@@ -44,6 +47,9 @@ def _client_factory(
     calls: list[tuple[TokenDict | None, bool]],
     configs: list[DatasphereConfig],
 ) -> Any:
+    """
+    Builds a client factory that records its logins and configurations.
+    """
     def create(config: DatasphereConfig) -> DatasphereClient:
         configs.append(config)
 
@@ -75,6 +81,9 @@ def _client_factory(
 
 
 async def test_session_loads_and_replaces_tokens(tmp_path: Path) -> None:
+    """
+    Checks that a session loads stored tokens and writes back new ones.
+    """
     config = _config()
     store = MemoryTokenStore()
     store.tokens[config.credential_key] = {
@@ -110,6 +119,9 @@ async def test_session_loads_and_replaces_tokens(tmp_path: Path) -> None:
 
 
 def test_session_config_requires_client_secret() -> None:
+    """
+    Checks that a configuration without a client secret is rejected.
+    """
     with pytest.raises(ValueError, match="Client secret"):
         _config(client_secret=" ")
 
@@ -117,6 +129,9 @@ def test_session_config_requires_client_secret() -> None:
 async def test_session_preserves_tokens_after_failed_login(
     tmp_path: Path,
 ) -> None:
+    """
+    Checks that stored tokens survive a failed login.
+    """
     config = _config()
     store = MemoryTokenStore()
     store.tokens[config.credential_key] = {
@@ -159,6 +174,9 @@ async def test_session_preserves_tokens_after_failed_login(
 def test_session_requires_authentication_before_client_access(
     tmp_path: Path,
 ) -> None:
+    """
+    Checks that the client is unavailable before authentication.
+    """
     session = DatasphereSession(
         _config(),
         token_store=MemoryTokenStore(),
@@ -172,6 +190,9 @@ def test_session_requires_authentication_before_client_access(
 async def test_session_logout_deletes_tokens(
     tmp_path: Path,
 ) -> None:
+    """
+    Checks that a logout removes the stored tokens.
+    """
     config = _config()
     store = MemoryTokenStore()
     store.tokens[config.credential_key] = {"access_token": "access"}

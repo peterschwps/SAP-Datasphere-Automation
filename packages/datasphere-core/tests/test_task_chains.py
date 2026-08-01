@@ -46,6 +46,9 @@ def _client(run: RunTaskChain) -> DatasphereClient:
 
 
 async def test_run_task_chain_maps_a_completed_run() -> None:
+    """
+    Checks that a completed run is mapped to its result fields.
+    """
     async def run(
         chain: str,
         space: str,
@@ -73,6 +76,9 @@ async def test_run_task_chain_maps_a_completed_run() -> None:
 
 
 async def test_run_task_chain_maps_a_chain_that_never_started() -> None:
+    """
+    Checks that a run without log details becomes a start failure.
+    """
     async def run(
         chain: str,
         space: str,
@@ -92,6 +98,9 @@ async def test_run_task_chain_maps_a_chain_that_never_started() -> None:
 
 
 async def test_run_task_chain_maps_a_timeout_to_its_status() -> None:
+    """
+    Checks that a timeout becomes a status instead of an exception.
+    """
     async def run(
         chain: str,
         space: str,
@@ -112,6 +121,9 @@ async def test_run_task_chain_maps_a_timeout_to_its_status() -> None:
 async def test_run_task_chain_reraises_a_cancellation_with_its_log_id() -> (
     None
 ):
+    """
+    Checks that a cancellation is re-raised with the log ID of the run.
+    """
     async def run(
         chain: str,
         space: str,
@@ -131,8 +143,12 @@ async def test_run_task_chain_reraises_a_cancellation_with_its_log_id() -> (
 
 
 async def test_run_task_chain_batch_keeps_order_and_reports_progress() -> None:
+    """
+    Checks that a batch keeps the input order and reports its progress.
+    """
     progress: list[CommandProgress] = []
 
+    # Chain B fails, every other chain completes
     async def run(
         chain: str,
         space: str,
@@ -182,5 +198,8 @@ async def test_run_task_chain_batch_keeps_order_and_reports_progress() -> None:
 
 
 def test_request_rejects_an_unusable_timeout() -> None:
+    """
+    Checks that a timeout outside the supported range is rejected.
+    """
     with pytest.raises(ValueError, match="Timeout"):
         RunTaskChainRequest(chain="A", space="S", timeout_seconds=0)

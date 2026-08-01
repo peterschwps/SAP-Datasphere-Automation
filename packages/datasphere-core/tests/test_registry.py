@@ -49,6 +49,9 @@ EXPECTED_COMMAND_NAMES = {
 
 
 def test_all_commands_are_registered_explicitly() -> None:
+    """
+    Checks that the registry holds exactly the expected commands.
+    """
     assert set(COMMANDS) == EXPECTED_COMMAND_NAMES
     assert all(command.description.strip() for command in COMMANDS.values())
     assert TASK_CHAINS_RUN_COMMAND.request_type is RunTaskChainRequest
@@ -64,6 +67,9 @@ def test_all_commands_are_registered_explicitly() -> None:
 
 
 def test_only_reviewed_command_is_exposed_to_mcp() -> None:
+    """
+    Checks that only the reviewed command is exposed to MCP.
+    """
     exposed = {
         name for name, command in COMMANDS.items() if command.expose_to_mcp
     }
@@ -71,6 +77,9 @@ def test_only_reviewed_command_is_exposed_to_mcp() -> None:
 
 
 def test_registered_batch_contract_carries_results_and_summary() -> None:
+    """
+    Checks that a batch result carries its items and their summary.
+    """
     result = RunTaskChainBatchResult(
         results=(
             RunTaskChainResult(
@@ -95,11 +104,17 @@ def test_registered_batch_contract_carries_results_and_summary() -> None:
 
 
 def test_command_registry_is_immutable() -> None:
+    """
+    Checks that the registry cannot be changed after it was built.
+    """
     with pytest.raises(TypeError):
         COMMANDS["other"] = TASK_CHAINS_RUN_COMMAND  # type: ignore[index]
 
 
 def test_registry_rejects_duplicate_commands() -> None:
+    """
+    Checks that a duplicate command name is rejected.
+    """
     with pytest.raises(ValueError, match="Duplicate command"):
         build_command_registry(
             [TASK_CHAINS_RUN_COMMAND, TASK_CHAINS_RUN_COMMAND]
@@ -107,7 +122,10 @@ def test_registry_rejects_duplicate_commands() -> None:
 
 
 def test_command_definition_rejects_invalid_command_names() -> None:
-    # The name pattern is the one definition value a typo can silently break
+    """
+    Checks that a malformed command name is rejected.
+    """
+    # The name pattern is the one value a typo can silently break
     with pytest.raises(ValueError, match="Invalid command name"):
         replace(TASK_CHAINS_RUN_COMMAND, name="Task Chains Run")
     with pytest.raises(ValueError, match="Invalid command name"):

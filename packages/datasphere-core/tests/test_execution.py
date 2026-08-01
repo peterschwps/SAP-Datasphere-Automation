@@ -8,10 +8,10 @@ from datasphere_api import DatasphereClient
 from datasphere_core import CommandContext
 from datasphere_core.errors import CommandTimeoutError
 from datasphere_core.execution import (
+    BatchReporter,
     batch_command,
     command,
     execute_with_concurrency_limit,
-    report_batch_results,
     run_batch,
 )
 from datasphere_core.models.common import (
@@ -87,6 +87,9 @@ async def _work(context: CommandContext, name: str) -> ExampleResult:
 
 
 def test_status_members_carry_their_outcome() -> None:
+    """
+    Checks that every status member exposes the outcome it belongs to.
+    """
     # The outcome replaces the per-command classification functions
     assert ExampleStatus.DONE.outcome is Outcome.SUCCEEDED
     assert ExampleStatus.SKIPPED.outcome is Outcome.SKIPPED
@@ -95,6 +98,9 @@ def test_status_members_carry_their_outcome() -> None:
 
 
 async def test_command_reports_started_and_completed() -> None:
+    """
+    Checks that a single command reports its start and its completion.
+    """
     context, progress, _ = _context()
     run = command("example.run")(_work)
 
@@ -119,6 +125,13 @@ async def test_command_derives_terminal_phase_from_status(
     item: str,
     phase: CommandProgressPhase,
 ) -> None:
+    """
+    Checks that a command derives its terminal phase from the outcome.
+
+    Args:
+        item (str): Item name selecting the status to produce.
+        phase (CommandProgressPhase): Phase the status has to end in.
+    """
     context, progress, _ = _context()
     run = command("example.run")(_work)
 
@@ -129,6 +142,9 @@ async def test_command_derives_terminal_phase_from_status(
 
 
 async def test_command_reports_timeout_and_reraises() -> None:
+    """
+    Checks that a command timeout is reported and then re-raised.
+    """
     context, progress, _ = _context()
 
     async def fail(context: CommandContext, item: str) -> ExampleResult:
@@ -145,6 +161,9 @@ async def test_command_reports_timeout_and_reraises() -> None:
 
 
 async def test_command_reports_cancellation_and_reraises() -> None:
+    """
+    Checks that a cancellation is reported and then re-raised.
+    """
     context, progress, _ = _context()
 
     async def cancel(context: CommandContext, item: str) -> ExampleResult:
@@ -160,6 +179,9 @@ async def test_command_reports_cancellation_and_reraises() -> None:
 
 
 async def test_run_batch_keeps_order_and_counts_outcomes() -> None:
+    """
+    Checks that a batch keeps the input order and counts every outcome.
+    """
     context, progress, items = _context()
 
     results, summary = await run_batch(
@@ -195,6 +217,9 @@ async def test_run_batch_keeps_order_and_counts_outcomes() -> None:
 
 
 async def test_run_batch_mutes_the_lifecycle_of_its_items() -> None:
+    """
+    Checks that batch items do not report their own command lifecycle.
+    """
     context, progress, _ = _context()
     item_command = command("example.run")(_work)
 
@@ -215,6 +240,9 @@ async def test_run_batch_mutes_the_lifecycle_of_its_items() -> None:
 
 
 async def test_run_batch_bounds_concurrency() -> None:
+    """
+    Checks that a batch never exceeds its concurrency limit.
+    """
     context, _, _ = _context()
     active = 0
     peak = 0
@@ -240,6 +268,9 @@ async def test_run_batch_bounds_concurrency() -> None:
 
 
 async def test_batch_command_derives_phase_from_summary() -> None:
+    """
+    Checks that the terminal phase of a batch follows its summary.
+    """
     context, progress, _ = _context()
 
     async def batch(
@@ -270,29 +301,42 @@ async def test_batch_command_derives_phase_from_summary() -> None:
     assert progress[-1].phase is CommandProgressPhase.TIMED_OUT
 
 
-async def test_report_batch_results_reports_precomputed_results() -> None:
+async def test_batch_reporter_reports_every_item_it_is_given() -> None:
+    """
+    Checks that the reporter delivers items right away, even out of order.
+    """
     context, progress, items = _context()
-    results = (
-        ExampleResult(name="a", status=ExampleStatus.DONE),
-        ExampleResult(name="b", status=ExampleStatus.BROKEN),
-    )
+    reporter = BatchReporter(context, "example.run_batch", 2)
 
-    summary = await report_batch_results(context, "example.run_batch", results)
+    broken = ExampleResult(name="b", status=ExampleStatus.BROKEN)
+    await reporter.complete(1, broken)
 
-    assert summary == BatchSummary(
+    # The item is reported right away, not once the batch is complete
+    assert [update.item_index for update in items] == [1]
+    assert progress[-1].total_items == 2
+    assert progress[-1].completed_items == 1
+
+    done = ExampleResult(name="a", status=ExampleStatus.DONE)
+    await reporter.complete(0, done)
+
+    # Items may arrive out of order, the summary counts them all the same
+    assert [update.item_index for update in items] == [1, 0]
+    assert reporter.summary == BatchSummary(
         total=2,
         succeeded=1,
         failed=1,
         skipped=0,
         timed_out=0,
     )
-    assert [update.item_index for update in items] == [0, 1]
     assert [update.phase for update in progress] == [
         CommandProgressPhase.ADVANCED
     ] * 2
 
 
 async def test_execute_with_concurrency_limit_keeps_order() -> None:
+    """
+    Checks that bounded execution returns its results in input order.
+    """
     async def double(value: int) -> int:
         await asyncio.sleep(0.01 if value % 2 else 0)
         return value * 2
@@ -307,6 +351,9 @@ async def test_execute_with_concurrency_limit_keeps_order() -> None:
 
 
 async def test_failing_item_cancels_the_remaining_items() -> None:
+    """
+    Checks that a failing item cancels the items still running.
+    """
     context, _, _ = _context()
     started = 0
     finished = 0
@@ -342,6 +389,12 @@ async def test_failing_item_cancels_the_remaining_items() -> None:
 async def test_run_batch_rejects_unsupported_concurrency(
     max_concurrency: int,
 ) -> None:
+    """
+    Checks that a batch rejects a concurrency limit outside the range.
+
+    Args:
+        max_concurrency (int): Unsupported concurrency limit to reject.
+    """
     context, _, _ = _context()
 
     with pytest.raises(ValueError, match="Maximum concurrency"):

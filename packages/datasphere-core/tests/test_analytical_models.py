@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -17,6 +18,7 @@ from datasphere_core.models.analytical_models import (
     AnalyticalModelReference,
     GetAnalyticalModelViewDependenciesBatchRequest,
     MeasureAnalyticalModelViewPersistenceBatchRequest,
+    MeasureAnalyticalModelViewPersistenceBatchResult,
     MeasureAnalyticalModelViewPersistenceRequest,
 )
 from datasphere_core.models.common import BatchItemResult, BatchSummary
@@ -91,6 +93,9 @@ def _client(
 
 
 async def test_dependency_batch_resolves_views_to_their_spaces() -> None:
+    """
+    Checks that a resolved view carries its space and an unknown one does not.
+    """
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"VIEW_1": "Sales", "VIEW_X": "Unknown"}}
 
@@ -125,6 +130,9 @@ async def test_dependency_batch_resolves_views_to_their_spaces() -> None:
 
 
 async def test_dependency_batch_reports_a_missing_model_as_skipped() -> None:
+    """
+    Checks that a model the tenant does not know is skipped, not failed.
+    """
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {}}
 
@@ -148,6 +156,9 @@ async def test_dependency_batch_reports_a_missing_model_as_skipped() -> None:
 
 
 async def test_dependency_batch_deduplicates_shared_views() -> None:
+    """
+    Checks that a shared view stays with the first model claiming it.
+    """
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"VIEW_1": "Sales"}}
 
@@ -173,6 +184,9 @@ async def test_dependency_batch_deduplicates_shared_views() -> None:
 
 
 async def test_measure_persists_a_view_and_removes_it_again() -> None:
+    """
+    Checks that a measured view is persisted and cleaned up again.
+    """
     persisted: list[tuple[str, str]] = []
     unpersisted: list[tuple[str, str]] = []
 
@@ -227,6 +241,9 @@ async def test_measure_persists_a_view_and_removes_it_again() -> None:
 
 
 async def test_measure_keeps_a_view_that_was_persisted_before() -> None:
+    """
+    Checks that a view persisted before the run keeps its persistence.
+    """
     unpersisted: list[str] = []
 
     async def dependencies(analytical_model_id: str) -> DependencyMap:
@@ -275,6 +292,9 @@ async def test_measure_keeps_a_view_that_was_persisted_before() -> None:
 
 
 async def test_measure_reports_a_timeout_as_needing_manual_action() -> None:
+    """
+    Checks that a timed-out persistence is flagged for manual intervention.
+    """
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"VIEW_1": "Sales"}}
 
@@ -311,14 +331,16 @@ async def test_measure_reports_a_timeout_as_needing_manual_action() -> None:
 
 
 async def test_measure_batch_runs_a_shared_view_once_and_projects_it() -> None:
+    """
+    Checks that a view shared by two models is measured once and projected onto
+    both of them.
+    """
     persisted: list[tuple[str, str]] = []
     item_results: list[BatchItemResult] = []
 
+    # Both models depend on the very same view
     async def dependencies(analytical_model_id: str) -> DependencyMap:
-        view_id = (
-            "SHARED_1" if analytical_model_id == "MODEL_1" else "SHARED_2"
-        )
-        return {analytical_model_id: {view_id: "Shared"}}
+        return {analytical_model_id: {"SHARED": "Shared"}}
 
     async def persist(
         view: str,
@@ -339,10 +361,7 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it() -> None:
                     _model("MODEL_1", "One", "SPACE_A"),
                     _model("MODEL_2", "Two", "SPACE_A"),
                 ],
-                views=[
-                    _view("SHARED_1", "Shared", "VIEW_SPACE"),
-                    _view("SHARED_2", "Shared", "VIEW_SPACE"),
-                ],
+                views=[_view("SHARED", "Shared", "VIEW_SPACE")],
                 dependencies=dependencies,
                 persist=persist,
             ),
@@ -366,9 +385,11 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it() -> None:
         AnalyticalModelPersistenceStatus.COMPLETED,
     ]
 
-    # Each model keeps its own view ID for the shared measurement
-    assert result.results[0].dependencies[0].view_id == "SHARED_1"
-    assert result.results[2].dependencies[0].view_id == "SHARED_2"
+    # The single measurement is projected onto both dependent models
+    assert result.results[0].dependencies[0].view_id == "SHARED"
+    assert result.results[2].dependencies[0].view_id == "SHARED"
+    assert result.results[0].dependencies[0].runtime_seconds == 2
+    assert result.results[2].dependencies[0].runtime_seconds == 2
     assert result.summary == BatchSummary(
         total=3,
         succeeded=2,
@@ -376,10 +397,15 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it() -> None:
         skipped=1,
         timed_out=0,
     )
-    assert [update.item_index for update in item_results] == [0, 1, 2]
+    # Models are reported as they become final, so the order follows
+    # completion. The index still refers to the batch input.
+    assert sorted(update.item_index for update in item_results) == [0, 1, 2]
 
 
 async def test_measure_skips_a_dependency_without_a_resolved_space() -> None:
+    """
+    Checks that an unresolved dependency is never persisted.
+    """
     persistence_called = False
 
     async def dependencies(analytical_model_id: str) -> DependencyMap:
@@ -418,7 +444,129 @@ async def test_measure_skips_a_dependency_without_a_resolved_space() -> None:
     assert result.status is AnalyticalModelPersistenceStatus.FAILED
 
 
+async def test_measure_batch_reports_a_model_before_the_batch_finished(
+) -> None:
+    """
+    Checks that a completed model is reported while others still run.
+    """
+    item_results: list[BatchItemResult] = []
+    blocked = asyncio.Event()
+
+    # Each model depends on a view of its own
+    async def dependencies(analytical_model_id: str) -> DependencyMap:
+        view_id = (
+            "VIEW_1" if analytical_model_id == "MODEL_1" else "VIEW_2"
+        )
+        return {analytical_model_id: {view_id: f"View{view_id[-1]}"}}
+
+    # The view of the second model blocks until the test releases it
+    async def persist(
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        if view == "View2":
+            await blocked.wait()
+        return True, {"status": "COMPLETED", "runTime": 1000}
+
+    async def report_item(update: BatchItemResult) -> None:
+        item_results.append(update)
+
+    context = CommandContext(
+        client=_client(
+            models=[
+                _model("MODEL_1", "One", "SPACE_A"),
+                _model("MODEL_2", "Two", "SPACE_A"),
+            ],
+            views=[
+                _view("VIEW_1", "View1", "VIEW_SPACE"),
+                _view("VIEW_2", "View2", "VIEW_SPACE"),
+            ],
+            dependencies=dependencies,
+            persist=persist,
+        ),
+        batch_item_result_callback=report_item,
+    )
+
+    async def run_measurement() -> (
+        MeasureAnalyticalModelViewPersistenceBatchResult
+    ):
+        return await measure_analytical_model_view_persistence_batch(
+            context,
+            MeasureAnalyticalModelViewPersistenceBatchRequest(
+                analytical_models=(
+                    AnalyticalModelReference("One", "SPACE_A"),
+                    AnalyticalModelReference("Two", "SPACE_A"),
+                ),
+                max_concurrency=2,
+            ),
+        )
+
+    batch = asyncio.create_task(run_measurement())
+
+    # Let the batch run as far as the blocked view. Bounded, so reporting only
+    # at the end fails the test instead of hanging it.
+    try:
+        for _ in range(100):
+            if item_results:
+                break
+            await asyncio.sleep(0)
+
+        # The first model is final while the second one is still measuring
+        assert [update.item_index for update in item_results] == [0]
+        assert not batch.done()
+    finally:
+        blocked.set()
+
+    result = await batch
+    assert [update.item_index for update in item_results] == [0, 1]
+    assert len(result.results) == 2
+
+
+async def test_dependency_batch_reports_deduplicated_models_in_order(
+) -> None:
+    """
+    Checks that the deduplication path reports in input order.
+    """
+    item_results: list[BatchItemResult] = []
+
+    async def dependencies(analytical_model_id: str) -> DependencyMap:
+        return {analytical_model_id: {"VIEW_1": "Sales"}}
+
+    async def report_item(update: BatchItemResult) -> None:
+        item_results.append(update)
+
+    result = await get_analytical_model_view_dependencies_batch(
+        CommandContext(
+            client=_client(
+                models=[
+                    _model("MODEL_1", "One", "SPACE_A"),
+                    _model("MODEL_2", "Two", "SPACE_A"),
+                ],
+                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
+                dependencies=dependencies,
+            ),
+            batch_item_result_callback=report_item,
+        ),
+        GetAnalyticalModelViewDependenciesBatchRequest(
+            deduplicate_views=True
+        ),
+    )
+
+    # Deduplication depends on the input order, so reporting follows it too
+    assert [update.item_index for update in item_results] == [0, 1]
+    assert len(result.results[0].dependencies) == 1
+    assert result.results[1].dependencies == ()
+
+    # Every reported item already carries its deduplicated result
+    assert tuple(update.result for update in item_results) == result.results
+
+
 def test_batch_request_rejects_an_ambiguous_model_selection() -> None:
+    """
+    Checks that a space cannot be combined with explicit models.
+    """
     with pytest.raises(ValueError, match="Space cannot be combined"):
         GetAnalyticalModelViewDependenciesBatchRequest(
             analytical_models=(AnalyticalModelReference("One", "SPACE_A"),),

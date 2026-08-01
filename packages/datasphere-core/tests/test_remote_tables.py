@@ -56,6 +56,9 @@ def _client(tables: dict[str, Any], **operations: Any) -> DatasphereClient:
 
 
 async def test_configure_creates_statistics_when_none_exist() -> None:
+    """
+    Checks that a table without statistics gets them created.
+    """
     created: list[tuple[str, str, str]] = []
 
     async def create_statistics(
@@ -85,6 +88,9 @@ async def test_configure_creates_statistics_when_none_exist() -> None:
 
 
 async def test_configure_updates_statistics_of_a_different_type() -> None:
+    """
+    Checks that statistics of another type are updated, not created.
+    """
     async def update_statistics(
         table: str,
         statistics_type: str,
@@ -110,6 +116,9 @@ async def test_configure_updates_statistics_of_a_different_type() -> None:
 
 
 async def test_configure_batch_discovers_and_classifies_every_table() -> None:
+    """
+    Checks that a discovery batch classifies every table it finds.
+    """
     async def create_statistics(
         table: str,
         statistics_type: str,
@@ -160,6 +169,9 @@ async def test_configure_batch_discovers_and_classifies_every_table() -> None:
 
 
 async def test_refresh_batch_classifies_selected_tables() -> None:
+    """
+    Checks that a refresh batch classifies each selected table.
+    """
     async def refresh_statistics(table: str, space: str) -> bool:
         return table == "TABLE_A"
 

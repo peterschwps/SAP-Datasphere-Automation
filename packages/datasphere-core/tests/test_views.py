@@ -65,6 +65,9 @@ def _view(view_id: str, name: str, space: str) -> dict[str, Any]:
 
 
 async def test_persist_view_maps_a_completed_run() -> None:
+    """
+    Checks that a completed persistence run is mapped to its fields.
+    """
     async def persist(
         view: str,
         space: str,
@@ -87,6 +90,9 @@ async def test_persist_view_maps_a_completed_run() -> None:
 
 
 async def test_persist_view_maps_a_timeout_to_its_status() -> None:
+    """
+    Checks that a persistence timeout becomes a status, not an exception.
+    """
     async def persist(
         view: str,
         space: str,
@@ -105,6 +111,9 @@ async def test_persist_view_maps_a_timeout_to_its_status() -> None:
 
 
 async def test_unpersist_view_reports_an_already_absent_persistence() -> None:
+    """
+    Checks that a view without persisted data is already absent.
+    """
     async def unpersist(
         view: str,
         space: str,
@@ -124,8 +133,12 @@ async def test_unpersist_view_reports_an_already_absent_persistence() -> None:
 
 
 async def test_persist_view_batch_keeps_order_and_summarizes() -> None:
+    """
+    Checks that a persistence batch keeps the order and summarizes it.
+    """
     progress: list[CommandProgress] = []
 
+    # VIEW_B fails, every other view completes
     async def persist(
         view: str,
         space: str,
@@ -171,6 +184,9 @@ async def test_persist_view_batch_keeps_order_and_summarizes() -> None:
 
 
 async def test_find_persistence_candidates_keeps_matching_scores() -> None:
+    """
+    Checks that only entities reaching the score become candidates.
+    """
     async def analyze(
         view: str,
         space: str,
@@ -200,7 +216,7 @@ async def test_find_persistence_candidates_keeps_matching_scores() -> None:
         FindViewPersistenceCandidatesRequest(
             view="VIEW_A",
             space="SPACE_A",
-            candidate_score=10,
+            minimum_candidate_score=10,
         ),
     )
 
@@ -217,7 +233,98 @@ async def test_find_persistence_candidates_keeps_matching_scores() -> None:
     )
 
 
+async def test_find_persistence_candidates_keeps_higher_scores() -> None:
+    """
+    Checks that the candidate score is a threshold, not an exact match.
+    """
+    async def analyze(
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None,
+    ) -> dict[str, Any]:
+        return {
+            "logId": 88,
+            "entityStats": [
+                {
+                    "entity": "VIEW_ABOVE",
+                    "space": "SPACE_B",
+                    "persistencyCandidateScore": 9,
+                },
+                {
+                    "entity": "VIEW_AT",
+                    "space": "SPACE_B",
+                    "persistencyCandidateScore": 7,
+                },
+                {
+                    "entity": "VIEW_BELOW",
+                    "space": "SPACE_B",
+                    "persistencyCandidateScore": 6,
+                },
+            ],
+        }
+
+    result = await find_view_persistence_candidates(
+        CommandContext(client=_client(analyze_view=analyze)),
+        FindViewPersistenceCandidatesRequest(
+            view="VIEW_A",
+            space="SPACE_A",
+            minimum_candidate_score=7,
+        ),
+    )
+
+    # The score is a threshold, so anything at or above it is a candidate
+    assert [candidate.view for candidate in result.candidates] == [
+        "VIEW_ABOVE",
+        "VIEW_AT",
+    ]
+
+    # Every candidate carries the score it actually reached, not the threshold
+    assert [candidate.score for candidate in result.candidates] == [9, 7]
+
+
+async def test_find_persistence_candidates_drops_entities_without_score(
+) -> None:
+    """
+    Checks that an entity without a score is dropped, not compared.
+    """
+    async def analyze(
+        view: str,
+        space: str,
+        *,
+        timeout_seconds: float | None,
+    ) -> dict[str, Any]:
+        return {
+            "logId": 88,
+            "entityStats": [
+                {"entity": "VIEW_NO_SCORE", "space": "SPACE_B"},
+                {
+                    "entity": "VIEW_MATCH",
+                    "space": "SPACE_B",
+                    "persistencyCandidateScore": 10,
+                },
+            ],
+        }
+
+    result = await find_view_persistence_candidates(
+        CommandContext(client=_client(analyze_view=analyze)),
+        FindViewPersistenceCandidatesRequest(
+            view="VIEW_A",
+            space="SPACE_A",
+        ),
+    )
+
+    # A missing score drops the entity instead of raising on the comparison
+    assert [candidate.view for candidate in result.candidates] == [
+        "VIEW_MATCH"
+    ]
+    assert result.status is FindViewPersistenceCandidatesStatus.COMPLETED
+
+
 async def test_find_persistence_candidates_reraises_a_cancellation() -> None:
+    """
+    Checks that a cancelled analysis is re-raised with its log ID.
+    """
     async def analyze(
         view: str,
         space: str,
@@ -240,12 +347,16 @@ async def test_find_persistence_candidates_reraises_a_cancellation() -> None:
 
 
 async def test_find_attribute_matches_batch_discovers_every_view() -> None:
+    """
+    Checks that a batch without explicit requests searches every view.
+    """
     async def get_all_views() -> list[dict[str, Any]]:
         return [
             _view("ID_1", "VIEW_A", "SPACE_A"),
             _view("ID_2", "VIEW_B", "SPACE_A"),
         ]
 
+    # Only the first view has attributes at all
     async def get_view_attributes(
         view_id: str,
         view_name: str,
@@ -276,6 +387,9 @@ async def test_find_attribute_matches_batch_discovers_every_view() -> None:
 
 
 async def test_create_partitioning_builds_the_requested_year_range() -> None:
+    """
+    Checks that the year range becomes one partition per year.
+    """
     received: dict[str, Any] = {}
 
     async def create_partitioning(
@@ -306,6 +420,9 @@ async def test_create_partitioning_builds_the_requested_year_range() -> None:
 
 
 async def test_create_partitioning_maps_an_existing_partitioning() -> None:
+    """
+    Checks that an existing partitioning is reported as skipped.
+    """
     async def create_partitioning(
         view: str,
         space: str,
@@ -334,6 +451,9 @@ async def test_create_partitioning_maps_an_existing_partitioning() -> None:
 
 
 async def test_lock_and_unlock_partitions_map_their_outcomes() -> None:
+    """
+    Checks that lock and unlock outcomes are mapped to their statuses.
+    """
     async def lock_partitions(view: str, space: str, until_year: int) -> str:
         return "locked"
 
@@ -359,6 +479,9 @@ async def test_lock_and_unlock_partitions_map_their_outcomes() -> None:
 
 
 def test_requests_reject_unusable_values() -> None:
+    """
+    Checks that an invalid timeout and an inverted year range fail.
+    """
     with pytest.raises(ValueError, match="Timeout"):
         PersistViewRequest(view="A", space="S", timeout_seconds=0)
     with pytest.raises(ValueError, match="Start year"):
