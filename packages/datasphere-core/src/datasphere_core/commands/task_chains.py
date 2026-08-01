@@ -69,6 +69,8 @@ async def run_task_chain(
     else:
         status = TaskChainStatus.START_FAILED
 
+    # Datasphere returns an empty dict when the run never started, so
+    # both keys are read defensively. A filled dict always carries them.
     return RunTaskChainResult(
         chain=request.chain,
         space=request.space,

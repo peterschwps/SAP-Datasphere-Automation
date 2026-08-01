@@ -499,6 +499,8 @@ async def persist_view(
     else:
         status = PersistViewStatus.START_FAILED
 
+    # Datasphere returns an empty dict when the run never started, so
+    # both keys are read defensively. A filled dict always carries them.
     return PersistViewResult(
         view=request.view,
         space=request.space,
@@ -590,6 +592,8 @@ async def unpersist_view(
     else:
         status = UnpersistViewStatus.START_FAILED
 
+    # Datasphere returns an empty dict when the run never started, so
+    # both keys are read defensively. A filled dict always carries them.
     return UnpersistViewResult(
         view=request.view,
         space=request.space,
