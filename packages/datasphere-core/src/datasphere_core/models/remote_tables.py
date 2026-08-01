@@ -30,6 +30,7 @@ class ConfigureRemoteTableStatisticsStatus(CommandStatus):
     ALREADY_EXISTS = "already_exists", Outcome.SUCCEEDED
     UNSUPPORTED = "unsupported", Outcome.SKIPPED
     UNSUPPORTED_TYPE = "unsupported_type", Outcome.SKIPPED
+    TABLE_NOT_FOUND = "table_not_found", Outcome.FAILED
     FAILED = "failed", Outcome.FAILED
 
 
