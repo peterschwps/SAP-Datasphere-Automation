@@ -12,7 +12,7 @@ from datasphere_core import (
     CommandError,
     DatasphereSession,
 )
-from datasphere_core.commands.task_chains import run_task_chain as run_command
+from datasphere_core.commands.task_chains import run_task_chain
 from datasphere_core.models.task_chains import (
     RunTaskChainRequest,
     RunTaskChainResult,
@@ -20,10 +20,14 @@ from datasphere_core.models.task_chains import (
 
 _COMMAND = "task_chains.run"
 
+# This module holds the direct command of one domain. A second domain gets its
+# own module next to it, and run() then has to pick the matching one instead of
+# calling the task chain path directly.
 
+# TODO: Implement Typer for parsing and running commands
 def _create_parser() -> argparse.ArgumentParser:
     """
-    Create the parser for canonical direct CLI commands.
+    Create the parser for direct CLI commands that execute a single action.
     """
     parser = argparse.ArgumentParser(prog="datasphere")
     domains = parser.add_subparsers(dest="domain", required=True)
@@ -57,20 +61,26 @@ def _create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def run_task_chain(
+async def _run_with_session(
     request: RunTaskChainRequest,
 ) -> RunTaskChainResult:
     """
-    Execute the task-chain command for the configured tenant.
+    Authenticates against the configured tenant and runs one task chain.
 
     Args:
-        request (RunTaskChainRequest): Task-chain name, space, and timeout.
+        request (RunTaskChainRequest): Name and space of the task chain and
+                                       timeout.
+
+    Raises:
+        CommandError: If the settings file has not been created yet.
 
     Returns:
-        RunTaskChainResult: Task-chain execution result.
+        RunTaskChainResult: Result of the task chain execution.
     """
     from datasphere_cli.settings import SETTINGS_FILE, build_session_config
 
+    # Loading the settings would create the file and open a browser, which a
+    # direct command must not do. A readable error is the better answer here.
     if not SETTINGS_FILE.exists():
         raise CommandError(
             "Settings are not initialized. Start 'datasphere' once to "
@@ -80,7 +90,7 @@ async def run_task_chain(
     config = build_session_config()
     async with DatasphereSession(config) as session:
         await session.authenticate(interactive=True)
-        return await run_command(
+        return await run_task_chain(
             CommandContext(client=session.client),
             request,
         )
@@ -100,9 +110,7 @@ def _print_result(
     if output == "json":
         print(json.dumps(asdict(result), separators=(",", ":")))
         return
-    print(
-        f"Task chain '{result.chain}' in '{result.space}': {result.status}"
-    )
+    print(f"Task chain '{result.chain}' in '{result.space}': {result.status}")
 
 
 def run(argv: Sequence[str]) -> int:
@@ -127,7 +135,7 @@ def run(argv: Sequence[str]) -> int:
         parser.error(str(error))
 
     try:
-        result = asyncio.run(run_task_chain(request))
+        result = asyncio.run(_run_with_session(request))
     except (CommandError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
