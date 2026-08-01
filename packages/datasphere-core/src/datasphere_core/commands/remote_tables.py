@@ -69,7 +69,7 @@ async def _configure_statistics_item(
 
     # Check metadata of the remote table
     if metadata is None:
-        status = ConfigureRemoteTableStatisticsStatus.FAILED
+        status = ConfigureRemoteTableStatisticsStatus.TABLE_NOT_FOUND
 
     # If statistics not supported
     elif not metadata["statisticsSupported"]:
