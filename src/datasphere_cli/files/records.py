@@ -2,25 +2,40 @@ from typing import Literal, TypedDict
 
 
 class AnalyticalModelTaskRecord(TypedDict):
+    """
+    One row of the analytical model task file.
+    """
     analytical_model: str
     space: str
 
 
 class TaskChainTaskRecord(TypedDict):
+    """
+    One row of the task chain task file.
+    """
     task_chain: str
     space: str
 
 
 class ViewTaskRecord(TypedDict):
+    """
+    One row of a view task file.
+    """
     view: str
     space: str
 
 
 class ViewPartitioningTaskRecord(ViewTaskRecord):
+    """
+    One row of the view partitioning task file.
+    """
     attribute: str
 
 
 class TaskChainResultRecord(TypedDict):
+    """
+    One row of the task chain result file.
+    """
     task_chain: str
     space: str
     status: str
@@ -30,6 +45,9 @@ class TaskChainResultRecord(TypedDict):
 
 
 class ViewPersistenceResultRecord(TypedDict):
+    """
+    One row of a view persistence result file.
+    """
     view: str
     space: str
     status: str
@@ -39,12 +57,18 @@ class ViewPersistenceResultRecord(TypedDict):
 
 
 class ViewStatusResultRecord(TypedDict):
+    """
+    One row of a view result file that only carries a status.
+    """
     view: str
     space: str
     status: str
 
 
 class ViewPartitioningResultRecord(TypedDict):
+    """
+    One row of the view partitioning result file.
+    """
     view: str
     space: str
     attribute: str
@@ -52,6 +76,9 @@ class ViewPartitioningResultRecord(TypedDict):
 
 
 class ViewAttributeResultRecord(TypedDict):
+    """
+    One row of the view attribute result file.
+    """
     view: str
     space: str
     business_name: str
@@ -60,6 +87,10 @@ class ViewAttributeResultRecord(TypedDict):
 
 
 class ViewPersistenceCandidateResultRecord(TypedDict):
+    """
+    One row of the persistence candidate result file. A source view without
+    candidates is written as a row with empty candidate fields.
+    """
     source_view: str
     source_space: str
     view: str | None
@@ -72,6 +103,9 @@ class ViewPersistenceCandidateResultRecord(TypedDict):
 
 
 class BatchSummaryRecord(TypedDict):
+    """
+    Outcome counts of a batch in a JSON result file.
+    """
     total: int
     succeeded: int
     failed: int
@@ -80,6 +114,9 @@ class BatchSummaryRecord(TypedDict):
 
 
 class AnalyticalModelDependencyRecord(TypedDict):
+    """
+    One resolved view dependency in a JSON result file.
+    """
     view_id: str
     view: str
     space: str | None
@@ -87,6 +124,9 @@ class AnalyticalModelDependencyRecord(TypedDict):
 
 
 class AnalyticalModelDependenciesResultRecord(TypedDict):
+    """
+    Dependencies of one analytical model in a JSON result file.
+    """
     analytical_model: str
     space: str
     status: str
@@ -95,11 +135,17 @@ class AnalyticalModelDependenciesResultRecord(TypedDict):
 
 
 class AnalyticalModelDependenciesBatchRecord(TypedDict):
+    """
+    Full content of the analytical model dependencies result file.
+    """
     results: list[AnalyticalModelDependenciesResultRecord]
     summary: BatchSummaryRecord
 
 
 class AnalyticalModelPersistenceItemRecord(TypedDict):
+    """
+    Persistence measurement of one view in a JSON result file.
+    """
     view_id: str
     view: str
     space: str | None
@@ -115,6 +161,9 @@ class AnalyticalModelPersistenceItemRecord(TypedDict):
 
 
 class AnalyticalModelPersistenceResultRecord(TypedDict):
+    """
+    Persistence measurements of one analytical model in a JSON result file.
+    """
     analytical_model: str
     space: str
     status: str
@@ -123,6 +172,9 @@ class AnalyticalModelPersistenceResultRecord(TypedDict):
 
 
 class AnalyticalModelPersistenceBatchRecord(TypedDict):
+    """
+    Full content of the analytical model persistence result file.
+    """
     results: list[AnalyticalModelPersistenceResultRecord]
     summary: BatchSummaryRecord
 
