@@ -113,19 +113,20 @@ async def find_view_persistence_candidates(
     request: FindViewPersistenceCandidatesRequest,
 ) -> FindViewPersistenceCandidatesResult:
     """
-    Analyzes one view and returns every entity at the requested score.
+    Analyzes one view and returns every entity that reached at least the
+    requested candidate score.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (FindViewPersistenceCandidatesRequest): View and score to
-                                                        analyze.
+        request (FindViewPersistenceCandidatesRequest): Input for the view
+                                                        analysis.
 
     Raises:
         CommandCancelledError: If the view analysis was cancelled after it had
                                already started remotely.
 
     Returns:
-        FindViewPersistenceCandidatesResult: Matching persistence candidates.
+        FindViewPersistenceCandidatesResult: Result of the view analysis.
     """
     # Run the view analyzer
     try:
@@ -182,21 +183,22 @@ async def find_view_persistence_candidates_batch(
     request: FindViewPersistenceCandidatesBatchRequest,
 ) -> FindViewPersistenceCandidatesBatchResult:
     """
-    Analyzes views concurrently and retains the input result order. Discovers
-    every view of the tenant if the request carries no explicit requests.
+    Analyzes selected views with concurrency. Discovers every view of the
+    tenant if the request carries no explicit requests.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (FindViewPersistenceCandidatesBatchRequest): Views and batch
-                                                             options to use.
+        request (FindViewPersistenceCandidatesBatchRequest): Input for the view
+                                                             analyses with
+                                                             concurrency.
 
     Raises:
         CommandCancelledError: If a view analysis was cancelled after it had
                                already started remotely.
 
     Returns:
-        FindViewPersistenceCandidatesBatchResult: Ordered candidate results and
-                                                  their summary.
+        FindViewPersistenceCandidatesBatchResult: Ordered results of the view
+                                                  analyses.
     """
     requests = request.requests
 
@@ -237,11 +239,11 @@ async def find_view_attribute_matches(
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (FindViewAttributeMatchesRequest): View and substring to search
-                                                   for.
+        request (FindViewAttributeMatchesRequest): Input for the attribute
+                                                   search.
 
     Returns:
-        FindViewAttributeMatchesResult: Matching view attributes.
+        FindViewAttributeMatchesResult: Result of the attribute search.
     """
     # Fetch all attributes of the view
     attributes = await context.client.views.get_view_attributes(
@@ -282,18 +284,18 @@ async def find_view_attribute_matches_batch(
     request: FindViewAttributeMatchesBatchRequest,
 ) -> FindViewAttributeMatchesBatchResult:
     """
-    Finds attribute matches concurrently and retains the input result order.
-    Discovers every view of the tenant if the request carries no explicit
-    requests.
+    Finds matching attributes in selected views with concurrency. Discovers
+    every view of the tenant if the request carries no explicit requests.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (FindViewAttributeMatchesBatchRequest): Search options and
-                                                        batch options to use.
+        request (FindViewAttributeMatchesBatchRequest): Input for the attribute
+                                                        searches with
+                                                        concurrency.
 
     Returns:
-        FindViewAttributeMatchesBatchResult: Ordered attribute results and
-                                             their summary.
+        FindViewAttributeMatchesBatchResult: Ordered results of the attribute
+                                             searches.
     """
     requests = request.requests
     if requests is None:
@@ -334,11 +336,11 @@ async def create_view_partitioning(
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (CreateViewPartitioningRequest): View and partition range to
-                                                 create.
+        request (CreateViewPartitioningRequest): Input for the partition
+                                                 creation.
 
     Returns:
-        CreateViewPartitioningResult: The resulting partition status.
+        CreateViewPartitioningResult: Result of the partition creation.
     """
     # Create partitioning
     outcome = await context.client.views.create_partitioning(
@@ -370,16 +372,17 @@ async def create_view_partitioning_batch(
     request: CreateViewPartitioningBatchRequest,
 ) -> CreateViewPartitioningBatchResult:
     """
-    Creates yearly partitions concurrently and retains the input result order.
+    Creates yearly range partitions for multiple views with concurrency.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (CreateViewPartitioningBatchRequest): Partition requests and
-                                                      batch options to use.
+        request (CreateViewPartitioningBatchRequest): Input for the partition
+                                                      creations with
+                                                      concurrency.
 
     Returns:
-        CreateViewPartitioningBatchResult: Ordered partition results and their
-                                           summary.
+        CreateViewPartitioningBatchResult: Ordered results of the partition
+                                           creations.
     """
     results, summary = await run_batch(
         context=context,
@@ -401,10 +404,11 @@ async def delete_view_partitioning(
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (DeleteViewPartitioningRequest): View partitioning to delete.
+        request (DeleteViewPartitioningRequest): Input for the partition
+                                                 deletion.
 
     Returns:
-        DeleteViewPartitioningResult: The resulting deletion status.
+        DeleteViewPartitioningResult: Result of the partition deletion.
     """
     deleted = await context.client.views.delete_partitioning(
         view=request.view,
@@ -427,16 +431,17 @@ async def delete_view_partitioning_batch(
     request: DeleteViewPartitioningBatchRequest,
 ) -> DeleteViewPartitioningBatchResult:
     """
-    Deletes partitioning concurrently and retains the input result order.
+    Deletes the partitioning of multiple views with concurrency.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (DeleteViewPartitioningBatchRequest): Partition requests and
-                                                      batch options to use.
+        request (DeleteViewPartitioningBatchRequest): Input for the partition
+                                                      deletions with
+                                                      concurrency.
 
     Returns:
-        DeleteViewPartitioningBatchResult: Ordered deletion results and their
-                                           summary.
+        DeleteViewPartitioningBatchResult: Ordered results of the partition
+                                           deletions.
     """
     results, summary = await run_batch(
         context=context,
@@ -458,14 +463,14 @@ async def persist_view(
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (PersistViewRequest): View and persistence options to use.
+        request (PersistViewRequest): Input for the persistence run.
 
     Raises:
         CommandCancelledError: If the persistence was cancelled after it had
                                already started remotely.
 
     Returns:
-        PersistViewResult: The persistence status and operation details.
+        PersistViewResult: Result of the persistence run.
     """
     # Start persistence
     try:
@@ -512,19 +517,20 @@ async def persist_view_batch(
     request: PersistViewBatchRequest,
 ) -> PersistViewBatchResult:
     """
-    Persists views concurrently and retains the input result order.
+    Persists multiple views with concurrency and waits for their terminal
+    status.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (PersistViewBatchRequest): Persistence requests and batch
-                                           options to use.
+        request (PersistViewBatchRequest): Input for the persistence runs with
+                                           concurrency.
 
     Raises:
         CommandCancelledError: If a persistence was cancelled after it had
                                already started remotely.
 
     Returns:
-        PersistViewBatchResult: Ordered persistence results and their summary.
+        PersistViewBatchResult: Ordered results of the persistence runs.
     """
     results, summary = await run_batch(
         context=context,
@@ -546,14 +552,14 @@ async def unpersist_view(
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (UnpersistViewRequest): View and unpersistence options to use.
+        request (UnpersistViewRequest): Input for the unpersistence run.
 
     Raises:
         CommandCancelledError: If the unpersistence was cancelled after it had
                                already started remotely.
 
     Returns:
-        UnpersistViewResult: The unpersistence status and operation details.
+        UnpersistViewResult: Result of the unpersistence run.
     """
     # Start removal of persistence
     try:
@@ -602,20 +608,19 @@ async def unpersist_view_batch(
     request: UnpersistViewBatchRequest,
 ) -> UnpersistViewBatchResult:
     """
-    Unpersists views concurrently and retains the input result order.
+    Removes the persisted data of multiple views with concurrency.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (UnpersistViewBatchRequest): Unpersistence requests and batch
-                                             options to use.
+        request (UnpersistViewBatchRequest): Input for the unpersistence runs
+                                             with concurrency.
 
     Raises:
         CommandCancelledError: If an unpersistence was cancelled after it had
                                already started remotely.
 
     Returns:
-        UnpersistViewBatchResult: Ordered unpersistence results and their
-                                  summary.
+        UnpersistViewBatchResult: Ordered results of the unpersistence runs.
     """
     results, summary = await run_batch(
         context=context,
@@ -637,11 +642,10 @@ async def lock_view_partitions(
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (LockViewPartitionsRequest): View and year through which to
-                                             lock partitions.
+        request (LockViewPartitionsRequest): Input for the partition lock.
 
     Returns:
-        LockViewPartitionsResult: The resulting lock status.
+        LockViewPartitionsResult: Result of the partition lock.
     """
     outcome = await context.client.views.lock_partitions(
         view=request.view,
@@ -661,15 +665,16 @@ async def lock_view_partitions_batch(
     request: LockViewPartitionsBatchRequest,
 ) -> LockViewPartitionsBatchResult:
     """
-    Locks partitions concurrently and retains the input result order.
+    Locks partitions through a requested year for multiple views with
+    concurrency.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (LockViewPartitionsBatchRequest): Lock requests and batch
-                                                  options to use.
+        request (LockViewPartitionsBatchRequest): Input for the partition locks
+                                                  with concurrency.
 
     Returns:
-        LockViewPartitionsBatchResult: Ordered lock results and their summary.
+        LockViewPartitionsBatchResult: Ordered results of the partition locks.
     """
     results, summary = await run_batch(
         context=context,
@@ -691,10 +696,10 @@ async def unlock_view_partitions(
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (UnlockViewPartitionsRequest): View whose partitions to unlock.
+        request (UnlockViewPartitionsRequest): Input for the partition unlock.
 
     Returns:
-        UnlockViewPartitionsResult: The resulting unlock status.
+        UnlockViewPartitionsResult: Result of the partition unlock.
     """
     outcome = await context.client.views.unlock_partitions(
         view=request.view,
@@ -713,16 +718,16 @@ async def unlock_view_partitions_batch(
     request: UnlockViewPartitionsBatchRequest,
 ) -> UnlockViewPartitionsBatchResult:
     """
-    Unlocks partitions concurrently and retains the input result order.
+    Unlocks every partition of multiple views with concurrency.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        request (UnlockViewPartitionsBatchRequest): Unlock requests and batch
-                                                    options to use.
+        request (UnlockViewPartitionsBatchRequest): Input for the partition
+                                                    unlocks with concurrency.
 
     Returns:
-        UnlockViewPartitionsBatchResult: Ordered unlock results and their
-                                         summary.
+        UnlockViewPartitionsBatchResult: Ordered results of the partition
+                                         unlocks.
     """
     results, summary = await run_batch(
         context=context,
