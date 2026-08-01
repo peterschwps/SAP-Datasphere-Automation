@@ -452,11 +452,17 @@ def _create_measurement_result(
         status (AnalyticalModelPersistenceItemStatus): Outcome of the item.
         previously_persisted (bool | None): State observed before the
                                             measurement.
-        persistence_details (dict[str, Any] | None, optional):
-            Persistence details as returned by Datasphere. Defaults to None.
-        cleanup_details (dict[str, Any] | None, optional):
-            Details of the cleanup action as returned by Datasphere. Defaults
-            to None.
+        persistence_details (dict[str, Any] | None, optional): Persistence
+                                                               details as
+                                                               returned by
+                                                               Datasphere.
+                                                               Defaults to
+                                                               None.
+        cleanup_details (dict[str, Any] | None, optional): Details of the
+                                                           cleanup action as
+                                                           returned by
+                                                           Datasphere.
+                                                           Defaults to None.
         persistence_log_id (str | None, optional): Log ID of the persistence
                                                    run. Defaults to None.
         cleanup_log_id (str | None, optional): Log ID of the cleanup action.

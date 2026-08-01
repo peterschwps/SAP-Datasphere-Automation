@@ -18,6 +18,13 @@ def build_credential_key(base_url: str, client_id: str) -> str:
     Returns a stable, non-secret key for the tenant and client. Can be used as
     an identifier for storing multiple OAuth tokens for different tenants or
     clients in the credential store.
+
+    Args:
+        base_url (str): Base URL of the Datasphere tenant.
+        client_id (str): OAuth client ID used against that tenant.
+
+    Returns:
+        str: Value identifying the tenant and client pair.
     """
     value = f"{base_url.rstrip('/')}\0{client_id}"
     return sha256(value.encode()).hexdigest()

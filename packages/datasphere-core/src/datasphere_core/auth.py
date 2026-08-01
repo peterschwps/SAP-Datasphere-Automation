@@ -90,22 +90,29 @@ class DatasphereSession:
         Args:
             config (SessionConfig): Configuration to create an SAP Datasphere
                                     session.
-            token_store (TokenStore | None, optional):
-                Token store used to persist OAuth tokens. If None, the OS
-                credential store will be used. This argument is mainly used to
-                provide a different token store when running tests.
-                Defaults to None.
-            client_factory (ClientFactory, optional):
-                A callable that receives a DatasphereConfig and returns a
-                DatasphereClient. This argument is mainly used to provide a
-                mock client when running tests.
-                Defaults to DatasphereClient.
-            lock_directory (Path | None, optional):
-                Path where a lock file should be created. This is done to
-                prevent parallel processes from writing tokens. If None, the
-                default cache directory will be used. This argument is mainly
-                used to provide a temporary directory when running tests.
-                Defaults to None.
+            token_store (TokenStore | None, optional): Token store used to
+                                                       persist OAuth tokens.
+                                                       Uses the OS credential
+                                                       store when None. Mainly
+                                                       used to swap the store
+                                                       in tests.
+                                                       Defaults to None.
+            client_factory (ClientFactory, optional): Callable that turns a
+                                                      DatasphereConfig into a
+                                                      DatasphereClient. Mainly
+                                                      used to inject a mock
+                                                      client in tests.
+                                                      Defaults to
+                                                      DatasphereClient.
+            lock_directory (Path | None, optional): Directory for the lock
+                                                    file that keeps parallel
+                                                    processes from writing
+                                                    tokens at once. Uses the
+                                                    default cache directory
+                                                    when None. Mainly used to
+                                                    point at a temporary
+                                                    directory in tests.
+                                                    Defaults to None.
         """
         self._config = config
         self._token_store = token_store or KeyringTokenStore()
@@ -126,6 +133,10 @@ class DatasphereSession:
     def client(self) -> DatasphereClient:
         """
         Returns the authenticated API client.
+
+        Raises:
+            SessionNotAuthenticatedError: If the session was not
+                                          authenticated yet.
         """
         if self._client is None:
             raise SessionNotAuthenticatedError(
