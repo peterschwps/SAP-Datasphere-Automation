@@ -471,6 +471,10 @@ def _create_measurement_result(
                                                          the persistence
                                                          runtime of one view.
     """
+    # Details are empty whenever a step never ran or its outcome could
+    # not be read, so every key is optional.
+    # An explicit logId beats the details, because the two never appear
+    # together.
     persistence_details = persistence_details or {}
     cleanup_details = cleanup_details or {}
     return MeasureAnalyticalModelViewPersistenceItemResult(
