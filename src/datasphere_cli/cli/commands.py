@@ -12,18 +12,19 @@ from datasphere_core import (
     CommandError,
     DatasphereSession,
 )
+from datasphere_core.commands.task_chains import run_task_chain as run_command
 from datasphere_core.models.task_chains import (
     RunTaskChainRequest,
     RunTaskChainResult,
 )
 
-from datasphere_cli.actions.dispatch import dispatch_command
-
 _COMMAND = "task_chains.run"
 
 
 def _create_parser() -> argparse.ArgumentParser:
-    """Create the parser for canonical direct CLI commands."""
+    """
+    Create the parser for canonical direct CLI commands.
+    """
     parser = argparse.ArgumentParser(prog="datasphere")
     domains = parser.add_subparsers(dest="domain", required=True)
     task_chains = domains.add_parser(
@@ -59,7 +60,8 @@ def _create_parser() -> argparse.ArgumentParser:
 async def run_task_chain(
     request: RunTaskChainRequest,
 ) -> RunTaskChainResult:
-    """Execute the task-chain command for the configured tenant.
+    """
+    Execute the task-chain command for the configured tenant.
 
     Args:
         request (RunTaskChainRequest): Task-chain name, space, and timeout.
@@ -78,12 +80,9 @@ async def run_task_chain(
     config = build_session_config()
     async with DatasphereSession(config) as session:
         await session.authenticate(interactive=True)
-        return await dispatch_command(
-            _COMMAND,
+        return await run_command(
             CommandContext(client=session.client),
             request,
-            RunTaskChainRequest,
-            RunTaskChainResult,
         )
 
 
@@ -91,6 +90,13 @@ def _print_result(
     result: RunTaskChainResult,
     output: Literal["text", "json"],
 ) -> None:
+    """
+    Prints one task chain result as text or JSON.
+
+    Args:
+        result (RunTaskChainResult): Result to print.
+        output (Literal["text", "json"]): Requested output format.
+    """
     if output == "json":
         print(json.dumps(asdict(result), separators=(",", ":")))
         return
@@ -100,7 +106,8 @@ def _print_result(
 
 
 def run(argv: Sequence[str]) -> int:
-    """Run a direct command and return its process exit code.
+    """
+    Run a direct command and return its process exit code.
 
     Args:
         argv (Sequence[str]): Command-line arguments without the executable.

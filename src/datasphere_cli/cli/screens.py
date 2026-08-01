@@ -54,8 +54,9 @@ type ParameterType = Literal["str", "optional_str", "int", "bool", "choice"]
 
 @dataclass(frozen=True, slots=True)
 class ParameterDefinition:
-    """Definition of one Textual parameter prompt."""
-
+    """
+    Definition of one Textual parameter prompt.
+    """
     name: str
     label: str
     type: ParameterType
@@ -143,6 +144,14 @@ PARAM_DEFINITIONS: dict[Action, list[ParameterDefinition]] = {
     actions.refresh_remote_table_statistics: [
         ParameterDefinition("space", "Space:", "str"),
     ],
+    actions.export_view_persistence_candidates: [
+        ParameterDefinition(
+            "minimum_candidate_score",
+            "Minimum persistence score (10 is the highest):",
+            "int",
+            default=10,
+        ),
+    ],
     actions.export_view_attribute_matches: [
         ParameterDefinition(
             "attribute_substring",
@@ -178,10 +187,22 @@ class LogHandler(logging.Handler):
     """
 
     def __init__(self, log_widget: RichLog) -> None:
+        """
+        Initializes the handler with the widget to write to.
+
+        Args:
+            log_widget (RichLog): Widget receiving the log messages.
+        """
         super().__init__()
         self._log = log_widget
 
     def emit(self, record: logging.LogRecord) -> None:
+        """
+        Writes one formatted log record to the widget.
+
+        Args:
+            record (logging.LogRecord): Log record to write.
+        """
         self._log.write(self.format(record))
 
 
@@ -195,6 +216,13 @@ class BaseScreen(Screen):
     """
 
     def compose(self) -> ComposeResult:
+        """
+        Builds the screen from the shared header, the screen content,
+        and the footer.
+
+        Yields:
+            ComposeResult: Widgets of the whole screen.
+        """
         yield Container(
             Static(ASCII_LOGO, id="header-logo"),
             Static(
@@ -210,6 +238,12 @@ class BaseScreen(Screen):
         yield from self.compose_footer()
 
     def compose_footer(self) -> ComposeResult:
+        """
+        Builds the default footer with the global shortcuts.
+
+        Yields:
+            ComposeResult: Footer of the screen.
+        """
         yield Horizontal(
             Static("[b]Quit[/b] - Ctrl+C", id="footer-left"),
             Static("[b]Settings[/b] - Ctrl+S", id="footer-center"),
@@ -219,6 +253,13 @@ class BaseScreen(Screen):
 
     @abstractmethod
     def compose_content(self) -> ComposeResult:
+        """
+        Builds the content between header and footer. Every screen has
+        to implement this.
+
+        Yields:
+            ComposeResult: Content widgets of the screen.
+        """
         raise NotImplementedError
 
 
@@ -228,6 +269,9 @@ class EntryScreen(BaseScreen):
     """
 
     def __init__(self) -> None:
+        """
+        Initializes the main menu with every option collapsed.
+        """
         super().__init__()
 
         # Holds all currently expanded menu options
@@ -378,6 +422,12 @@ class ParamScreen(BaseScreen):
     """
 
     def __init__(self, action: Action) -> None:
+        """
+        Initializes the wizard for the selected action.
+
+        Args:
+            action (Action): Action whose parameters are collected.
+        """
         super().__init__()
         self._action = action
         self._step: int = 0
@@ -431,12 +481,12 @@ class ParamScreen(BaseScreen):
         param_type = step.type
         value = self._answers.get(name, step.default)
 
-        # Input prompt for strings
+        # Input prompt for strings and whole numbers
         if param_type in ("str", "optional_str", "int"):
-            if param_type == "optional_str" and value is None:
-                value = ""
+
+            # A missing answer and a missing default both mean an empty field
             return Input(
-                value=str(value) if value != "" else "",
+                value="" if value is None else str(value),
                 id="current-widget",
             )
 
@@ -625,6 +675,14 @@ class ExecutionScreen(BaseScreen):
         action: Action,
         params: dict[str, Any],
     ) -> None:
+        """
+        Initializes the screen with the action to execute.
+
+        Args:
+            action (Action): Action to execute.
+            params (dict[str, Any]): Collected parameters of the
+                                     action.
+        """
         super().__init__()
         self._action = action
         self._params = params
@@ -676,6 +734,12 @@ class ExecutionScreen(BaseScreen):
             )
 
             async def report_progress(update: CommandProgress) -> None:
+                """
+                Writes one Core progress update to the log widget.
+
+                Args:
+                    update (CommandProgress): Progress update to show.
+                """
                 message = update.message or update.phase.replace("_", " ")
                 if update.completed_items is not None:
                     total = (
@@ -727,6 +791,12 @@ class SettingsScreen(BaseScreen):
     BINDINGS = [Binding("ctrl+s", "save", "Save", show=False)]
 
     def compose_content(self) -> ComposeResult:
+        """
+        Builds the settings editor.
+
+        Yields:
+            ComposeResult: Content widgets of the settings screen.
+        """
         yield Container(
             Static("Edit the settings:", id="settings-label"),
             TextArea(id="settings-editor"),
@@ -773,6 +843,12 @@ class SettingsScreen(BaseScreen):
             )
 
     async def on_key(self, event: events.Key) -> None:
+        """
+        Closes the settings screen when escape is pressed.
+
+        Args:
+            event (events.Key): Key event to handle.
+        """
         if event.key == "escape":
             self.app.pop_screen()
 
@@ -789,18 +865,30 @@ class DatasphereApp(App):
         Binding("ctrl+s", "open_settings", "Settings", show=False),
     ]
 
-    # Override unused bindings
+    # Override unused bindings of the Textual defaults
     def action_copy_text(self) -> None:
-        pass
+        """
+        Ignores the default copy binding.
+        """
 
     def action_focus_next(self) -> None:
-        pass
+        """
+        Ignores the default focus-next binding.
+        """
 
     def action_focus_previous(self) -> None:
-        pass
+        """
+        Ignores the default focus-previous binding.
+        """
 
     def action_open_settings(self) -> None:
+        """
+        Opens the settings screen.
+        """
         self.push_screen(SettingsScreen())
 
     def on_mount(self) -> None:
+        """
+        Shows the main menu after the app started.
+        """
         self.push_screen(EntryScreen())
