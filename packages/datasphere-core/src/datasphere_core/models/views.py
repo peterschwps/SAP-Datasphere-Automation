@@ -124,7 +124,7 @@ class FindViewPersistenceCandidatesRequest:
     """
     view: str
     space: str
-    candidate_score: int | float = 10
+    minimum_candidate_score: int | float = 10
     timeout_seconds: float = DEFAULT_VIEW_TIMEOUT_SECONDS
 
     def __post_init__(self) -> None:
@@ -157,7 +157,7 @@ class FindViewPersistenceCandidatesBatchRequest:
     supplied.
     """
     requests: tuple[FindViewPersistenceCandidatesRequest, ...] | None = None
-    candidate_score: int | float = 10
+    minimum_candidate_score: int | float = 10
     timeout_seconds: float = DEFAULT_VIEW_TIMEOUT_SECONDS
     max_concurrency: int = DEFAULT_VIEW_MAX_CONCURRENCY
 

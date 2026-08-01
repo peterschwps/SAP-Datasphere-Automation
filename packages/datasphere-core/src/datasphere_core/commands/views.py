@@ -83,6 +83,7 @@ UNLOCK_PARTITIONS_BATCH_COMMAND_NAME = "views.unlock_partitions_batch"
 def _candidate_from_entity(
     entity: dict[str, Any],
     request: FindViewPersistenceCandidatesRequest,
+    score: int | float,
 ) -> ViewPersistenceCandidate:
     """
     Converts one analyzer entity into a persistence candidate model.
@@ -90,8 +91,9 @@ def _candidate_from_entity(
     Args:
         entity (dict[str, Any]): Analyzer entity details.
         request (FindViewPersistenceCandidatesRequest): Request supplying the
-                                                        fallback view, space,
-                                                        and score values.
+                                                        fallback view and space
+                                                        values.
+        score (int | float): Candidate score the entity actually reached.
 
     Returns:
         ViewPersistenceCandidate: Normalized candidate details.
@@ -99,7 +101,7 @@ def _candidate_from_entity(
     return ViewPersistenceCandidate(
         view=entity.get("entity") or request.view,
         space=entity.get("space") or request.space,
-        score=request.candidate_score,
+        score=score,
         business_name=entity.get("businessName"),
         is_persisted=entity.get("isPersisted"),
     )
@@ -144,13 +146,19 @@ async def find_view_persistence_candidates(
         log_id = to_text(error.log_id)
         raise CommandCancelledError(str(error), log_id=log_id) from None
 
-    # Keep every entity that reached the requested candidate score
+    # Keep every entity that reached at least the requested candidate score
     entities = analysis["entityStats"]
-    candidates = tuple(
-        _candidate_from_entity(entity, request)
-        for entity in entities
-        if entity.get("persistencyCandidateScore") == request.candidate_score
-    )  # TODO: adjust check to greater than or equal
+    candidates: list[ViewPersistenceCandidate] = []
+    for entity in entities:
+
+        # An entity without a usable score is dropped instead of compared,
+        # because comparing None would raise a TypeError
+        score = entity.get("persistencyCandidateScore")
+        if not isinstance(score, int | float):
+            continue
+
+        if score >= request.minimum_candidate_score:
+            candidates.append(_candidate_from_entity(entity, request, score))
 
     # Fetch logId
     log_id = to_text(analysis.get("logId"))
@@ -163,7 +171,7 @@ async def find_view_persistence_candidates(
             if entities
             else FindViewPersistenceCandidatesStatus.FAILED
         ),
-        candidates=candidates,
+        candidates=tuple(candidates),
         log_id=log_id,
     )
 
@@ -199,7 +207,7 @@ async def find_view_persistence_candidates_batch(
             FindViewPersistenceCandidatesRequest(
                 view=view["name"],
                 space=view["space_name"],
-                candidate_score=request.candidate_score,
+                minimum_candidate_score=request.minimum_candidate_score,
                 timeout_seconds=request.timeout_seconds,
             )
             for view in views
