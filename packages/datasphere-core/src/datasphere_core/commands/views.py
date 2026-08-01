@@ -82,25 +82,23 @@ UNLOCK_PARTITIONS_BATCH_COMMAND_NAME = "views.unlock_partitions_batch"
 
 def _candidate_from_entity(
     entity: dict[str, Any],
-    request: FindViewPersistenceCandidatesRequest,
     score: int | float,
 ) -> ViewPersistenceCandidate:
     """
-    Converts one analyzer entity into a persistence candidate model.
+    Converts one analyzer entity into a persistence candidate model. An entity
+    usually describes a view other than the analyzed one, so its name and space
+    are read directly instead of falling back to the analyzed view.
 
     Args:
         entity (dict[str, Any]): Analyzer entity details.
-        request (FindViewPersistenceCandidatesRequest): Request supplying the
-                                                        fallback view and space
-                                                        values.
         score (int | float): Candidate score the entity actually reached.
 
     Returns:
         ViewPersistenceCandidate: Normalized candidate details.
     """
     return ViewPersistenceCandidate(
-        view=entity.get("entity") or request.view,
-        space=entity.get("space") or request.space,
+        view=entity["entity"],
+        space=entity["space"],
         score=score,
         business_name=entity.get("businessName"),
         is_persisted=entity.get("isPersisted"),
@@ -159,10 +157,10 @@ async def find_view_persistence_candidates(
             continue
 
         if score >= request.minimum_candidate_score:
-            candidates.append(_candidate_from_entity(entity, request, score))
+            candidates.append(_candidate_from_entity(entity, score))
 
     # Fetch logId
-    log_id = to_text(analysis.get("logId"))
+    log_id = to_text(analysis["logId"])
 
     return FindViewPersistenceCandidatesResult(
         view=request.view,
