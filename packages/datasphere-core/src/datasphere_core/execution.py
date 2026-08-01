@@ -60,23 +60,101 @@ class BatchResult(Protocol):
         ...
 
 
-def summarize(counts: Counter[Outcome]) -> BatchSummary:
+class BatchReporter:
     """
-    Builds the summary of a batch run from its recorded outcomes.
+    Records and reports the items of one batch. Every item is reported the
+    moment it is passed in, so a caller that persists the reported results
+    keeps them if a long run is interrupted.
 
-    Args:
-        counts (Counter[Outcome]): Number of items recorded per outcome.
-
-    Returns:
-        BatchSummary: Aggregate outcome counts of the batch.
+    Most batches do not use this directly, as run_batch runs their operation
+    and then uses this class to report each item when its operation returns.
+    However, this class can be used directly for batches where an item has no
+    operation of its own, so only the command itself can tell when the item is
+    complete.
+    Example: A batch item is an analytical model, but the work runs per view,
+    and views shared by several models are measured only once. A model is
+    complete once the last view it depends on was measured, which may happen
+    while another model is measured. Items may therefore be completed out of
+    order and from concurrent tasks. The recorded ``item_index`` always refers
+    to the position in the batch input.
     """
-    return BatchSummary(
-        total=sum(counts.values()),
-        succeeded=counts[Outcome.SUCCEEDED],
-        failed=counts[Outcome.FAILED],
-        skipped=counts[Outcome.SKIPPED],
-        timed_out=counts[Outcome.TIMED_OUT],
-    )
+
+    def __init__(
+        self,
+        context: CommandContext,
+        command: str,
+        total_items: int,
+    ) -> None:
+        """
+        Initializes the reporter for one batch run.
+
+        Args:
+            context (CommandContext): CommandContext object to report updates
+                                      to.
+            command (str): Command name used for the progress updates.
+            total_items (int): Total number of items in the batch.
+        """
+        self._context = context
+        self._command = command
+        self._total_items = total_items
+        self._counts: Counter[Outcome] = Counter()
+        self._lock = asyncio.Lock()
+
+    @property
+    def summary(self) -> BatchSummary:
+        """
+        Builds the summary from the outcomes recorded so far.
+
+        Returns:
+            BatchSummary: Aggregate outcome counts of the batch.
+        """
+        return BatchSummary(
+            total=sum(self._counts.values()),
+            succeeded=self._counts[Outcome.SUCCEEDED],
+            failed=self._counts[Outcome.FAILED],
+            skipped=self._counts[Outcome.SKIPPED],
+            timed_out=self._counts[Outcome.TIMED_OUT],
+        )
+
+    async def complete(
+        self,
+        item_index: int,
+        result: StatusResult,
+    ) -> None:
+        """
+        Records one completed batch item and reports it to the caller. Reports
+        are only delivered if the caller supplied the matching callbacks.
+
+        Args:
+            item_index (int): Index of the item in the batch input.
+            result (StatusResult): Final result of the completed item.
+        """
+        # Record and report under a lock to keep the counters consistent
+        async with self._lock:
+            self._counts[result.status.outcome] += 1
+
+            # Report phase 'advanced' for each completed batch item
+            await self._context.report(
+                batch_progress(
+                    command=self._command,
+                    phase=CommandProgressPhase.ADVANCED,
+                    summary=self.summary,
+                    total_items=self._total_items,
+                    item_index=item_index,
+                )
+            )
+
+            # Report the actual result to the caller (if a callback was
+            # supplied). This can be used to persist results of batch items
+            # while the batch itself is still running.
+            await self._context.report_batch_item_result(
+                BatchItemResult(
+                    command=self._command,
+                    item_index=item_index,
+                    total_items=self._total_items,
+                    result=result,
+                )
+            )
 
 
 def batch_progress(
@@ -443,10 +521,12 @@ async def run_batch[ItemT, ItemResultT: StatusResult](
                                                       the batch.
     """
     validate_max_concurrency(max_concurrency)
-    total_items = len(items)
     semaphore = asyncio.Semaphore(max_concurrency)
-    lock = asyncio.Lock()
-    counts: Counter[Outcome] = Counter()
+    reporter = BatchReporter(
+        context=context,
+        command=command,
+        total_items=len(items),
+    )
 
     # Create new context which disables the per-item progress callback.
     # Otherwise each item would report phases like started, failed, etc.
@@ -468,20 +548,12 @@ async def run_batch[ItemT, ItemResultT: StatusResult](
         Returns:
             ItemResultT: Result of the operation.
         """
+        # Await completion of the operation
         async with semaphore:
             result = await operation(item_context, item)
 
-        # Record and report under a lock to keep the counters consistent
-        async with lock:
-            counts[result.status.outcome] += 1
-            await _report_item(
-                context,
-                command,
-                item_index=item_index,
-                total_items=total_items,
-                result=result,
-                counts=counts,
-            )
+        # Report the result of the completed item
+        await reporter.complete(item_index, result)
         return result
 
     tasks = [
@@ -489,82 +561,4 @@ async def run_batch[ItemT, ItemResultT: StatusResult](
         for item_index, item in enumerate(items)
     ]
     results: tuple[ItemResultT, ...] = tuple(await _gather(tasks))
-    return results, summarize(counts)
-
-
-async def report_batch_results[ItemResultT: StatusResult](
-    context: CommandContext,
-    command: str,
-    results: tuple[ItemResultT, ...],
-) -> BatchSummary:
-    """
-    Records and reports results that were already computed. This is needed by
-    commands that can only classify their items once every result is known
-    (e.g. after deduplicating views across analytical models).
-
-    Args:
-        context (CommandContext): CommandContext object to report updates to.
-        command (str): Command name used for the progress updates.
-        results (tuple[ItemResultT, ...]): Completed results to report.
-
-    Returns:
-        BatchSummary: Aggregate outcome counts of the reported results.
-    """
-    total_items = len(results)
-    counts: Counter[Outcome] = Counter()
-    for item_index, result in enumerate(results):
-        counts[result.status.outcome] += 1
-        await _report_item(
-            context,
-            command,
-            item_index=item_index,
-            total_items=total_items,
-            result=result,
-            counts=counts,
-        )
-    return summarize(counts)
-
-
-async def _report_item(
-    context: CommandContext,
-    command: str,
-    *,
-    item_index: int,
-    total_items: int,
-    result: object,
-    counts: Counter[Outcome],
-) -> None:
-    """
-    Reports one completed batch item and its result to the caller. Reports are
-    only delivered if the caller supplied the matching callbacks.
-
-    Args:
-        context (CommandContext): CommandContext object to report updates to.
-        command (str): Command name used for the progress updates.
-        item_index (int): Index of the completed batch item.
-        total_items (int): Total number of items in the batch.
-        result (object): Command-specific batch item result.
-        counts (Counter[Outcome]): Outcomes recorded so far.
-    """
-    # Report phase 'advanced' for the completed batch item
-    await context.report(
-        batch_progress(
-            command,
-            CommandProgressPhase.ADVANCED,
-            summarize(counts),
-            total_items=total_items,
-            item_index=item_index,
-        )
-    )
-
-    # Report the actual result to the caller (if a callback was supplied)
-    # This can be used to persist results of batch items while the batch
-    # itself is still running.
-    await context.report_batch_item_result(
-        BatchItemResult(
-            command=command,
-            item_index=item_index,
-            total_items=total_items,
-            result=result,
-        )
-    )
+    return results, reporter.summary

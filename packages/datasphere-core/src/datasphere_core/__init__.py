@@ -19,11 +19,11 @@ from datasphere_core.errors import (
     TokenStoreError,
 )
 from datasphere_core.execution import (
+    BatchReporter,
     CommandHandler,
     batch_command,
     command,
     execute_with_concurrency_limit,
-    report_batch_results,
     run_batch,
 )
 from datasphere_core.registry import COMMANDS

@@ -10,10 +10,10 @@ from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
 from datasphere_core.definitions import CommandDefinition
 from datasphere_core.execution import (
+    BatchReporter,
     batch_command,
     command,
     execute_with_concurrency_limit,
-    report_batch_results,
     run_batch,
 )
 from datasphere_core.models.analytical_models import (
@@ -57,7 +57,7 @@ type ResolvedModel = tuple[
     AnalyticalModelsDetailsDict | None,
 ]
 type DependencyItem = tuple[ResolvedModel, dict[str, str]]
-type ViewKey = tuple[str, str]
+type ViewMeasurement = MeasureAnalyticalModelViewPersistenceItemResult
 
 
 def _select_models(
@@ -253,52 +253,44 @@ async def _resolve_selected_models(
 
 
 def _deduplicate_dependencies(
-    results: tuple[GetAnalyticalModelViewDependenciesResult, ...],
-) -> tuple[GetAnalyticalModelViewDependenciesResult, ...]:
+    result: GetAnalyticalModelViewDependenciesResult,
+    seen: set[str],
+) -> GetAnalyticalModelViewDependenciesResult:
     """
-    Removes repeated resolved views while preserving the result order. This
-    ensures that views shared by several analytical models are only processed
-    once.
+    Removes the views of one analytical model that an earlier model already
+    claimed. This ensures that views shared by several analytical models are
+    only processed once.
+
+    The 'seen' set is carried across calls and grows with every kept view, so
+    results have to be deduplicated in their input order.
 
     Args:
-        results (tuple[GetAnalyticalModelViewDependenciesResult, ...]):
-            Dependency results to deduplicate.
+        result (GetAnalyticalModelViewDependenciesResult): Dependency result to
+                                                           deduplicate.
+        seen (set[str]): IDs of the views claimed by earlier results.
 
     Returns:
-        tuple[GetAnalyticalModelViewDependenciesResult, ...]: Results with
-                                                              duplicate
-                                                              dependencies
-                                                              removed.
+        GetAnalyticalModelViewDependenciesResult: Result with the duplicate
+                                                  dependencies removed.
     """
-    seen: set[tuple[str | None, str]] = set()
-    deduplicated: list[GetAnalyticalModelViewDependenciesResult] = []
+    dependencies: list[AnalyticalModelViewDependency] = []
 
-    # Iterate over each analytical model
-    for result in results:
-        dependencies: list[AnalyticalModelViewDependency] = []
+    # Iterate over each dependency of the analytical model
+    for dependency in result.dependencies:
 
-        # Iterate over each dependency of the analytical model
-        for dependency in result.dependencies:
-
-            # Keep every view that could not be mapped
-            if dependency.status is AnalyticalModelDependencyStatus.NOT_FOUND:
-                dependencies.append(dependency)
-                continue
-
-            # Skip previously seen views and remember new ones
-            key = (dependency.space, dependency.view_id)
-            if key in seen:
-                continue
-
-            seen.add(key)
+        # Keep every view that could not be mapped
+        if dependency.status is AnalyticalModelDependencyStatus.NOT_FOUND:
             dependencies.append(dependency)
+            continue
 
-        # Add new result without duplicates to deduplicated
-        deduplicated.append(
-            replace(result, dependencies=tuple(dependencies))
-        )
+        # Skip previously seen views and remember new ones
+        if dependency.view_id in seen:
+            continue
 
-    return tuple(deduplicated)
+        seen.add(dependency.view_id)
+        dependencies.append(dependency)
+
+    return replace(result, dependencies=tuple(dependencies))
 
 
 @command(GET_VIEW_DEPENDENCIES_COMMAND_NAME)
@@ -372,22 +364,71 @@ async def get_analytical_model_view_dependencies_batch(
             summary=summary,
         )
 
-    # Deduplication needs every result before any of them is final, so the
-    # results are resolved first and reported afterwards
-    results = await execute_with_concurrency_limit(
-        items=tuple((model, spaces_by_view_id) for model in selected),
-        operation=lambda item: _resolve_dependencies(context, item),
-        max_concurrency=request.max_concurrency,
+    # Deduplication keeps the first occurrence of a view, so a model is only
+    # final once every earlier model was resolved. The tasks still run
+    # concurrently, but only the deduplication and reporting follow input
+    # order.
+    semaphore = asyncio.Semaphore(request.max_concurrency)
+
+    async def resolve(
+        item: DependencyItem,
+    ) -> GetAnalyticalModelViewDependenciesResult:
+        """
+        Resolves the dependencies of one model once the semaphore admits it.
+
+        Args:
+            item (DependencyItem): Model linked to its metadata and the mapping
+                                   of view IDs to their spaces.
+
+        Returns:
+            GetAnalyticalModelViewDependenciesResult: Resolved view
+                                                      dependencies.
+        """
+        async with semaphore:
+            return await _resolve_dependencies(context, item)
+
+    # Create tasks to resolve dependencies of every selected analytical model
+    # with bounded concurrency
+    tasks = [
+        asyncio.create_task(resolve(item=(model, spaces_by_view_id)))
+        for model in selected
+    ]
+
+    # Create reporter to report every model as soon as its last view was
+    # resolved
+    reporter = BatchReporter(
+        context=context,
+        command=GET_VIEW_DEPENDENCIES_BATCH_COMMAND_NAME,
+        total_items=len(tasks),
     )
-    results = _deduplicate_dependencies(results)
-    summary = await report_batch_results(
-        context,
-        GET_VIEW_DEPENDENCIES_BATCH_COMMAND_NAME,
-        results,
-    )
+
+    # Start resolving every model's dependencies
+    seen: set[str] = set()
+    results = []
+    try:
+        for item_index, task in enumerate(tasks):
+            resolved_dependencies_result = await task
+
+            # Deduplicate the result using the previously seen views
+            result = _deduplicate_dependencies(
+                result=resolved_dependencies_result,
+                seen=seen,
+            )
+            results.append(result)
+
+            # Report results
+            await reporter.complete(item_index, result)
+
+    # Cancel all pending tasks on BaseException (includes CancelledError)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise  # to re-raise the exception
+
     return GetAnalyticalModelViewDependenciesBatchResult(
-        results=results,
-        summary=summary,
+        results=tuple(results),
+        summary=reporter.summary,
     )
 
 
@@ -622,11 +663,91 @@ async def _measure_view(
     )
 
 
+def _create_measurement_result_for_model(
+    result: GetAnalyticalModelViewDependenciesResult,
+    measurement_by_view_id: dict[str, ViewMeasurement],
+) -> MeasureAnalyticalModelViewPersistenceResult:
+    """
+    Builds the measurement result of one analytical model from the already
+    measured views it depends on.
+
+    Args:
+        result (GetAnalyticalModelViewDependenciesResult): Model with the
+                                                           dependencies to
+                                                           project.
+        measurement_by_view_id (dict[str, ViewMeasurement]): Mapping of every
+                                                             view ID the model
+                                                             depends on to
+                                                             their measurement
+                                                             results.
+
+    Returns:
+        MeasureAnalyticalModelViewPersistenceResult: Result of the model.
+    """
+    # A missing model has no dependencies to measure
+    if result.status is (
+        AnalyticalModelDependenciesStatus.ANALYTICAL_MODEL_NOT_FOUND
+    ):
+        return MeasureAnalyticalModelViewPersistenceResult(
+            analytical_model_name=result.analytical_model_name,
+            space=result.space,
+            status=AnalyticalModelPersistenceStatus.ANALYTICAL_MODEL_NOT_FOUND,
+        )
+
+    # Views shared by several analytical models are measured once and the
+    # measurement is projected onto every model that depends on them
+    dependencies = tuple(
+        measurement_by_view_id[dependency.view_id]
+        if dependency.space is not None
+        else MeasureAnalyticalModelViewPersistenceItemResult(
+            view_id=dependency.view_id,
+            view_name=dependency.view_name,
+            space=None,
+            status=(
+                AnalyticalModelPersistenceItemStatus.DEPENDENCY_NOT_FOUND
+            ),
+            manual_intervention=True,
+        )
+        for dependency in result.dependencies
+    )
+
+    # Derive status from all view measurements of the analytical model
+    if any(
+        item.status
+        in {
+            AnalyticalModelPersistenceItemStatus.PERSIST_TIMED_OUT,
+            AnalyticalModelPersistenceItemStatus.CLEANUP_TIMED_OUT,
+        }
+        for item in dependencies
+    ):
+        status = AnalyticalModelPersistenceStatus.TIMED_OUT
+    elif any(
+        item.status
+        not in {
+            AnalyticalModelPersistenceItemStatus.COMPLETED,
+            AnalyticalModelPersistenceItemStatus.ALREADY_PERSISTED,
+        }
+        for item in dependencies
+    ):
+        status = AnalyticalModelPersistenceStatus.FAILED
+    else:
+        status = AnalyticalModelPersistenceStatus.COMPLETED
+
+    return MeasureAnalyticalModelViewPersistenceResult(
+        analytical_model_name=result.analytical_model_name,
+        space=result.space,
+        analytical_model_id=result.analytical_model_id,
+        status=status,
+        dependencies=dependencies,
+    )
+
+
 async def _measure_dependencies(
     context: CommandContext,
     dependency_results: tuple[GetAnalyticalModelViewDependenciesResult, ...],
     timeout_seconds: float,
     max_concurrency: int,
+    reporter: BatchReporter | None = None,
 ) -> tuple[MeasureAnalyticalModelViewPersistenceResult, ...]:
     """
     Measures every unique view once and projects its measurement onto each
@@ -638,116 +759,93 @@ async def _measure_dependencies(
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
-        dependency_results (tuple[GetAnalyticalModelViewDependenciesResult,
-                                  ...]):
-            Analytical models with the dependencies to measure.
+        dependency_results (tuple[GetAnalyticalModelViewDependenciesResult, \
+                                  ...]): Analytical models with the
+                                         dependencies to measure.
         timeout_seconds (float): Maximum duration for persisting each view.
         max_concurrency (int): Maximum amount of concurrent tasks.
+        reporter (BatchReporter | None, optional): Reporter that receives every
+                                                   model as soon as its last
+                                                   view was measured. None if
+                                                   a sinle analytical model is
+                                                   measured. Defaults to None.
 
     Returns:
         tuple[MeasureAnalyticalModelViewPersistenceResult, ...]: Ordered
             results of the measured view persistence runtimes.
     """
-    # Collect every resolved view exactly once
+    # Collect every resolved view exactly once and remember which views each
+    # model is still waiting for. A model is final once its set runs empty.
     unique_dependencies: list[AnalyticalModelViewDependency] = []
-    seen: set[ViewKey] = set()
-    for result in dependency_results:
+    collected: set[str] = set()
+    pending: dict[int, set[str]] = {}
+    for index, result in enumerate(dependency_results):
+        pending[index] = set()
         for dependency in result.dependencies:
             if dependency.space is None:
                 continue
-            key = (dependency.space, dependency.view_name)
-            if key not in seen:
-                seen.add(key)
+            pending[index].add(dependency.view_id)
+            if dependency.view_id not in collected:
+                collected.add(dependency.view_id)
                 unique_dependencies.append(dependency)
 
-    # Measure the unique views with concurrency
-    measured = await execute_with_concurrency_limit(
+    measurement_by_view_id: dict[str, ViewMeasurement] = {}
+    results: dict[int, MeasureAnalyticalModelViewPersistenceResult] = {}
+    lock = asyncio.Lock()
+
+    async def finalize(indexes: list[int]) -> None:
+        """
+        Projects and reports every model that just became final (meaning all
+        the persistence runtimes of its views have been measured).
+
+        Args:
+            indexes (list[int]): Indexes of the models to finalize.
+        """
+        for index in indexes:
+            measurement_result = _create_measurement_result_for_model(
+                result=dependency_results[index],
+                measurement_by_view_id=measurement_by_view_id,
+            )
+            results[index] = measurement_result
+            if reporter is not None:
+                await reporter.complete(index, measurement_result)
+
+    # Models without any measurable view are final right away
+    async with lock:
+        finished = [index for index, keys in pending.items() if not keys]
+        for index in finished:
+            del pending[index]
+    await finalize(finished)
+
+    async def measure(dependency: AnalyticalModelViewDependency) -> None:
+        """
+        Callable that measures one view and finalizes every model that only
+        waited for it.
+
+        Args:
+            dependency (AnalyticalModelViewDependency): View to measure.
+        """
+        measurement = await _measure_view(context, dependency, timeout_seconds)
+
+        # Record the measurement and collect the models it completed. Reporting
+        # happens outside the lock because the BatchReporter holds its own
+        # lock.
+        async with lock:
+            measurement_by_view_id[dependency.view_id] = measurement
+            finished = []
+            for index, view_ids in list(pending.items()):
+                view_ids.discard(dependency.view_id)
+                if not view_ids:
+                    finished.append(index)
+                    del pending[index]
+        await finalize(finished)
+
+    await execute_with_concurrency_limit(
         items=tuple(unique_dependencies),
-        operation=lambda dependency: _measure_view(
-            context,
-            dependency,
-            timeout_seconds,
-        ),
+        operation=measure,
         max_concurrency=max_concurrency,
     )
-    measurement_by_view = {
-        (item.space, item.view_name): item for item in measured
-    }
-
-    # Project the measurements back onto every analytical model
-    results: list[MeasureAnalyticalModelViewPersistenceResult] = []
-    for result in dependency_results:
-        if result.status is (
-            AnalyticalModelDependenciesStatus.ANALYTICAL_MODEL_NOT_FOUND
-        ):
-            results.append(
-                MeasureAnalyticalModelViewPersistenceResult(
-                    analytical_model_name=result.analytical_model_name,
-                    space=result.space,
-                    status=(
-                        AnalyticalModelPersistenceStatus
-                        .ANALYTICAL_MODEL_NOT_FOUND
-                    ),
-                )
-            )
-            continue
-
-        # Several analytical models can reference the same view under
-        # their own view ID, so the shared measurement keeps that ID per model
-        dependencies = tuple(
-            replace(
-                measurement_by_view[
-                    (dependency.space, dependency.view_name)
-                ],
-                view_id=dependency.view_id,
-            )
-            if dependency.space is not None
-            else MeasureAnalyticalModelViewPersistenceItemResult(
-                view_id=dependency.view_id,
-                view_name=dependency.view_name,
-                space=None,
-                status=(
-                    AnalyticalModelPersistenceItemStatus.DEPENDENCY_NOT_FOUND
-                ),
-                manual_intervention=True,
-            )
-            for dependency in result.dependencies
-        )
-
-        # Derive status from all view measurements of the analytical model
-        if any(
-                item.status
-                in {
-                    AnalyticalModelPersistenceItemStatus.PERSIST_TIMED_OUT,
-                    AnalyticalModelPersistenceItemStatus.CLEANUP_TIMED_OUT,
-                }
-                for item in dependencies
-            ):
-                status = AnalyticalModelPersistenceStatus.TIMED_OUT
-        elif any(
-            item.status
-            not in {
-                AnalyticalModelPersistenceItemStatus.COMPLETED,
-                AnalyticalModelPersistenceItemStatus.ALREADY_PERSISTED,
-            }
-            for item in dependencies
-        ):
-            status = AnalyticalModelPersistenceStatus.FAILED
-        else:
-            status = AnalyticalModelPersistenceStatus.COMPLETED
-
-        # Add analytical model with all its view runtime measurements to the
-        # results
-        results.append(
-            MeasureAnalyticalModelViewPersistenceResult(
-                analytical_model_name=result.analytical_model_name,
-                space=result.space,
-                analytical_model_id=result.analytical_model_id,
-                status=status,
-                dependencies=dependencies,
-            )
-        )
-    return tuple(results)
+    return tuple(results[index] for index in range(len(dependency_results)))
 
 
 @command(MEASURE_VIEW_PERSISTENCE_COMMAND_NAME)
@@ -824,21 +922,22 @@ async def measure_analytical_model_view_persistence_batch(
         max_concurrency=request.max_concurrency,
     )
 
-    # Shared views are measured only once, so the results are only final after
-    # every measurement completed and can only be reported afterwards
+    # Shared views are measured only once, so a model becomes final with its
+    # last measured view. The reporter delivers it right then, which lets the
+    # caller persist finished models while the run is still going.
+    reporter = BatchReporter(
+        context=context,
+        command=MEASURE_VIEW_PERSISTENCE_BATCH_COMMAND_NAME,
+        total_items=len(dependency_results),
+    )
     results = await _measure_dependencies(
         context=context,
         dependency_results=dependency_results,
         timeout_seconds=request.timeout_seconds,
         max_concurrency=request.max_concurrency,
+        reporter=reporter,
     )
-
-    # Report results
-    summary = await report_batch_results(
-        context=context,
-        command=MEASURE_VIEW_PERSISTENCE_BATCH_COMMAND_NAME,
-        results=results,
-    )
+    summary = reporter.summary
     return MeasureAnalyticalModelViewPersistenceBatchResult(
         results=results,
         summary=summary,
