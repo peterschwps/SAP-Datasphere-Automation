@@ -242,6 +242,9 @@ async def configure_remote_table_statistics_batch(
         if request.tables is not None
         else tuple(sorted(all_tables))
     )
+
+    # Discovery cannot miss a table because the names come from
+    # all_tables, but an explicit selection can name an unknown one
     items = tuple(
         (
             ConfigureRemoteTableStatisticsRequest(
@@ -294,6 +297,9 @@ async def refresh_remote_table_statistics_batch(
         if request.tables is not None
         else tuple(sorted(all_tables))
     )
+
+    # Discovery cannot miss a table because the names come from
+    # all_tables, but an explicit selection can name an unknown one
     items = tuple(
         (
             RefreshRemoteTableStatisticsRequest(
