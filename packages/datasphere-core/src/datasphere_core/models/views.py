@@ -377,7 +377,7 @@ class PersistViewResult:
     view: str
     space: str
     status: PersistViewStatus
-    sap_status: str | None = None
+    log_status: str | None = None
     log_id: str | None = None
     runtime_seconds: int | None = None
 
@@ -437,7 +437,7 @@ class UnpersistViewResult:
     view: str
     space: str
     status: UnpersistViewStatus
-    sap_status: str | None = None
+    log_status: str | None = None
     log_id: str | None = None
     runtime_seconds: int | None = None
 

@@ -67,7 +67,7 @@ class RunTaskChainResult:
     chain: str
     space: str
     status: TaskChainStatus
-    sap_status: str | None = None
+    log_status: str | None = None
     log_id: str | None = None
     runtime_seconds: int | None = None
 

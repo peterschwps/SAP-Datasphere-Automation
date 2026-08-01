@@ -505,7 +505,7 @@ async def persist_view(
         view=request.view,
         space=request.space,
         status=status,
-        sap_status=to_text(details.get("status")),
+        log_status=to_text(details.get("status")),
         log_id=to_text(details.get("logId")),
         runtime_seconds=runtime_to_seconds(details),
     )
@@ -598,7 +598,7 @@ async def unpersist_view(
         view=request.view,
         space=request.space,
         status=status,
-        sap_status=to_text(details.get("status")),
+        log_status=to_text(details.get("status")),
         log_id=to_text(details.get("logId")),
         runtime_seconds=runtime_to_seconds(details),
     )

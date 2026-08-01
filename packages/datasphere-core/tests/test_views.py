@@ -84,7 +84,7 @@ async def test_persist_view_maps_a_completed_run() -> None:
 
     # The millisecond runtime is rounded to whole seconds
     assert result.status is PersistViewStatus.COMPLETED
-    assert result.sap_status == "COMPLETED"
+    assert result.log_status == "COMPLETED"
     assert result.log_id == "5"
     assert result.runtime_seconds == 2
 

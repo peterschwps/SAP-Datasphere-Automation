@@ -75,7 +75,7 @@ async def run_task_chain(
         chain=request.chain,
         space=request.space,
         status=status,
-        sap_status=to_text(log_details.get("status")),
+        log_status=to_text(log_details.get("status")),
         log_id=to_text(log_details.get("logId")),
         runtime_seconds=(
             runtime_to_seconds(log_details) if success else None

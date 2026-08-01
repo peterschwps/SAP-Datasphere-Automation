@@ -219,9 +219,9 @@ class MeasureAnalyticalModelViewPersistenceItemResult:
     status: AnalyticalModelPersistenceItemStatus
     previously_persisted: bool | None = None
     runtime_seconds: int | None = None
-    persistence_sap_status: str | None = None
+    persistence_log_status: str | None = None
     persistence_log_id: str | None = None
-    cleanup_sap_status: str | None = None
+    cleanup_log_status: str | None = None
     cleanup_log_id: str | None = None
     persistence_removed: bool | None = None
     manual_intervention: bool = False

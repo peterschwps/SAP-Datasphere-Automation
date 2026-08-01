@@ -484,11 +484,11 @@ def _create_measurement_result(
         status=status,
         previously_persisted=previously_persisted,
         runtime_seconds=runtime_to_seconds(persistence_details),
-        persistence_sap_status=to_text(persistence_details.get("status")),
+        persistence_log_status=to_text(persistence_details.get("status")),
         persistence_log_id=(
             persistence_log_id or to_text(persistence_details.get("logId"))
         ),
-        cleanup_sap_status=to_text(cleanup_details.get("status")),
+        cleanup_log_status=to_text(cleanup_details.get("status")),
         cleanup_log_id=(
             cleanup_log_id or to_text(cleanup_details.get("logId"))
         ),

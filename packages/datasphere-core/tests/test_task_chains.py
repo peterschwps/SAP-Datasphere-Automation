@@ -69,7 +69,7 @@ async def test_run_task_chain_maps_a_completed_run() -> None:
         chain="CHAIN_A",
         space="SPACE_A",
         status=TaskChainStatus.COMPLETED,
-        sap_status="COMPLETED",
+        log_status="COMPLETED",
         log_id="123",
         runtime_seconds=65,
     )
