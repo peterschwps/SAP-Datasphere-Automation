@@ -1,7 +1,12 @@
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
 from datasphere_core import CommandContext
+from datasphere_core.commands.analytical_models import (
+    get_analytical_model_view_dependencies_batch,
+    measure_analytical_model_view_persistence_batch,
+)
 from datasphere_core.models.analytical_models import (
     AnalyticalModelReference,
     GetAnalyticalModelViewDependenciesBatchRequest,
@@ -10,9 +15,8 @@ from datasphere_core.models.analytical_models import (
     MeasureAnalyticalModelViewPersistenceBatchResult,
     MeasureAnalyticalModelViewPersistenceResult,
 )
-from datasphere_core.models.common import BatchItemResult
+from datasphere_core.models.common import BatchItemResult, Outcome
 
-from datasphere_cli.actions.dispatch import dispatch_command
 from datasphere_cli.files.records import (
     AnalyticalModelDependenciesBatchRecord,
     AnalyticalModelPersistenceBatchRecord,
@@ -40,6 +44,15 @@ def _log_summary(
     result: AnalyticalModelBatchResult,
     path: Path,
 ) -> None:
+    """
+    Logs the outcome counts of a batch and where its result was written.
+
+    Args:
+        command (str): Core command the results belong to.
+        result (AnalyticalModelBatchResult): Completed batch result to
+                                             summarize.
+        path (Path): Path the result file was written to.
+    """
     summary = result.summary
     logger.info(
         "%s: %s succeeded, %s failed, %s skipped, %s timed out.",
@@ -53,6 +66,15 @@ def _log_summary(
 
 
 def _summary_record(result: AnalyticalModelBatchResult) -> BatchSummaryRecord:
+    """
+    Converts a batch summary into its JSON record.
+
+    Args:
+        result (AnalyticalModelBatchResult): Completed batch result to convert.
+
+    Returns:
+        BatchSummaryRecord: Outcome counts of the batch.
+    """
     summary = result.summary
     return {
         "total": summary.total,
@@ -66,6 +88,20 @@ def _summary_record(result: AnalyticalModelBatchResult) -> BatchSummaryRecord:
 def _measure_output(
     results: tuple[MeasureAnalyticalModelViewPersistenceResult, ...],
 ) -> AnalyticalModelPersistenceBatchRecord:
+    """
+    Converts persistence measurements into their JSON record. The summary is
+    recomputed here because checkpoints are written while the batch is still
+    running.
+
+    Args:
+        results (tuple[MeasureAnalyticalModelViewPersistenceResult, ...]):
+            Measurements completed so far.
+
+    Returns:
+        AnalyticalModelPersistenceBatchRecord: Measurements and their summary.
+    """
+    # Every model carries its dependencies, so the record is built in two
+    # nested passes: one per model, one per measured view
     result_records: list[AnalyticalModelPersistenceResultRecord] = []
     for item in results:
         dependency_records: list[AnalyticalModelPersistenceItemRecord] = []
@@ -78,11 +114,11 @@ def _measure_output(
                     "status": dependency.status,
                     "previously_persisted": dependency.previously_persisted,
                     "runtime_seconds": dependency.runtime_seconds,
-                    "persistence_sap_status": (
-                        dependency.persistence_sap_status
+                    "persistence_log_status": (
+                        dependency.persistence_log_status
                     ),
-                    "persistence_log_id": (dependency.persistence_log_id),
-                    "cleanup_sap_status": dependency.cleanup_sap_status,
+                    "persistence_log_id": dependency.persistence_log_id,
+                    "cleanup_log_status": dependency.cleanup_log_status,
                     "cleanup_log_id": dependency.cleanup_log_id,
                     "persistence_removed": dependency.persistence_removed,
                     "manual_intervention": dependency.manual_intervention,
@@ -98,16 +134,16 @@ def _measure_output(
             }
         )
 
+    # Count different statuses
+    counts = Counter(item.status.outcome for item in results)
     return {
         "results": result_records,
         "summary": {
             "total": len(results),
-            "succeeded": sum(item.status == "completed" for item in results),
-            "failed": sum(item.status == "failed" for item in results),
-            "skipped": sum(
-                item.status == "analytical_model_not_found" for item in results
-            ),
-            "timed_out": sum(item.status == "timed_out" for item in results),
+            "succeeded": counts[Outcome.SUCCEEDED],
+            "failed": counts[Outcome.FAILED],
+            "skipped": counts[Outcome.SKIPPED],
+            "timed_out": counts[Outcome.TIMED_OUT],
         },
     }
 
@@ -119,15 +155,21 @@ async def export_analytical_model_view_dependencies(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> GetAnalyticalModelViewDependenciesBatchResult:
-    """Export analytical-model dependencies through the Core command.
+    """
+    Exports all view dependencies of analytical models.
 
     Args:
         context (CommandContext): Core context with the authenticated client.
         space (str | None, optional): Space to limit dependency discovery.
+                                      Defaults to None.
         deduplicate_views (bool, optional): Whether to remove duplicate views.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+                                            Defaults to False.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
 
     Returns:
         GetAnalyticalModelViewDependenciesBatchResult: Dependency results.
@@ -142,13 +184,12 @@ async def export_analytical_model_view_dependencies(
         deduplicate_views=deduplicate_views,
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _DEPENDENCIES_COMMAND,
+    result = await get_analytical_model_view_dependencies_batch(
         context,
         request,
-        GetAnalyticalModelViewDependenciesBatchRequest,
-        GetAnalyticalModelViewDependenciesBatchResult,
     )
+
+    # Loop over all views inside all models to build the JSON record
     output: AnalyticalModelDependenciesBatchRecord = {
         "results": [
             {
@@ -170,12 +211,16 @@ async def export_analytical_model_view_dependencies(
         ],
         "summary": _summary_record(result),
     }
+
+    # Write result JSON
     path = write_result_json(
         _DEPENDENCIES_COMMAND,
         output,
         workspace_root,
         space=space,
     )
+
+    # Log outcome counts
     _log_summary(_DEPENDENCIES_COMMAND, result, path)
     return result
 
@@ -186,17 +231,24 @@ async def measure_analytical_model_view_persistence_from_file(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> MeasureAnalyticalModelViewPersistenceBatchResult:
-    """Measure models and write only the final result atomically.
-
-    The Core checkpoint callback atomically persists completed model results
-    while the measurement is running.
+    """
+    Measures the persistence runtimes of view dependencies of analytical
+    models. Writes the result after every completed model to ensure that
+    results are persisted as soon as possible.
 
     Args:
         context (CommandContext): Core context with the authenticated client.
         timeout_seconds (float, optional): Maximum runtime for each model.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+                                           Defaults to 3600.0 seconds.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
+
+    Raises:
+        TypeError: If a checkpoint carries an unexpected result type.
 
     Returns:
         MeasureAnalyticalModelViewPersistenceBatchResult: Measurement results.
@@ -214,9 +266,21 @@ async def measure_analytical_model_view_persistence_from_file(
         timeout_seconds=timeout_seconds,
         max_concurrency=max_concurrency,
     )
+
+    # Dict to store measurements of completed models
     checkpointed: dict[int, MeasureAnalyticalModelViewPersistenceResult] = {}
 
     async def checkpoint(update: BatchItemResult) -> None:
+        """
+        Callable that writes every completed measurement of an analytical model
+        after it is completed.
+
+        Args:
+            update (BatchItemResult): Result of one completed model.
+
+        Raises:
+            TypeError: If the checkpoint carries an unexpected result.
+        """
         if not isinstance(
             update.result, MeasureAnalyticalModelViewPersistenceResult
         ):
@@ -225,24 +289,30 @@ async def measure_analytical_model_view_persistence_from_file(
             )
         item = update.result
         checkpointed[update.item_index] = item
+
+        # Rewrite the result JSON
+        # Models finish in any order, so the file is rebuilt in input order
         ordered = tuple(checkpointed[index] for index in sorted(checkpointed))
         write_result_json(
-            _MEASURE_COMMAND,
-            _measure_output(ordered),
-            workspace_root,
+            command=_MEASURE_COMMAND,
+            data=_measure_output(ordered),
+            root=workspace_root,
         )
 
-    result = await dispatch_command(
-        _MEASURE_COMMAND,
+    # Start the batch measurement with the callback to write results after
+    # each completed model
+    result = await measure_analytical_model_view_persistence_batch(
         replace(context, batch_item_result_callback=checkpoint),
         request,
-        MeasureAnalyticalModelViewPersistenceBatchRequest,
-        MeasureAnalyticalModelViewPersistenceBatchResult,
     )
+
+    # Write result JSON
     path = write_result_json(
         _MEASURE_COMMAND,
         _measure_output(result.results),
         workspace_root,
     )
+
+    # Log outcome counts
     _log_summary(_MEASURE_COMMAND, result, path)
     return result
