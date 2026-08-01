@@ -21,7 +21,7 @@ def to_text(value: object) -> str | None:
 
 def runtime_to_seconds(log_details: dict[str, Any]) -> int | None:
     """
-    Converts the millisecond runtime of an Datasphere log entry to rounded
+    Converts the millisecond runtime of a Datasphere log entry to rounded
     seconds.
 
     Args:
