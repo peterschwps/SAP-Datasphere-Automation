@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Self
 
-MAXIMUM_BATCH_CONCURRENCY = 32
+MAXIMUM_BATCH_CONCURRENCY = 10
 
 
 class CommandProgressPhase(StrEnum):
