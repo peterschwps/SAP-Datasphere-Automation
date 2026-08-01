@@ -18,7 +18,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Non-interactive mode: if arguments are provided, run the direct command
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments:
-        from datasphere_cli.cli.commands import run
+        from datasphere_cli.cli.task_chains import run
 
         return run(arguments)
 
