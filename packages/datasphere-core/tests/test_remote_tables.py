@@ -168,6 +168,41 @@ async def test_configure_batch_discovers_and_classifies_every_table() -> None:
     )
 
 
+async def test_configure_batch_reports_an_unknown_table_as_not_found(
+) -> None:
+    """
+    Checks that a table the space does not hold is reported as not found.
+    """
+    async def create_statistics(
+        table: str,
+        statistics_type: str,
+        space: str,
+    ) -> str:
+        return "created"
+
+    result = await configure_remote_table_statistics_batch(
+        CommandContext(
+            client=_client(
+                {"TABLE_A": _table()},
+                create_statistics=create_statistics,
+            )
+        ),
+        ConfigureRemoteTableStatisticsBatchRequest(
+            tables=("TABLE_A", "TABLE_MISSING"),
+            space="SPACE_A",
+            statistics_type=StatisticsType.HISTOGRAM,
+        ),
+    )
+
+    # Both commands name the same cause the same way, even though only the
+    # explicit table selection can reach it
+    assert [item.status for item in result.results] == [
+        ConfigureRemoteTableStatisticsStatus.CREATED,
+        ConfigureRemoteTableStatisticsStatus.TABLE_NOT_FOUND,
+    ]
+    assert result.summary.failed == 1
+
+
 async def test_refresh_batch_classifies_selected_tables() -> None:
     """
     Checks that a refresh batch classifies each selected table.
