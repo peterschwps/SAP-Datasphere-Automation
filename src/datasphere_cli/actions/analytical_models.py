@@ -100,11 +100,13 @@ def _measure_output(
     Returns:
         AnalyticalModelPersistenceBatchRecord: Measurements and their summary.
     """
-    # Every model carries its dependencies, so the record is built in two
-    # nested passes: one per model, one per measured view
     result_records: list[AnalyticalModelPersistenceResultRecord] = []
+
+    # Iterate over analytical models
     for item in results:
         dependency_records: list[AnalyticalModelPersistenceItemRecord] = []
+
+        # Iterate over view dependencies and add them to results
         for dependency in item.dependencies:
             dependency_records.append(
                 {
@@ -124,6 +126,8 @@ def _measure_output(
                     "manual_intervention": dependency.manual_intervention,
                 }
             )
+
+        # Add analytical model and its dependencies to the result
         result_records.append(
             {
                 "analytical_model": item.analytical_model_name,
@@ -174,11 +178,14 @@ async def export_analytical_model_view_dependencies(
     Returns:
         GetAnalyticalModelViewDependenciesBatchResult: Dependency results.
     """
+    # Write empty result file
     initialize_result(
-        _DEPENDENCIES_COMMAND,
-        workspace_root,
+        command=_DEPENDENCIES_COMMAND,
+        root=workspace_root,
         space=space,
     )
+
+    # Resolve all analytical models and their view dependencies
     request = GetAnalyticalModelViewDependenciesBatchRequest(
         space=space,
         deduplicate_views=deduplicate_views,
@@ -214,9 +221,9 @@ async def export_analytical_model_view_dependencies(
 
     # Write result JSON
     path = write_result_json(
-        _DEPENDENCIES_COMMAND,
-        output,
-        workspace_root,
+        command=_DEPENDENCIES_COMMAND,
+        data=output,
+        root=workspace_root,
         space=space,
     )
 
@@ -253,7 +260,10 @@ async def measure_analytical_model_view_persistence_from_file(
     Returns:
         MeasureAnalyticalModelViewPersistenceBatchResult: Measurement results.
     """
+    # Write empty result file
     initialize_result(_MEASURE_COMMAND, workspace_root)
+
+    # Build request from task file
     records = read_task_csv(_MEASURE_COMMAND, workspace_root)
     request = MeasureAnalyticalModelViewPersistenceBatchRequest(
         analytical_models=tuple(
