@@ -624,6 +624,8 @@ async def _measure_view(
             space,
             timeout_seconds,
         )
+
+    # If timeout is exceeded
     except ViewPersistenceTimeout as error:
         return _create_measurement_result(
             dependency,
@@ -633,13 +635,17 @@ async def _measure_view(
             cleanup_log_id=to_text(error.log_id),
             manual_intervention=True,
         )
-    except Exception as error:
+
+    # If any other errors occur
+    # Only HTTP and parsing errors reach this branch. A cancellation is turned
+    # into a return value by _run_cleanup, a timeout is caught above, and
+    # neither of the remaining errors carries a log ID.
+    except Exception:
         return _create_measurement_result(
             dependency,
             status=AnalyticalModelPersistenceItemStatus.CLEANUP_FAILED,
             previously_persisted=False,
             persistence_details=persistence_details,
-            cleanup_log_id=to_text(getattr(error, "log_id", None)),
             manual_intervention=True,
         )
 
