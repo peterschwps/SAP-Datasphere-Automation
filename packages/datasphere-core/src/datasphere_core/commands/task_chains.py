@@ -1,11 +1,9 @@
 from typing import Any
 
-from datasphere_api import TaskChainCancelled, TaskChainTimeout
-
 from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
 from datasphere_core.definitions import CommandDefinition
-from datasphere_core.errors import CommandCancelledError
+from datasphere_core.errors import CommandTimeoutError
 from datasphere_core.execution import batch_command, command, run_batch
 from datasphere_core.models.task_chains import (
     DEFAULT_TASK_CHAIN_TIMEOUT_SECONDS,
@@ -16,6 +14,7 @@ from datasphere_core.models.task_chains import (
     RunTaskChainResult,
     TaskChainStatus,
 )
+from datasphere_core.runs import run_chain
 
 RUN_TASK_CHAIN_COMMAND_NAME = "task_chains.run"
 RUN_TASK_CHAIN_BATCH_COMMAND_NAME = "task_chains.run_batch"
@@ -42,23 +41,19 @@ async def run_task_chain(
     """
     # Execute task chain
     try:
-        success, log_details = await context.client.task_chains.run(
-            request.chain,
-            request.space,
+        success, log_details = await run_chain(
+            context,
+            chain=request.chain,
+            space=request.space,
             timeout_seconds=request.timeout_seconds,
         )
-    except TaskChainTimeout as error:
+    except CommandTimeoutError as error:
         return RunTaskChainResult(
             chain=request.chain,
             space=request.space,
             status=TaskChainStatus.TIMED_OUT,
             log_id=to_text(error.log_id),
         )
-    except TaskChainCancelled as error:
-        raise CommandCancelledError(
-            message=str(error),
-            log_id=to_text(error.log_id),
-        ) from None
 
     # Set status
     status: TaskChainStatus

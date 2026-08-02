@@ -1,15 +1,19 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from datasphere_core.context import CommandContext
 from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
+
+# Reads the task log of one started run
+type LogFetcher = Callable[[int, str], Awaitable[dict[str, Any]]]
 
 # Seconds between two polls of a running task log
 POLL_INTERVAL_SECONDS = 1
 
 
 async def _await_task_log(
-    context: CommandContext,
+    fetch: LogFetcher,
     *,
     log_id: int,
     space: str,
@@ -19,7 +23,7 @@ async def _await_task_log(
     Polls the task log of a started run until it leaves the running state.
 
     Args:
-        context (CommandContext): Authenticated client and progress callbacks.
+        fetch (LogFetcher): Reads the task log of the run.
         log_id (int): Task log ID of the started run.
         space (str): Technical name of the Datasphere space.
         timeout_seconds (float | None): Maximum polling duration, or None to
@@ -34,10 +38,7 @@ async def _await_task_log(
     """
     async with asyncio.timeout(timeout_seconds):
         while True:
-            details = await context.client.views.get_extended_log(
-                log_id,
-                space,
-            )
+            details = await fetch(log_id, space)
 
             # The log itself does not carry its own ID
             details["logId"] = log_id
@@ -85,7 +86,7 @@ async def run_persistence(
 
     try:
         return await _await_task_log(
-            context,
+            context.client.views.get_extended_log,
             log_id=log_id,
             space=space,
             timeout_seconds=timeout_seconds,
@@ -149,7 +150,7 @@ async def run_persistence_removal(
 
     try:
         return await _await_task_log(
-            context,
+            context.client.views.get_extended_log,
             log_id=log_id,
             space=space,
             timeout_seconds=timeout_seconds,
@@ -164,5 +165,58 @@ async def run_persistence_removal(
         raise CommandCancelledError(
             f"Removing the persistence of view '{view}' in '{space}' was "
             "cancelled. The remote operation may continue.",
+            log_id=str(log_id),
+        ) from None
+
+
+async def run_chain(
+    context: CommandContext,
+    *,
+    chain: str,
+    space: str,
+    timeout_seconds: float | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    Starts one task chain and waits for the run to finish.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        chain (str): Technical name of the task chain.
+        space (str): Technical name of the Datasphere space.
+        timeout_seconds (float | None, optional): Maximum polling duration.
+                                                  Defaults to None.
+
+    Raises:
+        CommandTimeoutError: If the run is still going when the timeout
+                             expires. It continues remotely.
+        CommandCancelledError: If polling is cancelled after the run started.
+                               It continues remotely.
+
+    Returns:
+        tuple[bool, dict[str, Any]]: Whether the run completed, and its log
+                                     details. Both are empty if the run never
+                                     started.
+    """
+    log_id = await context.client.task_chains.start(chain, space)
+    if log_id is None:
+        return False, {}
+
+    try:
+        return await _await_task_log(
+            context.client.task_chains.get_log,
+            log_id=log_id,
+            space=space,
+            timeout_seconds=timeout_seconds,
+        )
+    except TimeoutError:
+        raise CommandTimeoutError(
+            f"Task chain '{chain}' in '{space}' timed out. "
+            "The remote operation may continue.",
+            log_id=str(log_id),
+        ) from None
+    except asyncio.CancelledError:
+        raise CommandCancelledError(
+            f"Task chain '{chain}' in '{space}' was cancelled. "
+            "The remote operation may continue.",
             log_id=str(log_id),
         ) from None

@@ -6,7 +6,7 @@ import pytest
 from datasphere_api import (
     DatasphereClient,
 )
-from datasphere_core import CommandCancelledError, CommandContext, persistence
+from datasphere_core import CommandCancelledError, CommandContext, runs
 from datasphere_core.commands import views as views_commands
 from datasphere_core.commands.views import (
     create_view_partitioning,
@@ -113,7 +113,7 @@ async def test_persist_view_polls_until_the_run_leaves_running(
     """
     Checks that a running job is polled until it reaches a final status.
     """
-    monkeypatch.setattr(persistence, "POLL_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(runs, "POLL_INTERVAL_SECONDS", 0)
 
     result = await persist_view(
         CommandContext(client=_client(**_run("RUNNING", "RUNNING", "FAILED"))),
