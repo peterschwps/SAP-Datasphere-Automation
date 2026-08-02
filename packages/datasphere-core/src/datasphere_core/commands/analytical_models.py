@@ -3,12 +3,12 @@ from contextlib import suppress
 from dataclasses import replace
 from typing import Any
 
-from datasphere_api import ViewPersistenceCancelled, ViewPersistenceTimeout
 from datasphere_api.models import AnalyticalModelsDetailsDict
 
 from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
 from datasphere_core.definitions import CommandDefinition
+from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
 from datasphere_core.execution import (
     BatchReporter,
     batch_command,
@@ -37,6 +37,10 @@ from datasphere_core.models.analytical_models import (
     MeasureAnalyticalModelViewPersistenceItemResult,
     MeasureAnalyticalModelViewPersistenceRequest,
     MeasureAnalyticalModelViewPersistenceResult,
+)
+from datasphere_core.persistence import (
+    run_persistence,
+    run_persistence_removal,
 )
 
 GET_VIEW_DEPENDENCIES_COMMAND_NAME = "analytical_models.get_view_dependencies"
@@ -537,12 +541,13 @@ async def _run_cleanup(
                                                      cancelled cleanup.
         """
         try:
-            cleaned_up, details = await context.client.views.unpersist_view(
+            cleaned_up, details = await run_persistence_removal(
+                context,
                 view=dependency.view_name,
                 space=space,
                 timeout_seconds=timeout_seconds,
             )
-        except ViewPersistenceCancelled as error:
+        except CommandCancelledError as error:
             return False, {}, to_text(error.log_id)
 
         return cleaned_up, details, None
@@ -572,8 +577,8 @@ async def _measure_view(
         timeout_seconds (float): Maximum duration for persistence and cleanup.
 
     Raises:
-        ViewPersistenceCancelled: If the API persistence operation is
-                                  cancelled.
+        CommandCancelledError: If the persistence run is cancelled after
+                               it started remotely.
 
     Returns:
         MeasureAnalyticalModelViewPersistenceItemResult: Result of measuring
@@ -591,14 +596,13 @@ async def _measure_view(
 
     # Start the persistence run
     try:
-        persisted, persistence_details = (
-            await context.client.views.persist_view(
-                dependency.view_name,
-                space,
-                timeout_seconds=timeout_seconds,
-            )
+        persisted, persistence_details = await run_persistence(
+            context,
+            view=dependency.view_name,
+            space=space,
+            timeout_seconds=timeout_seconds,
         )
-    except ViewPersistenceTimeout as error:
+    except CommandTimeoutError as error:
         return _create_measurement_result(
             dependency,
             status=AnalyticalModelPersistenceItemStatus.PERSIST_TIMED_OUT,
@@ -636,7 +640,7 @@ async def _measure_view(
         )
 
     # If timeout is exceeded
-    except ViewPersistenceTimeout as error:
+    except CommandTimeoutError as error:
         return _create_measurement_result(
             dependency,
             status=AnalyticalModelPersistenceItemStatus.CLEANUP_TIMED_OUT,
@@ -879,7 +883,7 @@ async def measure_analytical_model_view_persistence(
                                                                 measurement.
 
     Raises:
-        ViewPersistenceCancelled: If a persistence operation is cancelled.
+        CommandCancelledError: If a persistence run is cancelled.
 
     Returns:
         MeasureAnalyticalModelViewPersistenceResult: Result of the measurement.
@@ -925,7 +929,7 @@ async def measure_analytical_model_view_persistence_batch(
                                                                      ments.
 
     Raises:
-        ViewPersistenceCancelled: If a persistence operation is cancelled.
+        CommandCancelledError: If a persistence run is cancelled.
 
     Returns:
         MeasureAnalyticalModelViewPersistenceBatchResult: Ordered results of

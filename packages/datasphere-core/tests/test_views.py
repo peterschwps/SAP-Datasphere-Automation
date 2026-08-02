@@ -5,9 +5,8 @@ import pytest
 from datasphere_api import (
     DatasphereClient,
     ViewAnalysisCancelled,
-    ViewPersistenceTimeout,
 )
-from datasphere_core import CommandCancelledError, CommandContext
+from datasphere_core import CommandCancelledError, CommandContext, persistence
 from datasphere_core.commands.views import (
     create_view_partitioning,
     find_view_attribute_matches_batch,
@@ -64,21 +63,39 @@ def _view(view_id: str, name: str, space: str) -> dict[str, Any]:
     }
 
 
+def _run(*statuses: str, log_id: int | None = 5) -> dict[str, Any]:
+    """
+    Builds a client whose persistence run reports the given statuses in order.
+    """
+    remaining = list(statuses)
+
+    async def start_persistence(view: str, space: str) -> int | None:
+        return log_id
+
+    async def start_persistence_removal(view: str, space: str) -> int | None:
+        return log_id
+
+    async def get_extended_log(task_log: int, space: str) -> dict[str, Any]:
+        status = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+        return {"status": status, "runTime": 2400}
+
+    async def get_monitor_details(view: str, space: str) -> dict[str, Any]:
+        return {"dataPersistency": "Persisted"}
+
+    return {
+        "start_persistence": start_persistence,
+        "start_persistence_removal": start_persistence_removal,
+        "get_extended_log": get_extended_log,
+        "get_monitor_details": get_monitor_details,
+    }
+
+
 async def test_persist_view_maps_a_completed_run() -> None:
     """
     Checks that a completed persistence run is mapped to its fields.
     """
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> tuple[bool, dict[str, Any]]:
-        assert (view, space) == ("VIEW_A", "SPACE_A")
-        return True, {"status": "COMPLETED", "logId": 5, "runTime": 2400}
-
     result = await persist_view(
-        CommandContext(client=_client(persist_view=persist)),
+        CommandContext(client=_client(**_run("COMPLETED"))),
         PersistViewRequest(view="VIEW_A", space="SPACE_A"),
     )
 
@@ -89,45 +106,70 @@ async def test_persist_view_maps_a_completed_run() -> None:
     assert result.runtime_seconds == 2
 
 
+async def test_persist_view_polls_until_the_run_leaves_running(
+    monkeypatch,
+) -> None:
+    """
+    Checks that a running job is polled until it reaches a final status.
+    """
+    monkeypatch.setattr(persistence, "POLL_INTERVAL_SECONDS", 0)
+
+    result = await persist_view(
+        CommandContext(client=_client(**_run("RUNNING", "RUNNING", "FAILED"))),
+        PersistViewRequest(view="VIEW_A", space="SPACE_A"),
+    )
+
+    assert result.status is PersistViewStatus.FAILED
+    assert result.log_status == "FAILED"
+
+
 async def test_persist_view_maps_a_timeout_to_its_status() -> None:
     """
     Checks that a persistence timeout becomes a status, not an exception.
     """
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> tuple[bool, dict[str, Any]]:
-        raise ViewPersistenceTimeout("persist", view, space, log_id=17)
-
     result = await persist_view(
-        CommandContext(client=_client(persist_view=persist)),
-        PersistViewRequest(view="VIEW_A", space="SPACE_A"),
+        CommandContext(client=_client(**_run("RUNNING", log_id=17))),
+        PersistViewRequest(
+            view="VIEW_A",
+            space="SPACE_A",
+            timeout_seconds=0.01,
+        ),
     )
 
     assert result.status is PersistViewStatus.TIMED_OUT
     assert result.log_id == "17"
 
 
+async def test_persist_view_reports_a_run_that_never_started() -> None:
+    """
+    Checks that a persistence run without a log ID never started.
+    """
+    async def start_persistence(view: str, space: str) -> int | None:
+        return None
+
+    result = await persist_view(
+        CommandContext(client=_client(start_persistence=start_persistence)),
+        PersistViewRequest(view="VIEW_A", space="SPACE_A"),
+    )
+
+    assert result.status is PersistViewStatus.START_FAILED
+
+
 async def test_unpersist_view_reports_an_already_absent_persistence() -> None:
     """
     Checks that a view without persisted data is already absent.
     """
-    async def unpersist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> tuple[bool, dict[str, Any]]:
-        return True, {}
+    async def get_monitor_details(view: str, space: str) -> dict[str, Any]:
+        return {"dataPersistency": "NotPersisted"}
 
     result = await unpersist_view(
-        CommandContext(client=_client(unpersist_view=unpersist)),
+        CommandContext(
+            client=_client(get_monitor_details=get_monitor_details)
+        ),
         UnpersistViewRequest(view="VIEW_A", space="SPACE_A"),
     )
 
-    # A success without details means there was nothing to remove
+    # Nothing had to be removed, so no run was started at all
     assert result.status is UnpersistViewStatus.ALREADY_ABSENT
     assert result.status.outcome == "skipped"
 
@@ -139,22 +181,23 @@ async def test_persist_view_batch_keeps_order_and_summarizes() -> None:
     progress: list[CommandProgress] = []
 
     # VIEW_B fails, every other view completes
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> tuple[bool, dict[str, Any]]:
-        if view == "VIEW_B":
-            return False, {"status": "FAILED", "logId": 9}
-        return True, {"status": "COMPLETED", "logId": 1, "runTime": 1000}
+    async def start_persistence(view: str, space: str) -> int | None:
+        return 9 if view == "VIEW_B" else 1
+
+    async def get_extended_log(task_log: int, space: str) -> dict[str, Any]:
+        if task_log == 9:
+            return {"status": "FAILED"}
+        return {"status": "COMPLETED", "runTime": 1000}
 
     async def report(update: CommandProgress) -> None:
         progress.append(update)
 
     result = await persist_view_batch(
         CommandContext(
-            client=_client(persist_view=persist),
+            client=_client(
+                start_persistence=start_persistence,
+                get_extended_log=get_extended_log,
+            ),
             progress_callback=report,
         ),
         PersistViewBatchRequest(

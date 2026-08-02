@@ -1,17 +1,12 @@
 from collections.abc import Callable
 from typing import Any
 
-from datasphere_api import (
-    ViewAnalysisCancelled,
-    ViewAnalysisTimeout,
-    ViewPersistenceCancelled,
-    ViewPersistenceTimeout,
-)
+from datasphere_api import ViewAnalysisCancelled, ViewAnalysisTimeout
 
 from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
 from datasphere_core.definitions import CommandDefinition
-from datasphere_core.errors import CommandCancelledError
+from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
 from datasphere_core.execution import batch_command, command, run_batch
 from datasphere_core.models.views import (
     DEFAULT_VIEW_TIMEOUT_SECONDS,
@@ -57,6 +52,10 @@ from datasphere_core.models.views import (
     UnpersistViewResult,
     UnpersistViewStatus,
     ViewPersistenceCandidate,
+)
+from datasphere_core.persistence import (
+    run_persistence,
+    run_persistence_removal,
 )
 
 FIND_PERSISTENCE_CANDIDATES_COMMAND_NAME = "views.find_persistence_candidates"
@@ -482,23 +481,19 @@ async def persist_view(
     """
     # Start persistence
     try:
-        success, details = await context.client.views.persist_view(
+        success, details = await run_persistence(
+            context,
             view=request.view,
             space=request.space,
             timeout_seconds=request.timeout_seconds,
         )
-    except ViewPersistenceTimeout as error:
+    except CommandTimeoutError as error:
         return PersistViewResult(
             view=request.view,
             space=request.space,
             status=PersistViewStatus.TIMED_OUT,
             log_id=to_text(error.log_id),
         )
-    except ViewPersistenceCancelled as error:
-        raise CommandCancelledError(
-            str(error),
-            log_id=to_text(error.log_id),
-        ) from None
 
     # Check result
     status: PersistViewStatus
@@ -573,23 +568,19 @@ async def unpersist_view(
     """
     # Start removal of persistence
     try:
-        success, details = await context.client.views.unpersist_view(
+        success, details = await run_persistence_removal(
+            context,
             view=request.view,
             space=request.space,
             timeout_seconds=request.timeout_seconds,
         )
-    except ViewPersistenceTimeout as error:
+    except CommandTimeoutError as error:
         return UnpersistViewResult(
             view=request.view,
             space=request.space,
             status=UnpersistViewStatus.TIMED_OUT,
             log_id=to_text(error.log_id),
         )
-    except ViewPersistenceCancelled as error:
-        raise CommandCancelledError(
-            str(error),
-            log_id=to_text(error.log_id),
-        ) from None
 
     # Check result
     status: UnpersistViewStatus

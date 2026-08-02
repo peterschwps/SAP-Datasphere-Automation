@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from datasphere_api import DatasphereClient, ViewPersistenceTimeout
+from datasphere_api import DatasphereClient
 from datasphere_core import CommandContext
 from datasphere_core.commands.analytical_models import (
     get_analytical_model_view_dependencies_batch,
@@ -45,18 +45,23 @@ def _view(view_id: str, name: str, space: str) -> dict[str, Any]:
     }
 
 
+# Task log IDs the default fakes report for the two runs of a measurement
+PERSIST_LOG_ID = 11
+CLEANUP_LOG_ID = 12
+
+
 def _client(
     models: list[dict[str, Any]],
     views: list[dict[str, Any]],
     dependencies: Any,
     *,
-    persist: Any = None,
-    unpersist: Any = None,
     is_persisted: bool = False,
+    **view_calls: Any,
 ) -> DatasphereClient:
     """
     Builds a client covering the analytical model and view calls of the
-    dependency and measurement workflows.
+    dependency and measurement workflows. Every view call can be replaced
+    through a keyword argument.
     """
     async def get_all_analytical_models() -> list[dict[str, Any]]:
         return models
@@ -67,13 +72,19 @@ def _client(
     async def check_persisted(view: str, space: str) -> bool:
         return is_persisted
 
-    async def default_unpersist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
-        return True, {"status": "COMPLETED"}
+    async def start_persistence(view: str, space: str) -> int | None:
+        return PERSIST_LOG_ID
+
+    async def start_persistence_removal(view: str, space: str) -> int | None:
+        return CLEANUP_LOG_ID
+
+    async def get_monitor_details(view: str, space: str) -> dict[str, Any]:
+        return {"dataPersistency": "Persisted"}
+
+    async def get_extended_log(log_id: int, space: str) -> dict[str, Any]:
+        if log_id == PERSIST_LOG_ID:
+            return {"status": "COMPLETED", "runTime": 4000}
+        return {"status": "COMPLETED"}
 
     return cast(
         DatasphereClient,
@@ -83,10 +94,15 @@ def _client(
                 get_views_for_analytical_model=dependencies,
             ),
             views=SimpleNamespace(
-                get_all_views=get_all_views,
-                is_persisted=check_persisted,
-                persist_view=persist,
-                unpersist_view=unpersist or default_unpersist,
+                **{
+                    "get_all_views": get_all_views,
+                    "is_persisted": check_persisted,
+                    "start_persistence": start_persistence,
+                    "start_persistence_removal": start_persistence_removal,
+                    "get_monitor_details": get_monitor_details,
+                    "get_extended_log": get_extended_log,
+                    **view_calls,
+                }
             ),
         ),
     )
@@ -193,23 +209,13 @@ async def test_measure_persists_a_view_and_removes_it_again() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"VIEW_1": "Sales"}}
 
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
+    async def start_persistence(view: str, space: str) -> int | None:
         persisted.append((view, space))
-        return True, {"status": "COMPLETED", "runTime": 4000, "logId": 11}
+        return PERSIST_LOG_ID
 
-    async def unpersist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
+    async def start_persistence_removal(view: str, space: str) -> int | None:
         unpersisted.append((view, space))
-        return True, {"status": "COMPLETED", "logId": 12}
+        return CLEANUP_LOG_ID
 
     result = await measure_analytical_model_view_persistence(
         CommandContext(
@@ -217,8 +223,8 @@ async def test_measure_persists_a_view_and_removes_it_again() -> None:
                 models=[_model("MODEL_1", "One", "SPACE_A")],
                 views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
                 dependencies=dependencies,
-                persist=persist,
-                unpersist=unpersist,
+                start_persistence=start_persistence,
+                start_persistence_removal=start_persistence_removal,
             )
         ),
         MeasureAnalyticalModelViewPersistenceRequest(
@@ -249,22 +255,9 @@ async def test_measure_keeps_a_view_that_was_persisted_before() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"VIEW_1": "Sales"}}
 
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
-        return True, {"status": "COMPLETED", "runTime": 1000}
-
-    async def unpersist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
+    async def start_persistence_removal(view: str, space: str) -> int | None:
         unpersisted.append(view)
-        return True, {}
+        return CLEANUP_LOG_ID
 
     result = await measure_analytical_model_view_persistence(
         CommandContext(
@@ -272,8 +265,7 @@ async def test_measure_keeps_a_view_that_was_persisted_before() -> None:
                 models=[_model("MODEL_1", "One", "SPACE_A")],
                 views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
                 dependencies=dependencies,
-                persist=persist,
-                unpersist=unpersist,
+                start_persistence_removal=start_persistence_removal,
                 is_persisted=True,
             )
         ),
@@ -298,13 +290,12 @@ async def test_measure_reports_a_timeout_as_needing_manual_action() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"VIEW_1": "Sales"}}
 
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
-        raise ViewPersistenceTimeout("persist", view, space, log_id=31)
+    async def start_persistence(view: str, space: str) -> int | None:
+        return 31
+
+    # The run never leaves the running state, so the timeout decides
+    async def get_extended_log(log_id: int, space: str) -> dict[str, Any]:
+        return {"status": "RUNNING", "runTime": 1000}
 
     result = await measure_analytical_model_view_persistence(
         CommandContext(
@@ -312,12 +303,14 @@ async def test_measure_reports_a_timeout_as_needing_manual_action() -> None:
                 models=[_model("MODEL_1", "One", "SPACE_A")],
                 views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
                 dependencies=dependencies,
-                persist=persist,
+                start_persistence=start_persistence,
+                get_extended_log=get_extended_log,
             )
         ),
         MeasureAnalyticalModelViewPersistenceRequest(
             analytical_model_name="One",
             space="SPACE_A",
+            timeout_seconds=0.01,
         ),
     )
 
@@ -342,14 +335,9 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"SHARED": "Shared"}}
 
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
+    async def start_persistence(view: str, space: str) -> int | None:
         persisted.append((view, space))
-        return True, {"status": "COMPLETED", "runTime": 2000}
+        return PERSIST_LOG_ID
 
     async def report_item(update: BatchItemResult) -> None:
         item_results.append(update)
@@ -363,7 +351,7 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it() -> None:
                 ],
                 views=[_view("SHARED", "Shared", "VIEW_SPACE")],
                 dependencies=dependencies,
-                persist=persist,
+                start_persistence=start_persistence,
             ),
             batch_item_result_callback=report_item,
         ),
@@ -388,8 +376,8 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it() -> None:
     # The single measurement is projected onto both dependent models
     assert result.results[0].dependencies[0].view_id == "SHARED"
     assert result.results[2].dependencies[0].view_id == "SHARED"
-    assert result.results[0].dependencies[0].runtime_seconds == 2
-    assert result.results[2].dependencies[0].runtime_seconds == 2
+    assert result.results[0].dependencies[0].runtime_seconds == 4
+    assert result.results[2].dependencies[0].runtime_seconds == 4
     assert result.summary == BatchSummary(
         total=3,
         succeeded=2,
@@ -411,15 +399,10 @@ async def test_measure_skips_a_dependency_without_a_resolved_space() -> None:
     async def dependencies(analytical_model_id: str) -> DependencyMap:
         return {analytical_model_id: {"UNKNOWN": "Unknown"}}
 
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
+    async def start_persistence(view: str, space: str) -> int | None:
         nonlocal persistence_called
         persistence_called = True
-        return True, {}
+        return PERSIST_LOG_ID
 
     result = await measure_analytical_model_view_persistence(
         CommandContext(
@@ -427,7 +410,7 @@ async def test_measure_skips_a_dependency_without_a_resolved_space() -> None:
                 models=[_model("MODEL_1", "One", "SPACE_A")],
                 views=[],
                 dependencies=dependencies,
-                persist=persist,
+                start_persistence=start_persistence,
             )
         ),
         MeasureAnalyticalModelViewPersistenceRequest(
@@ -460,15 +443,10 @@ async def test_measure_batch_reports_a_model_before_the_batch_finished(
         return {analytical_model_id: {view_id: f"View{view_id[-1]}"}}
 
     # The view of the second model blocks until the test releases it
-    async def persist(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> tuple[bool, dict[str, Any]]:
+    async def start_persistence(view: str, space: str) -> int | None:
         if view == "View2":
             await blocked.wait()
-        return True, {"status": "COMPLETED", "runTime": 1000}
+        return PERSIST_LOG_ID
 
     async def report_item(update: BatchItemResult) -> None:
         item_results.append(update)
@@ -484,7 +462,7 @@ async def test_measure_batch_reports_a_model_before_the_batch_finished(
                 _view("VIEW_2", "View2", "VIEW_SPACE"),
             ],
             dependencies=dependencies,
-            persist=persist,
+            start_persistence=start_persistence,
         ),
         batch_item_result_callback=report_item,
     )
