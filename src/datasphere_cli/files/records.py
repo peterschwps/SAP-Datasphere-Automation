@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 
 class AnalyticalModelTaskRecord(TypedDict):
@@ -39,7 +39,7 @@ class TaskChainResultRecord(TypedDict):
     task_chain: str
     space: str
     status: str
-    sap_status: str | None
+    log_status: str | None
     log_id: str | None
     runtime_seconds: int | None
 
@@ -51,7 +51,7 @@ class ViewPersistenceResultRecord(TypedDict):
     view: str
     space: str
     status: str
-    sap_status: str | None
+    log_status: str | None
     log_id: str | None
     runtime_seconds: int | None
 
@@ -152,9 +152,9 @@ class AnalyticalModelPersistenceItemRecord(TypedDict):
     status: str
     previously_persisted: bool | None
     runtime_seconds: int | None
-    persistence_sap_status: str | None
+    persistence_log_status: str | None
     persistence_log_id: str | None
-    cleanup_sap_status: str | None
+    cleanup_log_status: str | None
     cleanup_log_id: str | None
     persistence_removed: bool | None
     manual_intervention: bool
@@ -177,6 +177,3 @@ class AnalyticalModelPersistenceBatchRecord(TypedDict):
     """
     results: list[AnalyticalModelPersistenceResultRecord]
     summary: BatchSummaryRecord
-
-
-type StatisticsType = Literal["RECORD_COUNT", "SIMPLE", "HISTOGRAM"]
