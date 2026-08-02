@@ -1,8 +1,6 @@
-import inspect
 import logging
 import os.path
 import textwrap
-from collections.abc import Callable
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from typing import Any
@@ -40,70 +38,46 @@ class MultiLineFormatter(logging.Formatter):
     module.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
-
     def format(self, record: logging.LogRecord) -> str:
         """
-        Method that receives a LogRecord and converts it to the desired format.
+        Converts one log record into the indented output format. Multi-line
+        messages keep the column layout of the header, so the separators line
+        up across every line of the record.
 
-        ARGS:
-            - record: logging.LogRecord
+        Args:
+            record (logging.LogRecord): Log record to format.
 
         Returns:
-            - str: formatted string
+            str: Formatted message wrapped in the rich color of its level.
         """
-
-        # Overwrite filename if call comes from wrapper function
-        # (uses extra param 'location')
-        # Otherwise logging.py would always be the filename in the log file
-        log_data = record.__dict__
-        if (
-            log_data["funcName"] == "wrapper"
-            and log_data["module"] == "logging"
-        ) and "location" in log_data:
-            log_data["filename"] = log_data["location"]
-
-        # Get logging message (resolve %-formatting with args)
         message = record.getMessage()
-
-        # Check if exception
         is_exception = record.exc_info is not None
-
-        # Check if multiline message
         try:
             multiline_message = len(message.split("\n")) > 1
         except AttributeError:
             multiline_message = False
 
-        # Save original msg/args to avoid mutating the record across handlers
+        # Keep the original message, because the same record object
+        # reaches every handler and is blanked below
         original_msg = record.msg
         original_args = record.args
 
-        # Set msg to empty string (unless it is an exception) and clear args
-        # to prevent %-formatting on an empty msg
+        # Blank the message to format the header on its own
+        # Args have to go too, or %-formatting fails on the empty message
         if not is_exception:
             record.msg = ""
             record.args = None
-
-        # Format record (with empty message) to create header
         header = super().format(record)
 
-        # Indent message by length of header (record without message)
         if multiline_message and not is_exception:
-            # Create filler for line indentation matching the spaces
-            # of the format
+            # Blank out every header segment but keep the pipes, so the
+            # following lines stay in the columns of the first one
             empty_filler = "|".join(
                 [" " * len(segment) for segment in header.split("|")]
             )
-
-            # Indent first line and add header to the front
             msg = textwrap.indent(
                 message.split("\n")[0], " " * len(header)
             ).lstrip()
-
-            # Add all other lines without the header, only using the separation
-            # signs (pipe symbols)
             for line in message.split("\n")[1:]:
                 msg += textwrap.indent("\n" + line, empty_filler)
 
@@ -111,37 +85,45 @@ class MultiLineFormatter(logging.Formatter):
             msg = textwrap.indent(message, " " * len(header)).lstrip()
 
         else:
-            # Reformat message by adding type of error as the first line and
-            # traceback as the consecutive lines
+            # Rewrite the exception as error type plus traceback
+            # Clearing both fields sends the recursion into the branch above
             record.msg = (
                 f"*** {type(record.msg).__name__} ***\n{record.exc_text}"
             )
-
-            # Set exception info and text to None so
             record.exc_info = None
             record.exc_text = None
-
-            # Recursively call function (won't be detected as an error now and
-            # handled like a normal record object)
             return self.format(record)
 
-        # Restore original msg/args so other handlers see the unmodified record
         record.msg = original_msg
         record.args = original_args
-
-        # Concatenate header and computed message
         log_message = header + msg
         return f"[{FORMATS[record.levelno]}]{log_message}[/]"
 
 
 # Handler to print messages with rich
 class RichPrintHandler(logging.StreamHandler):
+    """
+    Logging handler that prints messages through the rich console.
+    """
+
     def __init__(self, *args: Any, **kwargs: Any):
+        """
+        Initializes the handler with the shared rich console.
+
+        Args:
+            *args (Any): Positional arguments of the stream handler.
+            **kwargs (Any): Keyword arguments of the stream handler.
+        """
         super().__init__(*args, **kwargs)
         self.console = get_console()
-        self.console._highlight = False
 
     def emit(self, record: logging.LogRecord) -> None:
+        """
+        Prints one formatted log record to the console.
+
+        Args:
+            record (logging.LogRecord): Log record to print.
+        """
         self.console.print(self.format(record), highlight=False)
 
 
@@ -159,6 +141,7 @@ STREAM_FORMAT = MultiLineFormatter(
     datefmt="%Y-%m-%d | %H:%M:%S",
     style="{",
 )
+
 
 def configure_logging() -> None:
     """
@@ -188,44 +171,10 @@ def configure_logging() -> None:
     stream_handler.setFormatter(STREAM_FORMAT)
     stream_handler.setLevel(LEVEL_STREAM)
 
-    # Add handlers to the app logger and the library logger
+    # Attach both handlers to our logger and the library logger
     library_logger = logging.getLogger(LIBRARY_LOGGER_NAME)
     for log in (logger, library_logger):
         log.addHandler(file_handler)
         log.addHandler(stream_handler)
         log.setLevel(logging.DEBUG)  # filtered by handlers
         log.propagate = False
-
-
-# Wrapper to track execution time of a function
-def track_time(func: Any) -> Callable[[Any], None]:
-    """
-    A decorator function to automatically log the execution time of a function.
-    Uses the log level 'debug'.
-    """
-
-    def wrapper(*args: tuple[Any, ...], **kwargs: dict[str, Any]) -> None:
-        # Start timer, function and calculate execution time
-        start = datetime.now()
-        func(*args, **kwargs)
-        execution_time = datetime.now() - start
-
-        # Try to retrieve filename (TypeError for built-ins)
-        try:
-            filename = inspect.getfile(func).split("\\")[-1]
-            logger.debug(
-                "Execution time of '%s' from '%s': %s seconds.",
-                func.__name__,
-                filename,
-                round(execution_time.total_seconds(), 3),
-                extra={"location": filename},
-            )
-        except (TypeError, IndexError):
-            logger.debug(
-                "Execution time of '%s' from '%s': %s seconds.",
-                func.__name__,
-                filename,
-                round(execution_time.total_seconds(), 3),
-            )
-
-    return wrapper
