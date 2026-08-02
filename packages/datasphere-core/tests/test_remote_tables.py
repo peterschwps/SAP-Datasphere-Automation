@@ -4,6 +4,7 @@ from typing import Any, cast
 from datasphere_api import DatasphereClient
 from datasphere_core import CommandContext
 from datasphere_core.commands.remote_tables import (
+    _write_status,
     configure_remote_table_statistics,
     configure_remote_table_statistics_batch,
     refresh_remote_table_statistics_batch,
@@ -67,7 +68,7 @@ async def test_configure_creates_statistics_when_none_exist() -> None:
         space: str,
     ) -> str:
         created.append((table, statistics_type, space))
-        return "created"
+        return "accepted"
 
     result = await configure_remote_table_statistics(
         CommandContext(
@@ -87,6 +88,26 @@ async def test_configure_creates_statistics_when_none_exist() -> None:
     assert result.status is ConfigureRemoteTableStatisticsStatus.CREATED
 
 
+async def test_configure_maps_the_same_answer_per_endpoint() -> None:
+    """
+    Checks that an accepted write means created or updated by endpoint.
+    """
+    assert _write_status("accepted", creating=True) is (
+        ConfigureRemoteTableStatisticsStatus.CREATED
+    )
+    assert _write_status("accepted", creating=False) is (
+        ConfigureRemoteTableStatisticsStatus.UPDATED
+    )
+
+    # A conflict and a refusal read the same on both endpoints
+    assert _write_status("already_exists", creating=True) is (
+        ConfigureRemoteTableStatisticsStatus.ALREADY_EXISTS
+    )
+    assert _write_status("failed", creating=False) is (
+        ConfigureRemoteTableStatisticsStatus.FAILED
+    )
+
+
 async def test_configure_updates_statistics_of_a_different_type() -> None:
     """
     Checks that statistics of another type are updated, not created.
@@ -96,7 +117,7 @@ async def test_configure_updates_statistics_of_a_different_type() -> None:
         statistics_type: str,
         space: str,
     ) -> str:
-        return "updated"
+        return "accepted"
 
     result = await configure_remote_table_statistics(
         CommandContext(
@@ -124,7 +145,7 @@ async def test_configure_batch_discovers_and_classifies_every_table() -> None:
         statistics_type: str,
         space: str,
     ) -> str:
-        return "created"
+        return "accepted"
 
     tables = {
         "TABLE_A": _table(),
@@ -178,7 +199,7 @@ async def test_configure_batch_reports_an_unknown_table_as_not_found(
         statistics_type: str,
         space: str,
     ) -> str:
-        return "created"
+        return "accepted"
 
     result = await configure_remote_table_statistics_batch(
         CommandContext(

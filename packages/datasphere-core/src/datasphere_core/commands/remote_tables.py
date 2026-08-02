@@ -1,6 +1,9 @@
 from typing import Any, cast
 
-from datasphere_api.models import StatisticsInformationDict
+from datasphere_api.models import (
+    StatisticsInformationDict,
+    StatisticsWriteOutcome,
+)
 from datasphere_api.models import StatisticsType as ApiStatisticsType
 
 from datasphere_core.context import CommandContext
@@ -48,6 +51,34 @@ type RefreshStatisticsItem = tuple[
 ]
 
 
+def _write_status(
+    outcome: StatisticsWriteOutcome,
+    *,
+    creating: bool,
+) -> ConfigureRemoteTableStatisticsStatus:
+    """
+    Turns the outcome of a statistics write into its status.
+
+    Args:
+        outcome (StatisticsWriteOutcome): What the request achieved.
+        creating (bool): Whether statistics were created or replaced.
+
+    Returns:
+        ConfigureRemoteTableStatisticsStatus: Status of the written table.
+    """
+    if outcome == "already_exists":
+        return ConfigureRemoteTableStatisticsStatus.ALREADY_EXISTS
+    if outcome == "failed":
+        return ConfigureRemoteTableStatisticsStatus.FAILED
+
+    # The same accepted answer means different things per endpoint
+    return (
+        ConfigureRemoteTableStatisticsStatus.CREATED
+        if creating
+        else ConfigureRemoteTableStatisticsStatus.UPDATED
+    )
+
+
 async def _configure_statistics_item(
     context: CommandContext,
     item: ConfigureStatisticsItem,
@@ -86,29 +117,23 @@ async def _configure_statistics_item(
     elif metadata["statisticsType"] == request.statistics_type.value:
         status = ConfigureRemoteTableStatisticsStatus.ALREADY_CONFIGURED
 
-    # Create new statistics if supported but not present yet
-    elif metadata["statisticsType"] is None:
-        status = ConfigureRemoteTableStatisticsStatus(
-            await context.client.remote_tables.create_statistics(
-                table=request.table,
-                statistics_type=cast(
-                    ApiStatisticsType, request.statistics_type.value
-                ),
-                space=request.space,
-            )
-        )
-
-    # Update statistics if supported, present but of different type
+    # Create new statistics if supported but not present yet, otherwise
+    # replace the type that is already there
     else:
-        status = ConfigureRemoteTableStatisticsStatus(
-            await context.client.remote_tables.update_statistics(
-                table=request.table,
-                statistics_type=cast(
-                    ApiStatisticsType, request.statistics_type.value
-                ),
-                space=request.space,
-            )
+        creating = metadata["statisticsType"] is None
+        write = (
+            context.client.remote_tables.create_statistics
+            if creating
+            else context.client.remote_tables.update_statistics
         )
+        outcome = await write(
+            table=request.table,
+            statistics_type=cast(
+                ApiStatisticsType, request.statistics_type.value
+            ),
+            space=request.space,
+        )
+        status = _write_status(outcome, creating=creating)
 
     return ConfigureRemoteTableStatisticsResult(
         table=request.table,
