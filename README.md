@@ -52,7 +52,7 @@ provides scripts for managing:
 
 ### Views
 
-- Find views with a selected persistence score
+- Find views reaching at least a minimum persistence score
 - Find views with an attribute containing a specific substring
 - Create partitions by year
 - Remove partitions
@@ -103,6 +103,27 @@ can be installed without Textual or Rich:
 ```bash
 pip install datasphere-core
 ```
+
+Every command is a plain async function taking a `CommandContext` and a typed
+request:
+
+```python
+from datasphere_core import CommandContext
+from datasphere_core.commands.views import persist_view_batch
+from datasphere_core.models.views import PersistViewBatchRequest, PersistViewRequest
+
+result = await persist_view_batch(
+    CommandContext(client=session.client),
+    PersistViewBatchRequest(
+        requests=(PersistViewRequest(view="V_SALES", space="DEV"),),
+        max_concurrency=4,
+    ),
+)
+print(result.summary)
+```
+
+See [docs/datasphere-core-execution.md](docs/datasphere-core-execution.md) for
+the execution model, progress callbacks, and the error contract.
 
 The full `datasphere-cli` package includes the TUI and uses this shared layer.
 
@@ -410,6 +431,10 @@ file.
                     "status": "completed",
                     "previously_persisted": true,
                     "runtime_seconds": 78,
+                    "persistence_log_status": "COMPLETED",
+                    "persistence_log_id": "operation-1",
+                    "cleanup_log_status": "COMPLETED",
+                    "cleanup_log_id": "operation-2",
                     "persistence_removed": false,
                     "manual_intervention": false
                 }
@@ -507,7 +532,7 @@ Runs all task chains in the task file and writes the complete run results.
 **Example output:**
 
 ```csv
-task_chain,space,status,sap_status,log_id,runtime_seconds
+task_chain,space,status,log_status,log_id,runtime_seconds
 AnalyzeSales2025,SALES_DEPARTMENT,completed,COMPLETED,operation-1,1025
 ```
 
@@ -518,17 +543,22 @@ AnalyzeSales2025,SALES_DEPARTMENT,completed,COMPLETED,operation-1,1025
 <details>
 <summary>
     <strong>
-        4.1 Find Views with a Perfect Persistence Score of 10
+        4.1 Find Views by Minimum Persistence Score
             (Using View Analyzer)
     </strong>
 </summary>
 
-Performs view analysis on all views and saves the views with a perfect
-persistence score of 10.
+Performs view analysis on all views and saves every view that reaches at
+least the requested persistence score.
 
 **Required task file:** None
 
-**Parameters:** None
+**Parameters:**
+
+- **Minimum persistence score**: Lowest score a view has to reach to be
+                                 saved. Defaults to 10, the highest score the
+                                 view analyzer assigns, so only views with a
+                                 perfect score are saved.
 
 **Output file:** `datasphere/results/views_find_persistence_candidates.csv`
 
@@ -702,12 +732,12 @@ Persists all views listed in the task file.
 
 **Output file:** `datasphere/results/views_persist.csv`
 
-**Result headers:** `view,space,status,sap_status,log_id,runtime_seconds`
+**Result headers:** `view,space,status,log_status,log_id,runtime_seconds`
 
 **Example output:**
 
 ```csv
-view,space,status,sap_status,log_id,runtime_seconds
+view,space,status,log_status,log_id,runtime_seconds
 Sales2025,SALES_DEPARTMENT,completed,COMPLETED,operation-1,37
 Customers,SALES_DEPARTMENT,completed,COMPLETED,operation-2,9
 ```
@@ -727,12 +757,12 @@ Removes persistence from all views listed in the task file.
 
 **Output file:** `datasphere/results/views_unpersist.csv`
 
-**Result headers:** `view,space,status,sap_status,log_id,runtime_seconds`
+**Result headers:** `view,space,status,log_status,log_id,runtime_seconds`
 
 **Example output:**
 
 ```csv
-view,space,status,sap_status,log_id,runtime_seconds
+view,space,status,log_status,log_id,runtime_seconds
 Sales2025,SALES_DEPARTMENT,completed,COMPLETED,operation-1,37
 ```
 

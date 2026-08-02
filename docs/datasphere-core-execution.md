@@ -165,7 +165,7 @@ Core does not swallow errors. Expected domain outcomes become a status;
 everything else propagates:
 
 - **Timeouts** of a remote operation become a `TIMED_OUT` status carrying the
-  SAP log ID, so the caller can follow the run that may still be going.
+  Datasphere log ID, so the caller can follow the run that may still be going.
 - **Cancellation** after a remote start raises `CommandCancelledError` (a
   subclass of `asyncio.CancelledError`) carrying the log ID.
 - **Anything else** propagates unchanged after a `failed` phase was reported.
@@ -200,6 +200,7 @@ Command names are validated at import time to catch registry typos.
 | `models/common.py` | `CommandStatus`, `Outcome`, `CommandProgress`, `BatchSummary` |
 | `models/<domain>.py` | Requests, results, and status enums per domain |
 | `commands/<domain>.py` | Command bodies and their `CommandDefinition`s |
-| `conversion.py` | Normalizing SAP log IDs, statuses, and runtimes |
+| `conversion.py` | Normalizing Datasphere log IDs, statuses, and runtimes |
+| `errors.py` | `CommandError` and its subclasses |
 | `definitions.py`, `registry.py` | Command metadata and the registry |
 | `auth.py`, `credentials.py` | Session handling and the OS credential store |
