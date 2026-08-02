@@ -23,6 +23,9 @@ from datasphere_cli.files.workspace import (
 
 
 def test_file_setup_is_non_destructive(tmp_path: Path) -> None:
+    """
+    Checks that the setup keeps existing task and result files untouched.
+    """
     old_result = tmp_path / "datasphere" / "results" / "old.csv"
     old_result.parent.mkdir(parents=True)
     old_result.write_text("keep me", encoding="utf-8")
@@ -34,6 +37,7 @@ def test_file_setup_is_non_destructive(tmp_path: Path) -> None:
 
     assert old_result.read_text(encoding="utf-8") == "keep me"
     assert existing_task.read_text(encoding="utf-8") == "custom\n"
+    # A directory the user removed must not reappear on the next start
     assert not (tmp_path / "datasphere" / "exports").exists()
     assert {
         path.name
@@ -45,12 +49,16 @@ def test_file_setup_is_non_destructive(tmp_path: Path) -> None:
 
 
 def test_safe_space_result_filename_stays_in_results(tmp_path: Path) -> None:
+    """
+    Checks that a space name cannot escape the results directory.
+    """
     command = "analytical_models.get_view_dependencies_batch"
     space = "../../North Europe"
     digest = hashlib.sha256(space.encode("utf-8")).hexdigest()[:10]
 
     path = result_path(command, tmp_path, space=space)
 
+    # The traversal segments are stripped, so the path stays where it belongs
     assert safe_space_slug(space) == f"North_Europe_{digest}"
     assert path == (
         tmp_path
@@ -64,16 +72,24 @@ def test_safe_space_result_filename_stays_in_results(tmp_path: Path) -> None:
 
 
 def test_safe_space_slug_is_bounded_and_case_collision_resistant() -> None:
+    """
+    Checks that a slug stays bounded and keeps similar names apart.
+    """
     long_space = "A" * 500
 
     slug = safe_space_slug(long_space)
 
     assert len(slug) == 80
+
+    # Stripping makes different names look alike, the hash keeps them apart
     assert safe_space_slug("Space A") != safe_space_slug("space a")
     assert safe_space_slug(long_space) == slug
 
 
 def test_storage_reads_and_writes_exact_schemas(tmp_path: Path) -> None:
+    """
+    Checks that task rows and both result formats keep their exact schema.
+    """
     file_setup(tmp_path)
     task = task_path("task_chains.run_batch", tmp_path)
     with task.open("a", newline="", encoding="utf-8") as task_file:
@@ -82,10 +98,12 @@ def test_storage_reads_and_writes_exact_schemas(tmp_path: Path) -> None:
             fieldnames=("task_chain", "space"),
         ).writerow({"task_chain": "CHAIN_A", "space": "SPACE_A"})
 
+    # A task row becomes a dictionary keyed by the declared columns
     assert read_task_csv("task_chains.run_batch", tmp_path) == [
         {"task_chain": "CHAIN_A", "space": "SPACE_A"}
     ]
 
+    # A CSV result keeps its column order, numbers become plain text
     command = "task_chains.run_batch"
     initialize_result(command, tmp_path)
     path = write_result_csv(
@@ -95,7 +113,7 @@ def test_storage_reads_and_writes_exact_schemas(tmp_path: Path) -> None:
                 "task_chain": "CHAIN_A",
                 "space": "SPACE_A",
                 "status": "completed",
-                "sap_status": "COMPLETED",
+                "log_status": "COMPLETED",
                 "log_id": "42",
                 "runtime_seconds": 12,
             }
@@ -108,12 +126,13 @@ def test_storage_reads_and_writes_exact_schemas(tmp_path: Path) -> None:
                 "task_chain": "CHAIN_A",
                 "space": "SPACE_A",
                 "status": "completed",
-                "sap_status": "COMPLETED",
+                "log_status": "COMPLETED",
                 "log_id": "42",
                 "runtime_seconds": "12",
             }
         ]
 
+    # A JSON result is written space-scoped and survives the round trip
     json_command = "analytical_models.get_view_dependencies_batch"
     initialize_result(json_command, tmp_path, space="SPACE_A")
     json_path = write_result_json(
@@ -141,6 +160,13 @@ def test_read_task_csv_rejects_invalid_row_shapes(
     content: str,
     reason: str,
 ) -> None:
+    """
+    Checks that a malformed task row is rejected with its row number.
+
+    Args:
+        content (str): Task file content holding the invalid row.
+        reason (str): Text the error message has to contain.
+    """
     file_setup(tmp_path)
     path = task_path("task_chains.run_batch", tmp_path)
     path.write_text(content, encoding="utf-8")
@@ -154,6 +180,9 @@ def test_read_task_csv_rejects_invalid_row_shapes(
 
 
 def test_initialize_result_preserves_existing_output(tmp_path: Path) -> None:
+    """
+    Checks that an existing result is not replaced by an empty schema.
+    """
     command = "task_chains.run_batch"
     path = result_path(command, tmp_path)
     path.parent.mkdir(parents=True)
@@ -167,6 +196,9 @@ def test_initialize_result_preserves_existing_output(tmp_path: Path) -> None:
 def test_result_write_failure_preserves_existing_output(
     tmp_path: Path,
 ) -> None:
+    """
+    Checks that a failed CSV write leaves the previous result in place.
+    """
     command = "task_chains.run_batch"
     path = result_path(command, tmp_path)
     path.parent.mkdir(parents=True)
@@ -179,12 +211,17 @@ def test_result_write_failure_preserves_existing_output(
             tmp_path,
         )
 
+    # The temporary file never replaces the real one, so a failed write
+    # cannot leave a half-written result behind
     assert path.read_text(encoding="utf-8") == "previous result\n"
 
 
 def test_json_result_write_failure_preserves_existing_output(
     tmp_path: Path,
 ) -> None:
+    """
+    Checks that a failed JSON write leaves the previous result in place.
+    """
     command = "analytical_models.get_view_dependencies_batch"
     path = result_path(command, tmp_path, space="SPACE_A")
     path.parent.mkdir(parents=True)
@@ -198,10 +235,16 @@ def test_json_result_write_failure_preserves_existing_output(
             space="SPACE_A",
         )
 
+    # Serialization fails inside the temporary file, the old result stays
     assert path.read_text(encoding="utf-8") == "previous result\n"
 
 
 def test_definitions_use_exact_result_filenames() -> None:
+    """
+    Checks that every task and result file keeps its documented name.
+    """
+    # The filenames are part of the interface, a typo would silently move
+    # a user's file somewhere else
     assert {definition.filename for definition in TASK_FILES.values()} == {
         "analytical_models_measure_view_persistence.csv",
         "task_chains_run.csv",

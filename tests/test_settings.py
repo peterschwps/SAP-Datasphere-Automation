@@ -32,20 +32,31 @@ def settings_file(tmp_path: Path, monkeypatch) -> Path:
 
 
 def test_settings_load_and_uppercase_browser(settings_file: Path) -> None:
+    """
+    Checks that a valid settings file loads and normalizes the browser name.
+    """
     settings_file.write_text(VALID_TOML, encoding="utf-8")
     loaded = Settings()  # pyright: ignore[reportCallIssue]
+
+    # The file may spell the browser in any case, the model uppercases it
     assert loaded.setup.datasphere_url == "https://example.eu10.hcs.cloud.sap"
     assert loaded.setup.browser_to_use == "EDGE"
     assert loaded.credentials.secret == "top-secret"
 
 
 def test_settings_reject_missing_keys(settings_file: Path) -> None:
+    """
+    Checks that an incomplete settings file is rejected instead of guessed.
+    """
     settings_file.write_text("[setup]\n[credentials]\n", encoding="utf-8")
     with pytest.raises(ValidationError):
         Settings()  # pyright: ignore[reportCallIssue]
 
 
 def test_build_session_config_uses_settings(settings_file: Path) -> None:
+    """
+    Checks that the session configuration is built from the settings file.
+    """
     settings_file.write_text(VALID_TOML, encoding="utf-8")
     config = build_session_config()
     assert config.base_url == "https://example.eu10.hcs.cloud.sap"
@@ -57,12 +68,17 @@ def test_build_session_config_secret_from_environment(
     settings_file: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that the client secret may come from the environment instead.
+    """
     settings_file.write_text(
         VALID_TOML.replace('secret = "top-secret"', 'secret = ""'),
         encoding="utf-8",
     )
     monkeypatch.setenv("SECRET", "env-secret")
     config = build_session_config()
+
+    # The settings file can stay free of the secret and be shared safely
     assert config.client_secret == "env-secret"
 
 
@@ -70,6 +86,9 @@ def test_build_session_config_requires_secret(
     settings_file: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that a missing client secret fails with a readable error.
+    """
     settings_file.write_text(
         VALID_TOML.replace('secret = "top-secret"', 'secret = ""'),
         encoding="utf-8",

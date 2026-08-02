@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from datasphere_core import CommandContext, CommandError, CommandTimeoutError
@@ -12,17 +11,19 @@ from datasphere_core.models.task_chains import (
 
 from datasphere_cli import cli
 from datasphere_cli import settings as settings_module
-from datasphere_cli.actions import dispatch as dispatch_module
-from datasphere_cli.cli import commands
+from datasphere_cli.cli import task_chains as commands
 
 
 def _result(status: str = "completed") -> RunTaskChainResult:
+    """
+    Builds the task chain result of a completed or a failed run.
+    """
     if status == "completed":
         return RunTaskChainResult(
             chain="CHAIN_A",
             space="SPACE_A",
             status=TaskChainStatus.COMPLETED,
-            sap_status="COMPLETED",
+            log_status="COMPLETED",
             log_id="operation-1",
             runtime_seconds=65,
         )
@@ -35,13 +36,16 @@ def _result(status: str = "completed") -> RunTaskChainResult:
 
 
 def test_main_routes_canonical_arguments(monkeypatch) -> None:
+    """
+    Checks that arguments reach the direct command instead of the TUI.
+    """
     received: list[str] = []
 
     def fake_run(arguments: list[str]) -> int:
         received.extend(arguments)
         return 7
 
-    monkeypatch.setattr("datasphere_cli.cli.commands.run", fake_run)
+    monkeypatch.setattr("datasphere_cli.cli.task_chains.run", fake_run)
 
     result = cli.main(["task-chains", "run"])
 
@@ -50,6 +54,9 @@ def test_main_routes_canonical_arguments(monkeypatch) -> None:
 
 
 def test_task_chain_command_prints_json(monkeypatch, capsys) -> None:
+    """
+    Checks that the JSON output carries every result field verbatim.
+    """
     requests: list[RunTaskChainRequest] = []
 
     async def fake_execute(
@@ -58,7 +65,7 @@ def test_task_chain_command_prints_json(monkeypatch, capsys) -> None:
         requests.append(request)
         return _result()
 
-    monkeypatch.setattr(commands, "run_task_chain", fake_execute)
+    monkeypatch.setattr(commands, "_run_with_session", fake_execute)
 
     exit_code = commands.run(
         [
@@ -87,7 +94,7 @@ def test_task_chain_command_prints_json(monkeypatch, capsys) -> None:
         "chain": "CHAIN_A",
         "space": "SPACE_A",
         "status": "completed",
-        "sap_status": "COMPLETED",
+        "log_status": "COMPLETED",
         "log_id": "operation-1",
         "runtime_seconds": 65,
     }
@@ -95,19 +102,26 @@ def test_task_chain_command_prints_json(monkeypatch, capsys) -> None:
 
 
 def test_no_old_taskchain_route() -> None:
+    """
+    Checks that the replaced 'taskchain start' route no longer exists.
+    """
     with pytest.raises(SystemExit) as error:
         commands.run(["taskchain", "start", "CHAIN_A", "--space", "SPACE_A"])
 
+    # Exit code 2 is what argparse returns for an unknown subcommand
     assert error.value.code == 2
 
 
 def test_task_chain_failure_returns_exit_code_one(monkeypatch, capsys) -> None:
+    """
+    Checks that a failed task chain becomes a non-zero exit code.
+    """
     async def fake_execute(
         request: RunTaskChainRequest,
     ) -> RunTaskChainResult:
         return _result("failed")
 
-    monkeypatch.setattr(commands, "run_task_chain", fake_execute)
+    monkeypatch.setattr(commands, "_run_with_session", fake_execute)
 
     exit_code = commands.run(
         ["task-chains", "run", "CHAIN_A", "--space", "SPACE_A"]
@@ -115,17 +129,22 @@ def test_task_chain_failure_returns_exit_code_one(monkeypatch, capsys) -> None:
 
     captured = capsys.readouterr()
     assert exit_code == 1
+
+    # A failed chain is a result, not a program error, so stderr stays empty
     assert "failed" in captured.out
     assert captured.err == ""
 
 
 def test_task_chain_timeout_is_written_to_stderr(monkeypatch, capsys) -> None:
+    """
+    Checks that a timeout is reported on stderr and leaves stdout empty.
+    """
     async def fake_execute(
         request: RunTaskChainRequest,
     ) -> RunTaskChainResult:
         raise CommandTimeoutError("Timed out")
 
-    monkeypatch.setattr(commands, "run_task_chain", fake_execute)
+    monkeypatch.setattr(commands, "_run_with_session", fake_execute)
 
     exit_code = commands.run(
         ["task-chains", "run", "CHAIN_A", "--space", "SPACE_A"]
@@ -137,17 +156,20 @@ def test_task_chain_timeout_is_written_to_stderr(monkeypatch, capsys) -> None:
     assert captured.err == "Error: Timed out\n"
 
 
-async def test_execute_dispatches_through_registry(
+async def test_execute_calls_the_core_command_with_the_session_client(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that the direct command runs the Core command on its own session.
+    """
     settings_file = tmp_path / "settings.toml"
     settings_file.touch()
     monkeypatch.setattr(settings_module, "SETTINGS_FILE", settings_file)
     monkeypatch.setattr(settings_module, "build_session_config", object)
     requests: list[RunTaskChainRequest] = []
 
-    async def handler(
+    async def fake_command(
         context: CommandContext,
         request: RunTaskChainRequest,
     ) -> RunTaskChainResult:
@@ -176,20 +198,10 @@ async def test_execute_dispatches_through_registry(
             assert interactive is True
 
     monkeypatch.setattr(commands, "DatasphereSession", FakeSession)
-    monkeypatch.setattr(
-        dispatch_module,
-        "COMMANDS",
-        {
-            "task_chains.run": SimpleNamespace(
-                handler=handler,
-                request_type=RunTaskChainRequest,
-                result_type=RunTaskChainResult,
-            )
-        },
-    )
+    monkeypatch.setattr(commands, "run_task_chain", fake_command)
     request = RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A")
 
-    result = await commands.run_task_chain(request)
+    result = await commands._run_with_session(request)
 
     assert result == _result()
     assert requests == [request]
@@ -199,13 +211,18 @@ async def test_execute_requires_initialized_settings(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that a missing settings file fails with a readable error.
+    """
     monkeypatch.setattr(
         settings_module,
         "SETTINGS_FILE",
         tmp_path / "missing.toml",
     )
 
+    # Loading the settings would create the file and open a browser, which a
+    # direct command must never do
     with pytest.raises(CommandError, match="Settings are not initialized"):
-        await commands.run_task_chain(
+        await commands._run_with_session(
             RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A")
         )
