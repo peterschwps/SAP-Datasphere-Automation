@@ -341,23 +341,32 @@ async def create_view_partitioning(
     Returns:
         CreateViewPartitioningResult: Result of the partition creation.
     """
-    # Create partitioning
-    outcome = await context.client.views.create_partitioning(
-        view=request.view,
-        space=request.space,
-        attribute=request.attribute,
-        partitions=[
-            str(year) for year in range(request.start_year, request.end_year)
-        ],
-        overwrite_existing=request.overwrite_existing,
+    partitioning = await context.client.views.get_partitioning(
+        request.view,
+        request.space,
     )
 
-    # Check result
-    status = (
-        CreateViewPartitioningStatus.ALREADY_EXISTS
-        if outcome == "exists"
-        else CreateViewPartitioningStatus(outcome)
-    )
+    # Only a string column can carry a range partitioning
+    column = partitioning["partitioningColumns"][request.attribute]
+    if column["type"] != "cds.String":
+        status = CreateViewPartitioningStatus.INVALID_COLUMN
+
+    # Keep an existing partitioning unless the caller asked to replace it
+    elif partitioning["ranges"] and not request.overwrite_existing:
+        status = CreateViewPartitioningStatus.ALREADY_EXISTS
+
+    else:
+        accepted = await context.client.views.set_partitioning(
+            request.view,
+            request.space,
+            _yearly_partitioning(request),
+        )
+        status = (
+            CreateViewPartitioningStatus.CREATED
+            if accepted
+            else CreateViewPartitioningStatus.FAILED
+        )
+
     return CreateViewPartitioningResult(
         view=request.view,
         space=request.space,
@@ -633,6 +642,41 @@ async def unpersist_view_batch(
         max_concurrency=request.max_concurrency,
     )
     return UnpersistViewBatchResult(results=results, summary=summary)
+
+
+def _yearly_partitioning(
+    request: CreateViewPartitioningRequest,
+) -> dict[str, Any]:
+    """
+    Builds the partitioning payload of one range per year.
+
+    Args:
+        request (CreateViewPartitioningRequest): Input for the partition
+                                                 creation.
+
+    Returns:
+        dict[str, Any]: Payload for the partitioning endpoint.
+    """
+    # Each range spans one year, so the last year is only an upper bound
+    years = [str(year) for year in range(request.start_year, request.end_year)]
+    return {
+        "remoteSourceName": "",
+        "objectName": request.view,
+        "numParallelPartitions": 1,
+        "ranges": [
+            {
+                "id": index + 1,
+                "low": {"include": True, "value": years[index]},
+                "high": {"include": False, "value": years[index + 1]},
+                "locked": False,
+            }
+            for index in range(len(years) - 1)
+        ],
+        "column": request.attribute,
+        "columnType": "cds.String",
+        "runtimeDataCalculation": "designtime",
+        "type": "range",
+    }
 
 
 # Fields the partitioning endpoint expects back when it is written

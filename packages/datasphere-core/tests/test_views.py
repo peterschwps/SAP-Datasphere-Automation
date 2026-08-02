@@ -390,21 +390,28 @@ async def test_create_partitioning_builds_the_requested_year_range() -> None:
     """
     Checks that the year range becomes one partition per year.
     """
-    received: dict[str, Any] = {}
+    written: list[dict[str, Any]] = []
 
-    async def create_partitioning(
+    async def get_partitioning(view: str, space: str) -> dict[str, Any]:
+        return {
+            "ranges": [],
+            "partitioningColumns": {"FISCYEAR": {"type": "cds.String"}},
+        }
+
+    async def set_partitioning(
         view: str,
         space: str,
-        attribute: str,
-        partitions: list[str],
-        overwrite_existing: bool = False,
-    ) -> str:
-        received.update(partitions=partitions, attribute=attribute)
-        return "created"
+        data: dict[str, Any],
+    ) -> bool:
+        written.append(data)
+        return True
 
     result = await create_view_partitioning(
         CommandContext(
-            client=_client(create_partitioning=create_partitioning)
+            client=_client(
+                get_partitioning=get_partitioning,
+                set_partitioning=set_partitioning,
+            )
         ),
         CreateViewPartitioningRequest(
             view="VIEW_A",
@@ -415,27 +422,32 @@ async def test_create_partitioning_builds_the_requested_year_range() -> None:
         ),
     )
 
-    assert received["partitions"] == ["2020", "2021", "2022"]
+    # The last year is only the upper bound of the preceding range
+    ranges = written[0]["ranges"]
+    assert [partition["low"]["value"] for partition in ranges] == [
+        "2020",
+        "2021",
+    ]
+    assert [partition["high"]["value"] for partition in ranges] == [
+        "2021",
+        "2022",
+    ]
+    assert written[0]["column"] == "FISCYEAR"
     assert result.status is CreateViewPartitioningStatus.CREATED
 
 
 async def test_create_partitioning_maps_an_existing_partitioning() -> None:
     """
-    Checks that an existing partitioning is reported as skipped.
+    Checks that an existing partitioning is kept instead of replaced.
     """
-    async def create_partitioning(
-        view: str,
-        space: str,
-        attribute: str,
-        partitions: list[str],
-        overwrite_existing: bool = False,
-    ) -> str:
-        return "exists"
+    async def get_partitioning(view: str, space: str) -> dict[str, Any]:
+        return {
+            "ranges": [{"id": 1}],
+            "partitioningColumns": {"FISCYEAR": {"type": "cds.String"}},
+        }
 
     result = await create_view_partitioning(
-        CommandContext(
-            client=_client(create_partitioning=create_partitioning)
-        ),
+        CommandContext(client=_client(get_partitioning=get_partitioning)),
         CreateViewPartitioningRequest(
             view="VIEW_A",
             space="SPACE_A",
@@ -445,9 +457,33 @@ async def test_create_partitioning_maps_an_existing_partitioning() -> None:
         ),
     )
 
-    # The API name 'exists' becomes the explicit already-exists status
     assert result.status is CreateViewPartitioningStatus.ALREADY_EXISTS
     assert result.status.outcome == "skipped"
+
+
+async def test_create_partitioning_rejects_a_non_string_column() -> None:
+    """
+    Checks that a column of another type is refused before writing.
+    """
+    async def get_partitioning(view: str, space: str) -> dict[str, Any]:
+        return {
+            "ranges": [],
+            "partitioningColumns": {"FISCYEAR": {"type": "cds.Integer"}},
+        }
+
+    result = await create_view_partitioning(
+        CommandContext(client=_client(get_partitioning=get_partitioning)),
+        CreateViewPartitioningRequest(
+            view="VIEW_A",
+            space="SPACE_A",
+            attribute="FISCYEAR",
+            start_year=2020,
+            end_year=2023,
+        ),
+    )
+
+    # Only a string column can carry a range partitioning
+    assert result.status is CreateViewPartitioningStatus.INVALID_COLUMN
 
 
 async def test_lock_and_unlock_partitions_map_their_outcomes() -> None:
