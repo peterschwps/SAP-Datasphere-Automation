@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 def main(argv: Sequence[str] | None = None) -> int:
     """
-    Entrypoint for the SAP-Datasphere-CLI.
+    Starts the CLI, either as a direct command or as the interactive TUI.
 
     Args:
         argv (Sequence[str] | None, optional): Optional arguments to directly

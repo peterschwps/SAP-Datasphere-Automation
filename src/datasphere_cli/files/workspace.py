@@ -10,12 +10,17 @@ from types import MappingProxyType
 
 @dataclass(frozen=True, slots=True)
 class FileDefinition:
-    """Definition of one command-owned workspace file."""
-
+    """
+    Definition of one command-owned workspace file. The columns decide the
+    file format: a tuple describes a CSV header, None marks a JSON file whose
+    structure is too nested for columns.
+    """
     filename: str
     columns: tuple[str, ...] | None = None
 
 
+# Only commands that read their input from a file appear here. Commands
+# discovering their own input have a result file without a task file.
 TASK_FILES: Mapping[str, FileDefinition] = MappingProxyType(
     {
         "analytical_models.measure_view_persistence_batch": FileDefinition(
@@ -67,7 +72,7 @@ RESULT_FILES: Mapping[str, FileDefinition] = MappingProxyType(
                 "task_chain",
                 "space",
                 "status",
-                "sap_status",
+                "log_status",
                 "log_id",
                 "runtime_seconds",
             ),
@@ -104,7 +109,7 @@ RESULT_FILES: Mapping[str, FileDefinition] = MappingProxyType(
                 "view",
                 "space",
                 "status",
-                "sap_status",
+                "log_status",
                 "log_id",
                 "runtime_seconds",
             ),
@@ -115,7 +120,7 @@ RESULT_FILES: Mapping[str, FileDefinition] = MappingProxyType(
                 "view",
                 "space",
                 "status",
-                "sap_status",
+                "log_status",
                 "log_id",
                 "runtime_seconds",
             ),
@@ -133,19 +138,61 @@ RESULT_FILES: Mapping[str, FileDefinition] = MappingProxyType(
 
 
 def workspace_root(root: str | Path | None = None) -> Path:
-    """Resolve the workspace root for one operation."""
+    """
+    Resolves the workspace root for one operation.
+
+    Args:
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Uses the current working
+                                            directory when None.
+                                            Defaults to None.
+
+    Returns:
+        Path: Root directory of the workspace.
+    """
     return Path.cwd() if root is None else Path(root)
 
 
 def tasks_path(root: str | Path | None = None) -> Path:
+    """
+    Returns the directory holding the task files.
+
+    Args:
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Defaults to None.
+
+    Returns:
+        Path: Directory of the task files.
+    """
     return workspace_root(root) / "datasphere" / "tasks"
 
 
 def results_path(root: str | Path | None = None) -> Path:
+    """
+    Returns the directory holding the result files.
+
+    Args:
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Defaults to None.
+
+    Returns:
+        Path: Directory of the result files.
+    """
     return workspace_root(root) / "datasphere" / "results"
 
 
 def task_path(command: str, root: str | Path | None = None) -> Path:
+    """
+    Returns the task file of one command.
+
+    Args:
+        command (str): Command the task file belongs to.
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Defaults to None.
+
+    Returns:
+        Path: Path of the task file.
+    """
     return tasks_path(root) / TASK_FILES[command].filename
 
 
@@ -154,10 +201,24 @@ _SPACE_HASH_LENGTH = 10
 
 
 def safe_space_slug(space: str) -> str:
-    """Return a bounded, traversal-safe filename component for a space."""
+    """
+    Builds a bounded, traversal-safe filename component for a space. A
+    hash suffix keeps the name unique after the readable part was
+    stripped of non-ASCII characters and truncated.
+
+    Args:
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        str: Filename component for the space.
+    """
+    # Strip everything a path separator could hide in
     normalized = unicodedata.normalize("NFKD", space)
     ascii_space = normalized.encode("ascii", "ignore").decode("ascii")
     readable = re.sub(r"[^A-Za-z0-9_-]+", "_", ascii_space).strip("_-")
+
+    # Append a hash, minus one character for the joining underscore
+    # Keeps spaces apart that the stripping made identical
     digest = hashlib.sha256(space.encode("utf-8")).hexdigest()
     hash_suffix = digest[:_SPACE_HASH_LENGTH]
     readable_length = _MAX_SPACE_SLUG_LENGTH - len(hash_suffix) - 1
@@ -171,8 +232,24 @@ def result_path(
     *,
     space: str | None = None,
 ) -> Path:
+    """
+    Returns the result file of one command. Results of space-scoped
+    commands get their own file per space.
+
+    Args:
+        command (str): Command the result file belongs to.
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Defaults to None.
+        space (str | None, optional): Space to scope the result file to.
+                                      Defaults to None.
+
+    Returns:
+        Path: Path of the result file.
+    """
     definition = RESULT_FILES[command]
     filename = definition.filename
+
+    # Scope the filename to the space to keep results apart
     if space is not None:
         file_path = Path(filename)
         filename = (
@@ -182,7 +259,13 @@ def result_path(
 
 
 def file_setup(root: str | Path | None = None) -> None:
-    """Create workspace directories and any missing task templates."""
+    """
+    Creates the workspace directories and any missing task templates.
+
+    Args:
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Defaults to None.
+    """
     task_directory = tasks_path(root)
     results_path(root).mkdir(parents=True, exist_ok=True)
     task_directory.mkdir(parents=True, exist_ok=True)

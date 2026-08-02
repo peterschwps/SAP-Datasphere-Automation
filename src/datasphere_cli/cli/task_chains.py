@@ -20,14 +20,16 @@ from datasphere_core.models.task_chains import (
 
 _COMMAND = "task_chains.run"
 
-# This module holds the direct command of one domain. A second domain gets its
-# own module next to it, and run() then has to pick the matching one instead of
-# calling the task chain path directly.
+# Holds the direct command of one domain. A second domain gets its own
+# module, and run() then has to pick the matching one.
 
 # TODO: Implement Typer for parsing and running commands
 def _create_parser() -> argparse.ArgumentParser:
     """
-    Create the parser for direct CLI commands that execute a single action.
+    Creates the parser for direct CLI commands that execute a single action.
+
+    Returns:
+        argparse.ArgumentParser: Parser for the direct commands.
     """
     parser = argparse.ArgumentParser(prog="datasphere")
     domains = parser.add_subparsers(dest="domain", required=True)
@@ -79,8 +81,8 @@ async def _run_with_session(
     """
     from datasphere_cli.settings import SETTINGS_FILE, build_session_config
 
-    # Loading the settings would create the file and open a browser, which a
-    # direct command must not do. A readable error is the better answer here.
+    # Fail on missing settings instead of loading them
+    # Loading would create the file and open a browser
     if not SETTINGS_FILE.exists():
         raise CommandError(
             "Settings are not initialized. Start 'datasphere' once to "
@@ -115,7 +117,7 @@ def _print_result(
 
 def run(argv: Sequence[str]) -> int:
     """
-    Run a direct command and return its process exit code.
+    Runs a direct command and returns its process exit code.
 
     Args:
         argv (Sequence[str]): Command-line arguments without the executable.

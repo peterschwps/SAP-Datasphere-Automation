@@ -15,9 +15,18 @@ from datasphere_cli.files.workspace import (
 
 
 class CsvRowValidationError(ValueError):
-    """Raised when a task CSV row does not match its declared schema."""
-
+    """
+    Raised when a task CSV row does not match its declared schema.
+    """
     def __init__(self, path: Path, row_number: int, reason: str) -> None:
+        """
+        Initializes the error with the row that failed validation.
+
+        Args:
+            path (Path): Path of the task file.
+            row_number (int): Number of the invalid row.
+            reason (str): Reason the row was rejected.
+        """
         self.path = path
         self.row_number = row_number
         self.reason = reason
@@ -26,7 +35,20 @@ class CsvRowValidationError(ValueError):
         )
 
 
-def _atomic_write(path: Path, writer: Callable[[TextIO], object]) -> None:
+def _atomic_write(
+    path: Path,
+    writer: Callable[[TextIO], object],
+) -> None:
+    """
+    Writes a file by replacing it atomically. The content is written to a
+    temporary file first so an interrupted run never leaves a partial
+    result behind.
+
+    Args:
+        path (Path): Path of the file to replace.
+        writer (Callable[[TextIO], object]): Callable writing the content
+                                             to the opened file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
@@ -45,6 +67,8 @@ def _atomic_write(path: Path, writer: Callable[[TextIO], object]) -> None:
             os.fsync(temporary_file.fileno())
         os.replace(temporary_path, path)
     finally:
+        # Clean up after a failed write
+        # A successful replace already moved the temporary file away
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
 
@@ -53,12 +77,31 @@ def read_task_csv(
     command: str,
     root: str | Path | None = None,
 ) -> list[dict[str, str]]:
-    """Read and validate one command's task records."""
+    """
+    Reads and validates one command's task records. A task file is edited by
+    hand, so every deviation from the declared schema is reported with its
+    row number instead of being silently skipped.
+
+    Args:
+        command (str): Command the task file belongs to.
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Uses the default workspace when
+                                            None. Defaults to None.
+
+    Raises:
+        CsvRowValidationError: If the header or any row does not match the
+                               declared schema.
+
+    Returns:
+        list[dict[str, str]]: One dictionary per task row, keyed by column.
+    """
     definition = TASK_FILES[command]
     path = task_path(command, root)
     with path.open(newline="", encoding="utf-8") as task_file:
         reader = csv.reader(task_file)
         expected = list(definition.columns or ())
+
+        # Read the header row, which an empty file does not have
         try:
             actual_columns = next(reader)
         except StopIteration:
@@ -69,6 +112,8 @@ def read_task_csv(
                 1,
                 f"expected columns {expected}, got {actual_columns}",
             )
+        # Validate every row
+        # Separate checks so the message names the actual problem
         records: list[dict[str, str]] = []
         for row in reader:
             row_number = reader.line_num
@@ -107,15 +152,37 @@ def initialize_result(
     *,
     space: str | None = None,
 ) -> Path:
-    """Create a missing result schema without replacing an existing result."""
+    """
+    Creates a missing result schema without replacing an existing result.
+    An empty schema lets the user open the result file before the command
+    finishes.
+
+    Args:
+        command (str): Command the result file belongs to.
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Uses the default workspace when
+                                            None. Defaults to None.
+        space (str | None, optional): Space to scope the result file to.
+                                      Defaults to None.
+
+    Returns:
+        Path: Path of the existing or newly created result file.
+    """
     definition = RESULT_FILES[command]
     path = result_path(command, root, space=space)
     if path.exists():
         return path
 
+    # Write an empty JSON result, marked by missing columns
     if definition.columns is None:
 
         def write_empty(result_file: TextIO) -> None:
+            """
+            Writes an empty JSON result with a zeroed summary.
+
+            Args:
+                result_file (TextIO): Opened result file to write to.
+            """
             json.dump(
                 {
                     "results": [],
@@ -137,6 +204,12 @@ def initialize_result(
         columns = definition.columns
 
         def write_header(result_file: TextIO) -> None:
+            """
+            Writes the CSV header of the result schema.
+
+            Args:
+                result_file (TextIO): Opened result file to write to.
+            """
             csv.DictWriter(
                 result_file,
                 fieldnames=columns,
@@ -151,7 +224,22 @@ def write_result_csv(
     rows: Sequence[Mapping[str, Any]],
     root: str | Path | None = None,
 ) -> Path:
-    """Atomically replace one command's complete ordered CSV result."""
+    """
+    Atomically replaces one command's complete ordered CSV result.
+
+    Args:
+        command (str): Command the result file belongs to.
+        rows (Sequence[Mapping[str, Any]]): Result rows in their final order.
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Uses the default workspace when
+                                            None. Defaults to None.
+
+    Raises:
+        ValueError: If the command writes a JSON result instead of a CSV one.
+
+    Returns:
+        Path: Path of the written result file.
+    """
     definition = RESULT_FILES[command]
     if definition.columns is None:
         raise ValueError(f"Result for '{command}' is not CSV.")
@@ -159,6 +247,12 @@ def write_result_csv(
     path = result_path(command, root)
 
     def write_rows(result_file: TextIO) -> None:
+        """
+        Writes the header and every result row.
+
+        Args:
+            result_file (TextIO): Opened result file to write to.
+        """
         writer = csv.DictWriter(
             result_file,
             fieldnames=columns,
@@ -177,13 +271,37 @@ def write_result_json(
     *,
     space: str | None = None,
 ) -> Path:
-    """Atomically replace one structured JSON command result."""
+    """
+    Atomically replaces one structured JSON command result. Checkpointing
+    commands call this repeatedly while they are still running.
+
+    Args:
+        command (str): Command the result file belongs to.
+        data (object): Structured result to serialize.
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Uses the default workspace when
+                                            None. Defaults to None.
+        space (str | None, optional): Space to scope the result file to.
+                                      Defaults to None.
+
+    Raises:
+        ValueError: If the command writes a CSV result instead of a JSON one.
+
+    Returns:
+        Path: Path of the written result file.
+    """
     definition = RESULT_FILES[command]
     if definition.columns is not None:
         raise ValueError(f"Result for '{command}' is not JSON.")
     path = result_path(command, root, space=space)
 
     def write_data(result_file: TextIO) -> None:
+        """
+        Writes the structured result as indented JSON.
+
+        Args:
+            result_file (TextIO): Opened result file to write to.
+        """
         json.dump(data, result_file, indent=2)
         result_file.write("\n")
     _atomic_write(path, write_data)

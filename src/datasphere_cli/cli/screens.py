@@ -29,6 +29,7 @@ except PackageNotFoundError:
 
 from datasphere_core import CommandContext, DatasphereSession
 from datasphere_core.models.common import CommandProgress
+from datasphere_core.models.remote_tables import StatisticsType
 
 from datasphere_cli import actions
 from datasphere_cli.cli.logo import ASCII_LOGO
@@ -137,8 +138,8 @@ PARAM_DEFINITIONS: dict[Action, list[ParameterDefinition]] = {
             "statistics_type",
             "Statistics type",
             "choice",
-            choices=("RECORD_COUNT", "SIMPLE", "HISTOGRAM"),
-            default="HISTOGRAM",
+            choices=tuple(StatisticsType),
+            default=StatisticsType.HISTOGRAM,
         ),
     ],
     actions.refresh_remote_table_statistics: [
@@ -257,6 +258,9 @@ class BaseScreen(Screen):
         Builds the content between header and footer. Every screen has
         to implement this.
 
+        Raises:
+            NotImplementedError: If a screen does not implement it.
+
         Yields:
             ComposeResult: Content widgets of the screen.
         """
@@ -279,7 +283,7 @@ class EntryScreen(BaseScreen):
 
     def compose_content(self) -> ComposeResult:
         """
-        Show menu in the main content widget.
+        Builds the main menu container.
 
         Yields:
             ComposeResult: Interactive menu widget.
@@ -292,13 +296,13 @@ class EntryScreen(BaseScreen):
 
     def on_mount(self) -> None:
         """
-        Event handler called after widget was added to the CLI.
+        Handles the mount event and builds the menu.
         """
         self._rebuild_menu()
 
     def _rebuild_menu(self, restore_id: str | None = None) -> None:
         """
-        Build the interactive menu.
+        Rebuilds the interactive menu from the expansion state.
 
         Args:
             restore_id (str | None, optional): ID of the cursor's position. If
@@ -356,6 +360,7 @@ class EntryScreen(BaseScreen):
                         )
 
         # Set cursor back to previous position
+        # Textual offers no public lookup from option ID to index
         if restore_id:
             for i, opt in enumerate(menu._options):
                 if opt.id == restore_id:
@@ -372,7 +377,10 @@ class EntryScreen(BaseScreen):
         event: OptionList.OptionSelected,
     ) -> None:
         """
-        Event handler called when list option is selected.
+        Handles a menu selection: expands a category or starts an action.
+
+        Args:
+            event (OptionList.OptionSelected): Selection event to handle.
         """
         # Get ID of current cursor position
         option_id = str(event.option.id)
@@ -448,7 +456,7 @@ class ParamScreen(BaseScreen):
 
     def compose_content(self) -> ComposeResult:
         """
-        Load structure with all components. Content is populated in on_mount.
+        Builds the empty wizard layout. Content is filled in on_mount.
 
         Yields:
             ComposeResult: Container with step counter, label, widget area,
@@ -465,7 +473,7 @@ class ParamScreen(BaseScreen):
 
     async def on_mount(self) -> None:
         """
-        Event handler called after widget was added to the CLI.
+        Handles the mount event and shows the first step.
         """
         await self._show_step()
 
@@ -476,6 +484,12 @@ class ParamScreen(BaseScreen):
         """
         Builds the input widget for the current step, pre-filled with any
         previously entered answer or the parameter default.
+
+        Args:
+            step (ParameterDefinition): Parameter the widget asks for.
+
+        Returns:
+            Input | OptionList: Widget matching the parameter type.
         """
         name = step.name
         param_type = step.type
@@ -484,7 +498,7 @@ class ParamScreen(BaseScreen):
         # Input prompt for strings and whole numbers
         if param_type in ("str", "optional_str", "int"):
 
-            # A missing answer and a missing default both mean an empty field
+            # Start empty when there is neither an answer nor a default
             return Input(
                 value="" if value is None else str(value),
                 id="current-widget",
@@ -567,7 +581,8 @@ class ParamScreen(BaseScreen):
         Reads and validates the current widget value.
 
         Returns:
-            Validated value or None on validation error.
+            Any | None: Validated value, or None if the input was
+                        rejected or an optional field was left empty.
         """
         step = self._steps[self._step]
         param_type = step.type
@@ -609,7 +624,8 @@ class ParamScreen(BaseScreen):
         Validates the current step, stores the answer and advances to the next
         step or pushes ExecutionScreen on the final step.
         """
-        # Check for errors (value=None)
+        # Stay on the step while the input is rejected
+        # None also marks an optional string left empty on purpose
         step = self._steps[self._step]
         value = self._validate_current()
         if value is None and step.type != "optional_str":
@@ -632,7 +648,8 @@ class ParamScreen(BaseScreen):
 
     async def _handle_back(self) -> None:
         """
-        Go back one step, or pop to EntryScreen if already on the first step.
+        Returns to the previous step, or leaves the wizard on the first
+        step.
         """
         if self._step == 0:
             self.app.pop_screen()
@@ -642,7 +659,10 @@ class ParamScreen(BaseScreen):
 
     async def on_input_submitted(self, _event: Input.Submitted) -> None:
         """
-        Event handler called when Enter is pressed inside an Input widget.
+        Handles Enter inside an Input widget and confirms the step.
+
+        Args:
+            _event (Input.Submitted): Unused submit event.
         """
         await self._handle_confirm()
 
@@ -650,16 +670,22 @@ class ParamScreen(BaseScreen):
         self, event: OptionList.OptionSelected
     ) -> None:
         """
-        Event handler called when an option is selected in a bool OptionList.
-        OptionList consumes the Enter key itself, so we confirm here instead
-        of in on_key.
+        Handles a selection in an OptionList and confirms the step.
+        OptionList consumes the Enter key itself, so the confirmation
+        happens here instead of in on_key.
+
+        Args:
+            event (OptionList.OptionSelected): Selection event to handle.
         """
         if event.option_list.id == "current-widget":
             await self._handle_confirm()
 
     async def on_key(self, event: events.Key) -> None:
         """
-        Event handler called when a key is pressed.
+        Handles Escape and steps back through the wizard.
+
+        Args:
+            event (events.Key): Key event to handle.
         """
         if event.key == "escape":
             await self._handle_back()
@@ -690,7 +716,7 @@ class ExecutionScreen(BaseScreen):
 
     def compose_content(self) -> ComposeResult:
         """
-        Show live log output and status for the running action.
+        Builds the live log output and status of the running action.
 
         Yields:
             ComposeResult: Log widget and status indicator.
@@ -703,8 +729,7 @@ class ExecutionScreen(BaseScreen):
 
     def on_mount(self) -> None:
         """
-        Event handler called after widget was added to the CLI. Starts the
-        action worker.
+        Handles the mount event and starts the action worker.
         """
         self.run_worker(self._run_action(), exclusive=True)
 
@@ -735,7 +760,7 @@ class ExecutionScreen(BaseScreen):
 
             async def report_progress(update: CommandProgress) -> None:
                 """
-                Writes one Core progress update to the log widget.
+                Writes one progress update to the log widget.
 
                 Args:
                     update (CommandProgress): Progress update to show.
@@ -774,7 +799,10 @@ class ExecutionScreen(BaseScreen):
 
     def on_key(self, event: events.Key) -> None:
         """
-        Event handler for key presses. Returns to EntryScreen after completion.
+        Handles key presses and returns to the EntryScreen once done.
+
+        Args:
+            event (events.Key): Key event to handle.
         """
         # Pop ExecutionScreen and ParamScreen to return to EntryScreen
         if self._done and event.key in ("enter", "escape"):
@@ -787,7 +815,6 @@ class SettingsScreen(BaseScreen):
     Screen to view and edit the settings.toml file.
     Ctrl+S saves and reloads settings. Escape closes without saving.
     """
-
     BINDINGS = [Binding("ctrl+s", "save", "Save", show=False)]
 
     def compose_content(self) -> ComposeResult:
@@ -806,7 +833,7 @@ class SettingsScreen(BaseScreen):
 
     def compose_footer(self) -> ComposeResult:
         """
-        Show custom footer with shortcuts to edit settings.
+        Builds a custom footer with the settings shortcuts.
 
         Yields:
             ComposeResult: Footer with special shortcuts.
@@ -821,14 +848,14 @@ class SettingsScreen(BaseScreen):
 
     def on_mount(self) -> None:
         """
-        Event handler called after widget was added to the CLI.
+        Handles the mount event and loads the settings file.
         """
         content = SETTINGS_FILE.read_text(encoding="utf-8")
         self.query_one("#settings-editor", TextArea).load_text(content)
 
     def action_save(self) -> None:
         """
-        Event handler called when settings are saved.
+        Saves the edited settings and reloads them.
         """
         text = self.query_one("#settings-editor", TextArea).text
         SETTINGS_FILE.write_text(text, encoding="utf-8")
@@ -857,7 +884,6 @@ class DatasphereApp(App):
     """
     Global app configuration for the CLI. Calls the EntryScreen.
     """
-
     CSS_PATH = "style.tcss"
     MIN_WIDTH = 112
     BINDINGS = [

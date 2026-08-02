@@ -104,10 +104,19 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """
-        Loads the settings exclusively from the TOML file.
+        Loads the settings exclusively from the TOML file. The signature is
+        fixed by pydantic-settings; every source but the TOML one is dropped
+        so an environment variable can never silently override the file.
+
+        Args:
+            settings_cls (type[BaseSettings]): Settings class being built.
+            init_settings (PydanticBaseSettingsSource): Unused source.
+            env_settings (PydanticBaseSettingsSource): Unused source.
+            dotenv_settings (PydanticBaseSettingsSource): Unused source.
+            file_secret_settings (PydanticBaseSettingsSource): Unused source.
 
         Returns:
-            tuple[PydanticBaseSettingsSource, ...]: Settings sources.
+            tuple[PydanticBaseSettingsSource, ...]: The TOML source only.
         """
         return (TomlConfigSettingsSource(settings_cls),)
 
@@ -184,10 +193,16 @@ def build_session_config() -> SessionConfig:
     Builds the session configuration from the settings file. The client
     secret can also be provided via the 'SECRET' environment variable.
 
+    Raises:
+        ValueError: If neither the settings file nor the environment
+                    provides a client secret.
+
     Returns:
         SessionConfig: Configuration for the Datasphere session.
     """
     current = get_settings()
+
+    # Fall back to the environment so the file can stay free of the secret
     client_secret = current.credentials.secret or os.environ.get("SECRET")
     if not client_secret:
         raise ValueError(
