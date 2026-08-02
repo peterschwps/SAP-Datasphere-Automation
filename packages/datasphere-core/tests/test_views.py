@@ -1,12 +1,13 @@
+import asyncio
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from datasphere_api import (
     DatasphereClient,
-    ViewAnalysisCancelled,
 )
 from datasphere_core import CommandCancelledError, CommandContext, persistence
+from datasphere_core.commands import views as views_commands
 from datasphere_core.commands.views import (
     create_view_partitioning,
     find_view_attribute_matches_batch,
@@ -226,19 +227,42 @@ async def test_persist_view_batch_keeps_order_and_summarizes() -> None:
     assert progress[-1].phase is CommandProgressPhase.FAILED
 
 
+def _analyzer(
+    entities: list[dict[str, Any]],
+    *,
+    log_id: int = 88,
+    status: str = "COMPLETED",
+) -> dict[str, Any]:
+    """
+    Builds a client whose view analyzer reports one run with the given status.
+    """
+    async def get_task_logs(view: str, space: str) -> list[dict[str, Any]]:
+        return [{"logId": log_id, "status": status}]
+
+    async def start_view_analyzer(
+        view: str,
+        space: str,
+    ) -> tuple[bool, int | None, bool]:
+        return True, log_id, False
+
+    async def get_view_analyzer_result(
+        task_log: int,
+        space: str,
+    ) -> dict[str, Any]:
+        return {"entityStats": entities}
+
+    return {
+        "get_task_logs": get_task_logs,
+        "start_view_analyzer": start_view_analyzer,
+        "get_view_analyzer_result": get_view_analyzer_result,
+    }
+
+
 async def test_find_persistence_candidates_keeps_matching_scores() -> None:
     """
     Checks that only entities reaching the score become candidates.
     """
-    async def analyze(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> dict[str, Any]:
-        return {
-            "logId": 88,
-            "entityStats": [
+    entities: list[dict[str, Any]] = [
                 {
                     "entity": "VIEW_MATCH",
                     "space": "SPACE_B",
@@ -251,11 +275,10 @@ async def test_find_persistence_candidates_keeps_matching_scores() -> None:
                     "space": "SPACE_B",
                     "persistencyCandidateScore": 3,
                 },
-            ],
-        }
+            ]
 
     result = await find_view_persistence_candidates(
-        CommandContext(client=_client(analyze_view=analyze)),
+        CommandContext(client=_client(**_analyzer(entities))),
         FindViewPersistenceCandidatesRequest(
             view="VIEW_A",
             space="SPACE_A",
@@ -280,15 +303,7 @@ async def test_find_persistence_candidates_keeps_higher_scores() -> None:
     """
     Checks that the candidate score is a threshold, not an exact match.
     """
-    async def analyze(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> dict[str, Any]:
-        return {
-            "logId": 88,
-            "entityStats": [
+    entities: list[dict[str, Any]] = [
                 {
                     "entity": "VIEW_ABOVE",
                     "space": "SPACE_B",
@@ -304,11 +319,10 @@ async def test_find_persistence_candidates_keeps_higher_scores() -> None:
                     "space": "SPACE_B",
                     "persistencyCandidateScore": 6,
                 },
-            ],
-        }
+            ]
 
     result = await find_view_persistence_candidates(
-        CommandContext(client=_client(analyze_view=analyze)),
+        CommandContext(client=_client(**_analyzer(entities))),
         FindViewPersistenceCandidatesRequest(
             view="VIEW_A",
             space="SPACE_A",
@@ -331,26 +345,17 @@ async def test_find_persistence_candidates_drops_entities_without_score(
     """
     Checks that an entity without a score is dropped, not compared.
     """
-    async def analyze(
-        view: str,
-        space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> dict[str, Any]:
-        return {
-            "logId": 88,
-            "entityStats": [
+    entities: list[dict[str, Any]] = [
                 {"entity": "VIEW_NO_SCORE", "space": "SPACE_B"},
                 {
                     "entity": "VIEW_MATCH",
                     "space": "SPACE_B",
                     "persistencyCandidateScore": 10,
                 },
-            ],
-        }
+            ]
 
     result = await find_view_persistence_candidates(
-        CommandContext(client=_client(analyze_view=analyze)),
+        CommandContext(client=_client(**_analyzer(entities))),
         FindViewPersistenceCandidatesRequest(
             view="VIEW_A",
             space="SPACE_A",
@@ -368,17 +373,31 @@ async def test_find_persistence_candidates_reraises_a_cancellation() -> None:
     """
     Checks that a cancelled analysis is re-raised with its log ID.
     """
-    async def analyze(
+    calls = 0
+
+    # The first call snapshots the existing runs, the cancellation has to
+    # happen after the analyzer started
+    async def get_task_logs(view: str, space: str) -> list[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise asyncio.CancelledError
+        return []
+
+    async def start_view_analyzer(
         view: str,
         space: str,
-        *,
-        timeout_seconds: float | None,
-    ) -> dict[str, Any]:
-        raise ViewAnalysisCancelled(view, space, log_id=7)
+    ) -> tuple[bool, int | None, bool]:
+        return True, 7, False
 
     with pytest.raises(CommandCancelledError) as error:
         await find_view_persistence_candidates(
-            CommandContext(client=_client(analyze_view=analyze)),
+            CommandContext(
+                client=_client(
+                    get_task_logs=get_task_logs,
+                    start_view_analyzer=start_view_analyzer,
+                )
+            ),
             FindViewPersistenceCandidatesRequest(
                 view="VIEW_A",
                 space="SPACE_A",
@@ -387,6 +406,146 @@ async def test_find_persistence_candidates_reraises_a_cancellation() -> None:
 
     # The log ID lets the caller follow the analysis that still runs remotely
     assert error.value.log_id == "7"
+
+
+def _analyzer_logs(
+    *polls: list[dict[str, Any]],
+    started_log_id: int | None,
+    already_running: bool = False,
+) -> dict[str, Any]:
+    """
+    Builds a client whose task log answers one snapshot and then the polls.
+    """
+    remaining = list(polls)
+
+    async def get_task_logs(view: str, space: str) -> list[dict[str, Any]]:
+        return remaining.pop(0) if len(remaining) > 1 else remaining[0]
+
+    async def start_view_analyzer(
+        view: str,
+        space: str,
+    ) -> tuple[bool, int | None, bool]:
+        return True, started_log_id, already_running
+
+    async def get_view_analyzer_result(
+        task_log: int,
+        space: str,
+    ) -> dict[str, Any]:
+        return {"entityStats": [{"entity": str(task_log)}]}
+
+    return {
+        "get_task_logs": get_task_logs,
+        "start_view_analyzer": start_view_analyzer,
+        "get_view_analyzer_result": get_view_analyzer_result,
+    }
+
+
+async def test_view_analyzer_follows_the_log_id_of_its_own_run() -> None:
+    """
+    Checks that a newer foreign run does not divert the analysis.
+    """
+    result = await find_view_persistence_candidates(
+        CommandContext(
+            client=_client(
+                **_analyzer_logs(
+                    [{"status": "RUNNING", "logId": 19}],
+                    [
+                        {"status": "COMPLETED", "logId": 21},
+                        {"status": "COMPLETED", "logId": 20},
+                    ],
+                    started_log_id=20,
+                )
+            )
+        ),
+        FindViewPersistenceCandidatesRequest(view="VIEW_A", space="SPACE_A"),
+    )
+
+    # Log 21 is newer but belongs to someone else
+    assert result.log_id == "20"
+    assert result.status is FindViewPersistenceCandidatesStatus.COMPLETED
+
+
+async def test_view_analyzer_waits_for_a_log_that_appears_late(
+    monkeypatch,
+) -> None:
+    """
+    Checks that an empty poll is retried instead of ending the analysis.
+    """
+    monkeypatch.setattr(views_commands, "ANALYZER_POLL_INTERVAL_SECONDS", 0)
+
+    result = await find_view_persistence_candidates(
+        CommandContext(
+            client=_client(
+                **_analyzer_logs(
+                    [],
+                    [],
+                    [{"status": "COMPLETED", "logId": 41}],
+                    started_log_id=41,
+                )
+            )
+        ),
+        FindViewPersistenceCandidatesRequest(view="VIEW_A", space="SPACE_A"),
+    )
+
+    assert result.log_id == "41"
+
+
+async def test_view_analyzer_reports_a_terminal_status_without_result(
+    monkeypatch,
+) -> None:
+    """
+    Checks that a cancelled run yields its log ID and no candidates.
+    """
+    monkeypatch.setattr(views_commands, "ANALYZER_POLL_INTERVAL_SECONDS", 0)
+
+    result = await find_view_persistence_candidates(
+        CommandContext(
+            client=_client(
+                **_analyzer_logs(
+                    [],
+                    [{"status": "CANCELLED", "logId": 32}],
+                    started_log_id=32,
+                )
+            )
+        ),
+        FindViewPersistenceCandidatesRequest(view="VIEW_A", space="SPACE_A"),
+    )
+
+    # Without entities the analysis counts as failed, but the run is traceable
+    assert result.log_id == "32"
+    assert result.candidates == ()
+    assert result.status is FindViewPersistenceCandidatesStatus.FAILED
+
+
+async def test_view_analyzer_timeout_keeps_the_discovered_log_id(
+    monkeypatch,
+) -> None:
+    """
+    Checks that a timeout reports the log ID the analysis had found.
+    """
+    monkeypatch.setattr(views_commands, "ANALYZER_POLL_INTERVAL_SECONDS", 0)
+
+    result = await find_view_persistence_candidates(
+        CommandContext(
+            client=_client(
+                **_analyzer_logs(
+                    [],
+                    [{"status": "RUNNING", "logId": 55}],
+                    started_log_id=None,
+                    already_running=True,
+                )
+            )
+        ),
+        FindViewPersistenceCandidatesRequest(
+            view="VIEW_A",
+            space="SPACE_A",
+            timeout_seconds=0.01,
+        ),
+    )
+
+    # The start returned no ID, so only polling could discover it
+    assert result.status is FindViewPersistenceCandidatesStatus.TIMED_OUT
+    assert result.log_id == "55"
 
 
 async def test_find_attribute_matches_batch_discovers_every_view() -> None:

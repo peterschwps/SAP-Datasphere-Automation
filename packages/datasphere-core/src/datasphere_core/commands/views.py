@@ -1,7 +1,6 @@
+import asyncio
 from collections.abc import Callable
 from typing import Any
-
-from datasphere_api import ViewAnalysisCancelled, ViewAnalysisTimeout
 
 from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
@@ -105,6 +104,155 @@ def _candidate_from_entity(
     )
 
 
+# Statuses a view analyzer run reports while it is still going
+_ANALYZER_ACTIVE_STATUSES = ("PENDING", "RUNNING")
+
+# Seconds between two polls of a running view analyzer
+ANALYZER_POLL_INTERVAL_SECONDS = 1
+
+
+def _log_id_of(log: dict[str, Any]) -> int | None:
+    """
+    Reads the task log ID of one log entry.
+
+    Args:
+        log (dict[str, Any]): Log entry as returned by the task log endpoint.
+
+    Returns:
+        int | None: Log ID, or None if the entry carries no usable one.
+    """
+    log_id = log.get("logId")
+    if isinstance(log_id, int) and not isinstance(log_id, bool):
+        return log_id
+    return None
+
+
+def _match_analyzer_log(
+    logs: list[dict[str, Any]],
+    *,
+    log_id: int | None,
+    known_log_ids: set[int],
+    already_running: bool,
+) -> dict[str, Any] | None:
+    """
+    Picks the log entry that belongs to the started analyzer run.
+
+    Args:
+        logs (list[dict[str, Any]]): Current log entries of the view.
+        log_id (int | None): Log ID the start returned, if any.
+        known_log_ids (set[int]): Log IDs that existed before the start.
+        already_running (bool): Whether the analyzer was running before.
+
+    Returns:
+        dict[str, Any] | None: Matching entry, or None while none fits yet.
+    """
+    for log in logs:
+        candidate = _log_id_of(log)
+        if candidate is None:
+            continue
+        if log_id is not None and candidate != log_id:
+            continue
+        if log_id is None and candidate in known_log_ids:
+            continue
+        return log
+
+    # A run that was already going may not report a log ID of its own, so the
+    # first active entry is the best guess left
+    if already_running and log_id is None:
+        for log in logs:
+            if str(log.get("status", "")).upper() in _ANALYZER_ACTIVE_STATUSES:
+                return log
+    return None
+
+
+async def _run_view_analyzer(
+    context: CommandContext,
+    *,
+    view: str,
+    space: str,
+    timeout_seconds: float | None,
+) -> tuple[int | None, list[dict[str, Any]]]:
+    """
+    Starts the view analyzer and waits for its entity statistics.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+        timeout_seconds (float | None): Maximum polling duration, or None to
+                                        poll without a limit.
+
+    Raises:
+        CommandTimeoutError: If the run is still going when the timeout
+                             expires. It continues remotely.
+        CommandCancelledError: If polling is cancelled after the run started.
+                               It continues remotely.
+
+    Returns:
+        tuple[int | None, list[dict[str, Any]]]: Log ID of the run and its
+                                                 entity statistics. The
+                                                 statistics are empty if the
+                                                 run failed or never started.
+    """
+    # Remember the existing runs, so a new one can be told apart from them
+    known_log_ids = {
+        log_id
+        for log in await context.client.views.get_task_logs(view, space)
+        if (log_id := _log_id_of(log)) is not None
+    }
+
+    started, log_id, already_running = (
+        await context.client.views.start_view_analyzer(view, space)
+    )
+    if not started:
+        return None, []
+
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            while True:
+                logs = await context.client.views.get_task_logs(view, space)
+                matching = _match_analyzer_log(
+                    logs,
+                    log_id=log_id,
+                    known_log_ids=known_log_ids,
+                    already_running=already_running,
+                )
+                matching_id = (
+                    None if matching is None else _log_id_of(matching)
+                )
+                if matching is None or matching_id is None:
+                    await asyncio.sleep(ANALYZER_POLL_INTERVAL_SECONDS)
+                    continue
+
+                log_id = matching_id
+                status = str(matching.get("status", "")).upper()
+                if status == "COMPLETED":
+                    break
+                if status not in _ANALYZER_ACTIVE_STATUSES:
+                    return log_id, []
+                await asyncio.sleep(ANALYZER_POLL_INTERVAL_SECONDS)
+
+    except TimeoutError:
+        raise CommandTimeoutError(
+            f"Analysis of view '{view}' in '{space}' timed out. "
+            "The remote operation may continue.",
+            log_id=to_text(log_id),
+        ) from None
+    except asyncio.CancelledError:
+        raise CommandCancelledError(
+            f"Analysis of view '{view}' in '{space}' was cancelled. "
+            "The remote operation may continue.",
+            log_id=to_text(log_id),
+        ) from None
+
+    result = await context.client.views.get_view_analyzer_result(
+        log_id,
+        space,
+    )
+    entities = result.get("entityStats", [])
+    return log_id, entities if isinstance(entities, list) else []
+
+
 @command(FIND_PERSISTENCE_CANDIDATES_COMMAND_NAME)
 async def find_view_persistence_candidates(
     context: CommandContext,
@@ -128,12 +276,13 @@ async def find_view_persistence_candidates(
     """
     # Run the view analyzer
     try:
-        analysis = await context.client.views.analyze_view(
+        analyzer_log_id, entities = await _run_view_analyzer(
+            context,
             view=request.view,
             space=request.space,
             timeout_seconds=request.timeout_seconds,
         )
-    except ViewAnalysisTimeout as error:
+    except CommandTimeoutError as error:
         return FindViewPersistenceCandidatesResult(
             view=request.view,
             space=request.space,
@@ -141,12 +290,8 @@ async def find_view_persistence_candidates(
             candidates=(),
             log_id=to_text(error.log_id),
         )
-    except ViewAnalysisCancelled as error:
-        log_id = to_text(error.log_id)
-        raise CommandCancelledError(str(error), log_id=log_id) from None
 
     # Keep every entity that reached at least the requested candidate score
-    entities = analysis["entityStats"]
     candidates: list[ViewPersistenceCandidate] = []
     for entity in entities:
 
@@ -159,8 +304,7 @@ async def find_view_persistence_candidates(
         if score >= request.minimum_candidate_score:
             candidates.append(_candidate_from_entity(entity, score))
 
-    # Fetch logId
-    log_id = to_text(analysis["logId"])
+    log_id = to_text(analyzer_log_id)
 
     return FindViewPersistenceCandidatesResult(
         view=request.view,
