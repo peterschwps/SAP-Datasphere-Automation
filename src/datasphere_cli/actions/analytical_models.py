@@ -48,7 +48,7 @@ def _log_summary(
     Logs the outcome counts of a batch and where its result was written.
 
     Args:
-        command (str): Core command the results belong to.
+        command (str): Command the results belong to.
         result (AnalyticalModelBatchResult): Completed batch result to
                                              summarize.
         path (Path): Path the result file was written to.
@@ -163,7 +163,7 @@ async def export_analytical_model_view_dependencies(
     Exports all view dependencies of analytical models.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
+        context (CommandContext): Context with the authenticated client.
         space (str | None, optional): Space to limit dependency discovery.
                                       Defaults to None.
         deduplicate_views (bool, optional): Whether to remove duplicate views.
@@ -244,7 +244,7 @@ async def measure_analytical_model_view_persistence_from_file(
     results are persisted as soon as possible.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
+        context (CommandContext): Context with the authenticated client.
         timeout_seconds (float, optional): Maximum runtime for each model.
                                            Defaults to 3600.0 seconds.
         max_concurrency (int, optional): Maximum amount of concurrent

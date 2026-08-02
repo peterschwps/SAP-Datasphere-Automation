@@ -1,13 +1,13 @@
 from pathlib import Path
 
 from datasphere_core import CommandContext
+from datasphere_core.commands.task_chains import run_task_chain_batch
 from datasphere_core.models.task_chains import (
     RunTaskChainBatchRequest,
     RunTaskChainBatchResult,
     RunTaskChainRequest,
 )
 
-from datasphere_cli.actions.dispatch import dispatch_command
 from datasphere_cli.files.records import TaskChainResultRecord
 from datasphere_cli.files.storage import (
     initialize_result,
@@ -25,23 +25,29 @@ async def run_task_chains_from_file(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> RunTaskChainBatchResult:
-    """Run task chains and write only the final result atomically.
-
-    Core progress contains counters but not result records, so this adapter
-    does not fabricate partial checkpoints during a long-running command.
+    """
+    Runs the task chains listed in the task file. Writes the result once
+    the batch completed.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
+        context (CommandContext): Context with the authenticated client.
         timeout_seconds (float, optional): Maximum runtime for each task chain.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+                                           Defaults to 3600.0 seconds.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
 
     Returns:
-        RunTaskChainBatchResult: Task-chain execution results.
+        RunTaskChainBatchResult: Task chain execution results.
     """
     initialize_result(_COMMAND, workspace_root)
     records = read_task_csv(_COMMAND, workspace_root)
+
+    # Build request from task file
+    # The only task file whose column name differs from the request field
     request = RunTaskChainBatchRequest(
         requests=tuple(
             RunTaskChainRequest(
@@ -53,25 +59,22 @@ async def run_task_chains_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _COMMAND,
-        context,
-        request,
-        RunTaskChainBatchRequest,
-        RunTaskChainBatchResult,
-    )
+    result = await run_task_chain_batch(context, request)
     rows: list[TaskChainResultRecord] = [
         {
             "task_chain": item.chain,
             "space": item.space,
             "status": item.status,
-            "sap_status": item.sap_status,
+            "log_status": item.log_status,
             "log_id": item.log_id,
             "runtime_seconds": item.runtime_seconds,
         }
         for item in result.results
     ]
     path = write_result_csv(_COMMAND, rows, workspace_root)
+
+    # Log outcome counts
+    # TaskChainStatus has no skipped outcome, so that counter stays out
     logger.info(
         "Task chains: %s succeeded, %s failed, %s timed out.",
         result.summary.succeeded,

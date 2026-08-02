@@ -1,6 +1,16 @@
 from pathlib import Path
 
 from datasphere_core import CommandContext
+from datasphere_core.commands.views import (
+    create_view_partitioning_batch,
+    delete_view_partitioning_batch,
+    find_view_attribute_matches_batch,
+    find_view_persistence_candidates_batch,
+    lock_view_partitions_batch,
+    persist_view_batch,
+    unlock_view_partitions_batch,
+    unpersist_view_batch,
+)
 from datasphere_core.models.views import (
     CreateViewPartitioningBatchRequest,
     CreateViewPartitioningBatchResult,
@@ -26,7 +36,6 @@ from datasphere_core.models.views import (
     UnpersistViewRequest,
 )
 
-from datasphere_cli.actions.dispatch import dispatch_command
 from datasphere_cli.files.records import (
     ViewAttributeResultRecord,
     ViewPartitioningResultRecord,
@@ -62,7 +71,19 @@ type ViewBatchResult = (
 )
 
 
-def _log_summary(command: str, result: ViewBatchResult, path: Path) -> None:
+def _log_summary(
+    command: str,
+    result: ViewBatchResult,
+    path: Path,
+) -> None:
+    """
+    Logs the outcome counts of a batch and where its result was written.
+
+    Args:
+        command (str): Command the results belong to.
+        result (ViewBatchResult): Completed batch result to summarize.
+        path (Path): Path the result file was written to.
+    """
     logger.info(
         "%s: %s succeeded, %s failed, %s skipped, %s timed out.",
         command,
@@ -76,37 +97,41 @@ def _log_summary(command: str, result: ViewBatchResult, path: Path) -> None:
 
 async def export_view_persistence_candidates(
     context: CommandContext,
-    candidate_score: int | float = 10,
+    minimum_candidate_score: int | float = 10,
     timeout_seconds: float = 3600.0,
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> FindViewPersistenceCandidatesBatchResult:
-    """Export view persistence candidates from the Core command.
+    """
+    Exports view persistence candidates.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
-        candidate_score (int | float, optional): Minimum candidate score.
+        context (CommandContext): Context with the authenticated client.
+        minimum_candidate_score (int | float, optional): Lowest candidate
+                                                         score a view has to
+                                                         reach. Defaults to 10.
         timeout_seconds (float, optional): Maximum runtime for each view.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for result files.
-            Uses the default workspace when None.
+                                           Defaults to 3600.0 seconds.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for the result
+                                                      file. Uses the default
+                                                      workspace when None.
+                                                      Defaults to None.
 
     Returns:
         FindViewPersistenceCandidatesBatchResult: Candidate results.
     """
     initialize_result(_CANDIDATES_COMMAND, workspace_root)
     request = FindViewPersistenceCandidatesBatchRequest(
-        candidate_score=candidate_score,
+        minimum_candidate_score=minimum_candidate_score,
         timeout_seconds=timeout_seconds,
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _CANDIDATES_COMMAND,
-        context,
-        request,
-        FindViewPersistenceCandidatesBatchRequest,
-        FindViewPersistenceCandidatesBatchResult,
-    )
+    result = await find_view_persistence_candidates_batch(context, request)
+
+    # Write one row per candidate
+    # A view without candidates keeps a row with empty candidate fields
     rows: list[ViewPersistenceCandidateResultRecord] = []
     for item in result.results:
         if not item.candidates:
@@ -150,15 +175,20 @@ async def export_view_attribute_matches(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> FindViewAttributeMatchesBatchResult:
-    """Export view attributes matching a substring.
+    """
+    Exports view attributes matching a substring.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
+        context (CommandContext): Context with the authenticated client.
         attribute_substring (str): Substring to find in view attributes.
         case_sensitive (bool, optional): Whether matching respects case.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for result files.
-            Uses the default workspace when None.
+                                         Defaults to False.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for the result
+                                                      file. Uses the default
+                                                      workspace when None.
+                                                      Defaults to None.
 
     Returns:
         FindViewAttributeMatchesBatchResult: Attribute-match results.
@@ -169,13 +199,7 @@ async def export_view_attribute_matches(
         case_sensitive=case_sensitive,
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _ATTRIBUTES_COMMAND,
-        context,
-        request,
-        FindViewAttributeMatchesBatchRequest,
-        FindViewAttributeMatchesBatchResult,
-    )
+    result = await find_view_attribute_matches_batch(context, request)
     rows: list[ViewAttributeResultRecord] = []
     for item in result.results:
         for attribute in item.attributes:
@@ -201,17 +225,21 @@ async def create_view_partitioning_from_file(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> CreateViewPartitioningBatchResult:
-    """Create partitioning for views listed in the task file.
+    """
+    Creates partitioning for views listed in the task file.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
+        context (CommandContext): Context with the authenticated client.
         start_year (int): First year included in the partitioning range.
         end_year (int): Last year included in the partitioning range.
         overwrite_existing (bool, optional): Whether to replace existing
-            partitioning.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+                                             partitioning. Defaults to False.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
 
     Returns:
         CreateViewPartitioningBatchResult: Partitioning operation results.
@@ -232,13 +260,7 @@ async def create_view_partitioning_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _CREATE_COMMAND,
-        context,
-        request,
-        CreateViewPartitioningBatchRequest,
-        CreateViewPartitioningBatchResult,
-    )
+    result = await create_view_partitioning_batch(context, request)
     return _write_partitioning_result(
         _CREATE_COMMAND,
         result,
@@ -252,32 +274,33 @@ async def delete_view_partitioning_from_file(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> DeleteViewPartitioningBatchResult:
-    """Delete partitioning for views listed in the task file.
+    """
+    Deletes partitioning for views listed in the task file.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+        context (CommandContext): Context with the authenticated client.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
 
     Returns:
         DeleteViewPartitioningBatchResult: Partitioning operation results.
     """
     initialize_result(_DELETE_COMMAND, workspace_root)
-    records = _read_view_tasks(_DELETE_COMMAND, workspace_root)
+    records = read_task_csv(_DELETE_COMMAND, workspace_root)
+
+    # Build request from task file
+    # The columns are named after the request fields, so a record splats
     request = DeleteViewPartitioningBatchRequest(
         requests=tuple(
             DeleteViewPartitioningRequest(**record) for record in records
         ),
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _DELETE_COMMAND,
-        context,
-        request,
-        DeleteViewPartitioningBatchRequest,
-        DeleteViewPartitioningBatchResult,
-    )
+    result = await delete_view_partitioning_batch(context, request)
     return _write_status_result(
         _DELETE_COMMAND,
         result,
@@ -291,23 +314,26 @@ async def persist_views_from_file(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> PersistViewBatchResult:
-    """Persist views and write only the final result atomically.
-
-    Core progress contains counters but not result records, so this adapter
-    does not fabricate partial checkpoints during a long-running command.
+    """
+    Persists the views listed in the task file. Writes the result once the
+    batch completed.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
+        context (CommandContext): Context with the authenticated client.
         timeout_seconds (float, optional): Maximum runtime for each view.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+                                           Defaults to 3600.0 seconds.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
 
     Returns:
         PersistViewBatchResult: View persistence results.
     """
     initialize_result(_PERSIST_COMMAND, workspace_root)
-    records = _read_view_tasks(_PERSIST_COMMAND, workspace_root)
+    records = read_task_csv(_PERSIST_COMMAND, workspace_root)
     request = PersistViewBatchRequest(
         requests=tuple(
             PersistViewRequest(
@@ -318,13 +344,7 @@ async def persist_views_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _PERSIST_COMMAND,
-        context,
-        request,
-        PersistViewBatchRequest,
-        PersistViewBatchResult,
-    )
+    result = await persist_view_batch(context, request)
     return _write_persistence_result(
         _PERSIST_COMMAND,
         result,
@@ -338,23 +358,26 @@ async def unpersist_views_from_file(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> UnpersistViewBatchResult:
-    """Unpersist views and write only the final result atomically.
-
-    Core progress contains counters but not result records, so this adapter
-    does not fabricate partial checkpoints during a long-running command.
+    """
+    Removes the persisted data of the views listed in the task file. Writes
+    the result once the batch completed.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
+        context (CommandContext): Context with the authenticated client.
         timeout_seconds (float, optional): Maximum runtime for each view.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+                                           Defaults to 3600.0 seconds.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
 
     Returns:
         UnpersistViewBatchResult: View unpersistence results.
     """
     initialize_result(_UNPERSIST_COMMAND, workspace_root)
-    records = _read_view_tasks(_UNPERSIST_COMMAND, workspace_root)
+    records = read_task_csv(_UNPERSIST_COMMAND, workspace_root)
     request = UnpersistViewBatchRequest(
         requests=tuple(
             UnpersistViewRequest(
@@ -365,13 +388,7 @@ async def unpersist_views_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _UNPERSIST_COMMAND,
-        context,
-        request,
-        UnpersistViewBatchRequest,
-        UnpersistViewBatchResult,
-    )
+    result = await unpersist_view_batch(context, request)
     return _write_persistence_result(
         _UNPERSIST_COMMAND,
         result,
@@ -385,20 +402,24 @@ async def lock_view_partitions_from_file(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> LockViewPartitionsBatchResult:
-    """Lock partitions for views listed in the task file.
+    """
+    Locks partitions for views listed in the task file.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
+        context (CommandContext): Context with the authenticated client.
         until_year (int): Last year whose partitions should be locked.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
 
     Returns:
         LockViewPartitionsBatchResult: Partition-lock operation results.
     """
     initialize_result(_LOCK_COMMAND, workspace_root)
-    records = _read_view_tasks(_LOCK_COMMAND, workspace_root)
+    records = read_task_csv(_LOCK_COMMAND, workspace_root)
     request = LockViewPartitionsBatchRequest(
         requests=tuple(
             LockViewPartitionsRequest(
@@ -409,13 +430,7 @@ async def lock_view_partitions_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _LOCK_COMMAND,
-        context,
-        request,
-        LockViewPartitionsBatchRequest,
-        LockViewPartitionsBatchResult,
-    )
+    result = await lock_view_partitions_batch(context, request)
     return _write_status_result(
         _LOCK_COMMAND,
         result,
@@ -428,32 +443,30 @@ async def unlock_view_partitions_from_file(
     max_concurrency: int = 4,
     workspace_root: str | Path | None = None,
 ) -> UnlockViewPartitionsBatchResult:
-    """Unlock partitions for views listed in the task file.
+    """
+    Unlocks partitions for views listed in the task file.
 
     Args:
-        context (CommandContext): Core context with the authenticated client.
-        max_concurrency (int, optional): Maximum concurrent SAP operations.
-        workspace_root (str | Path | None, optional): Root for task and result
-            files. Uses the default workspace when None.
+        context (CommandContext): Context with the authenticated client.
+        max_concurrency (int, optional): Maximum amount of concurrent
+                                         operations. Defaults to 4.
+        workspace_root (str | Path | None, optional): Root for task and
+                                                      result files. Uses the
+                                                      default workspace when
+                                                      None. Defaults to None.
 
     Returns:
         UnlockViewPartitionsBatchResult: Partition-unlock operation results.
     """
     initialize_result(_UNLOCK_COMMAND, workspace_root)
-    records = _read_view_tasks(_UNLOCK_COMMAND, workspace_root)
+    records = read_task_csv(_UNLOCK_COMMAND, workspace_root)
     request = UnlockViewPartitionsBatchRequest(
         requests=tuple(
             UnlockViewPartitionsRequest(**record) for record in records
         ),
         max_concurrency=max_concurrency,
     )
-    result = await dispatch_command(
-        _UNLOCK_COMMAND,
-        context,
-        request,
-        UnlockViewPartitionsBatchRequest,
-        UnlockViewPartitionsBatchResult,
-    )
+    result = await unlock_view_partitions_batch(context, request)
     return _write_status_result(
         _UNLOCK_COMMAND,
         result,
@@ -461,18 +474,24 @@ async def unlock_view_partitions_from_file(
     )
 
 
-def _read_view_tasks(
-    command: str,
-    workspace_root: str | Path | None,
-) -> list[dict[str, str]]:
-    return read_task_csv(command, workspace_root)
-
-
 def _write_status_result[ResultT: ViewBatchResult](
     command: str,
     result: ResultT,
     workspace_root: str | Path | None,
 ) -> ResultT:
+    """
+    Writes the view statuses of a batch result and logs its summary.
+
+    Args:
+        command (str): Command the results belong to.
+        result (ResultT): Completed batch result to write.
+        workspace_root (str | Path | None): Root for the result file. Uses
+                                            the default workspace when
+                                            None.
+
+    Returns:
+        ResultT: The unchanged batch result.
+    """
     rows: list[ViewStatusResultRecord] = [
         {
             "view": item.view,
@@ -492,6 +511,25 @@ def _write_partitioning_result(
     workspace_root: str | Path | None,
     records: list[dict[str, str]],
 ) -> CreateViewPartitioningBatchResult:
+    """
+    Writes the partitioning results of a batch and logs its summary. The
+    partitioned attribute is only known from the task records.
+
+    Args:
+        command (str): Command the results belong to.
+        result (CreateViewPartitioningBatchResult): Completed batch result
+                                                    to write.
+        workspace_root (str | Path | None): Root for the result file. Uses
+                                            the default workspace when
+                                            None.
+        records (list[dict[str, str]]): Task records the batch was built
+                                        from.
+
+    Returns:
+        CreateViewPartitioningBatchResult: The unchanged batch result.
+    """
+    # Pair every result with its task record to recover the attribute
+    # 'strict=True' guards the assumption that both keep the input order
     rows: list[ViewPartitioningResultRecord] = [
         {
             "view": item.view,
@@ -513,13 +551,26 @@ def _write_persistence_result[
     result: ResultT,
     workspace_root: str | Path | None,
 ) -> ResultT:
+    """
+    Writes the persistence results of a batch and logs its summary.
+
+    Args:
+        command (str): Command the results belong to.
+        result (ResultT): Completed batch result to write.
+        workspace_root (str | Path | None): Root for the result file. Uses
+                                            the default workspace when
+                                            None.
+
+    Returns:
+        ResultT: The unchanged batch result.
+    """
     rows: list[ViewPersistenceResultRecord] = [
         {
             "view": item.view,
             "space": item.space,
             "status": item.status,
-            "sap_status": item.sap_status,
-                    "log_id": item.log_id,
+            "log_status": item.log_status,
+            "log_id": item.log_id,
             "runtime_seconds": item.runtime_seconds,
         }
         for item in result.results

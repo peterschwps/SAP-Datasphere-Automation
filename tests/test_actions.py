@@ -2,7 +2,6 @@ import csv
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -83,12 +82,69 @@ from datasphere_core.models.views import (
 
 from datasphere_cli import actions
 from datasphere_cli.actions import (
-    dispatch as dispatch_module,
+    analytical_models as analytical_model_actions,
 )
+from datasphere_cli.actions import remote_tables as remote_table_actions
+from datasphere_cli.actions import task_chains as task_chain_actions
+from datasphere_cli.actions import views as view_actions
 from datasphere_cli.files.workspace import file_setup, result_path, task_path
+
+# Core command each action calls, so a test can replace it with a stub
+_CORE_FUNCTIONS: dict[str, tuple[Any, str]] = {
+    "analytical_models.get_view_dependencies_batch": (
+        analytical_model_actions,
+        "get_analytical_model_view_dependencies_batch",
+    ),
+    "analytical_models.measure_view_persistence_batch": (
+        analytical_model_actions,
+        "measure_analytical_model_view_persistence_batch",
+    ),
+    "remote_tables.configure_statistics_batch": (
+        remote_table_actions,
+        "configure_remote_table_statistics_batch",
+    ),
+    "remote_tables.refresh_statistics_batch": (
+        remote_table_actions,
+        "refresh_remote_table_statistics_batch",
+    ),
+    "task_chains.run_batch": (
+        task_chain_actions,
+        "run_task_chain_batch",
+    ),
+    "views.find_persistence_candidates_batch": (
+        view_actions,
+        "find_view_persistence_candidates_batch",
+    ),
+    "views.find_attribute_matches_batch": (
+        view_actions,
+        "find_view_attribute_matches_batch",
+    ),
+    "views.create_partitioning_batch": (
+        view_actions,
+        "create_view_partitioning_batch",
+    ),
+    "views.delete_partitioning_batch": (
+        view_actions,
+        "delete_view_partitioning_batch",
+    ),
+    "views.persist_batch": (view_actions, "persist_view_batch"),
+    "views.unpersist_batch": (view_actions, "unpersist_view_batch"),
+    "views.lock_partitions_batch": (
+        view_actions,
+        "lock_view_partitions_batch",
+    ),
+    "views.unlock_partitions_batch": (
+        view_actions,
+        "unlock_view_partitions_batch",
+    ),
+}
 
 
 def _context() -> CommandContext:
+    """
+    Builds a context whose client is never reached, because the Core command
+    itself is replaced in these tests.
+    """
     return CommandContext(client=cast(Any, object()))
 
 
@@ -99,6 +155,9 @@ def _summary(
     skipped: int = 0,
     timed_out: int = 0,
 ) -> BatchSummary:
+    """
+    Builds a batch summary whose total follows from the single counts.
+    """
     return BatchSummary(
         total=succeeded + failed + skipped + timed_out,
         succeeded=succeeded,
@@ -113,6 +172,9 @@ def _write_task(
     root: Path,
     row: Mapping[str, object],
 ) -> None:
+    """
+    Appends one row to the task file of a command.
+    """
     path = task_path(command, root)
     with path.open("a", newline="", encoding="utf-8") as task_file:
         writer = csv.DictWriter(task_file, fieldnames=tuple(row))
@@ -120,6 +182,9 @@ def _write_task(
 
 
 def _read_csv(command: str, root: Path) -> list[dict[str, str]]:
+    """
+    Reads the CSV result of a command back as dictionaries.
+    """
     with result_path(command, root).open(
         newline="",
         encoding="utf-8",
@@ -127,22 +192,21 @@ def _read_csv(command: str, root: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(result_file))
 
 
-def _registry_entry(
-    handler: object,
-    request_type: type[object],
-    result_type: type[object],
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        handler=handler,
-        request_type=request_type,
-        result_type=result_type,
-    )
+def _patch_command(monkeypatch: Any, command: str, handler: object) -> None:
+    """
+    Replaces the Core command an action calls with the supplied stub.
+    """
+    module, name = _CORE_FUNCTIONS[command]
+    monkeypatch.setattr(module, name, handler)
 
 
 async def test_analytical_model_adapters_map_requests_and_json(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that both analytical model adapters map their request and result.
+    """
     file_setup(tmp_path)
     dependency_result = GetAnalyticalModelViewDependenciesBatchResult(
         results=(
@@ -193,25 +257,15 @@ async def test_analytical_model_adapters_map_requests_and_json(
         requests.append(request)
         return measure_result
 
-    monkeypatch.setattr(
-        dispatch_module,
-        "COMMANDS",
-        {
-            "analytical_models.get_view_dependencies_batch": (
-                _registry_entry(
-                    dependencies_handler,
-                    GetAnalyticalModelViewDependenciesBatchRequest,
-                    GetAnalyticalModelViewDependenciesBatchResult,
-                )
-            ),
-            "analytical_models.measure_view_persistence_batch": (
-                _registry_entry(
-                    measure_handler,
-                    MeasureAnalyticalModelViewPersistenceBatchRequest,
-                    MeasureAnalyticalModelViewPersistenceBatchResult,
-                )
-            ),
-        },
+    _patch_command(
+        monkeypatch,
+        "analytical_models.get_view_dependencies_batch",
+        dependencies_handler,
+    )
+    _patch_command(
+        monkeypatch,
+        "analytical_models.measure_view_persistence_batch",
+        measure_handler,
     )
     _write_task(
         "analytical_models.measure_view_persistence_batch",
@@ -234,6 +288,7 @@ async def test_analytical_model_adapters_map_requests_and_json(
         workspace_root=tmp_path,
     )
 
+    # Every parameter of the action reaches the Core request unchanged
     assert requests == [
         GetAnalyticalModelViewDependenciesBatchRequest(
             space="SPACE/A",
@@ -251,6 +306,7 @@ async def test_analytical_model_adapters_map_requests_and_json(
             max_concurrency=2,
         ),
     ]
+    # The slash in the space name must not turn into a directory
     dependencies_path = result_path(
         "analytical_models.get_view_dependencies_batch",
         tmp_path,
@@ -281,6 +337,8 @@ async def test_analytical_model_adapters_map_requests_and_json(
             "timed_out": 0,
         },
     }
+    # The measurement result is written through the checkpoint callback,
+    # so a model appears in the file before the batch is finished
     measure_path = result_path(
         "analytical_models.measure_view_persistence_batch",
         tmp_path,
@@ -299,6 +357,9 @@ async def test_analytical_model_adapters_map_requests_and_json(
 async def test_remote_table_adapters_dispatch_batch_commands(
     monkeypatch,
 ) -> None:
+    """
+    Checks that both remote table adapters build their batch request.
+    """
     configured = ConfigureRemoteTableStatisticsBatchResult(
         results=(
             ConfigureRemoteTableStatisticsResult(
@@ -336,27 +397,21 @@ async def test_remote_table_adapters_dispatch_batch_commands(
         requests.append(request)
         return refreshed
 
-    monkeypatch.setattr(
-        dispatch_module,
-        "COMMANDS",
-        {
-            "remote_tables.configure_statistics_batch": _registry_entry(
-                configure_handler,
-                ConfigureRemoteTableStatisticsBatchRequest,
-                ConfigureRemoteTableStatisticsBatchResult,
-            ),
-            "remote_tables.refresh_statistics_batch": _registry_entry(
-                refresh_handler,
-                RefreshRemoteTableStatisticsBatchRequest,
-                RefreshRemoteTableStatisticsBatchResult,
-            ),
-        },
+    _patch_command(
+        monkeypatch,
+        "remote_tables.configure_statistics_batch",
+        configure_handler,
+    )
+    _patch_command(
+        monkeypatch,
+        "remote_tables.refresh_statistics_batch",
+        refresh_handler,
     )
 
     configure_result = await actions.configure_remote_table_statistics(
         _context(),
         space="SPACE_A",
-        statistics_type="HISTOGRAM",
+        statistics_type=StatisticsType.HISTOGRAM,
         max_concurrency=5,
     )
     refresh_result = await actions.refresh_remote_table_statistics(
@@ -386,6 +441,9 @@ async def test_task_chain_adapter_writes_exact_result(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that the task chain adapter writes every result column.
+    """
     file_setup(tmp_path)
     _write_task(
         "task_chains.run_batch",
@@ -398,7 +456,7 @@ async def test_task_chain_adapter_writes_exact_result(
                 chain="CHAIN_A",
                 space="SPACE_A",
                 status=TaskChainStatus.COMPLETED,
-                sap_status="COMPLETED",
+                log_status="COMPLETED",
                 log_id="operation-1",
                 runtime_seconds=15,
             ),
@@ -414,16 +472,10 @@ async def test_task_chain_adapter_writes_exact_result(
         requests.append(request)
         return result
 
-    monkeypatch.setattr(
-        dispatch_module,
-        "COMMANDS",
-        {
-            "task_chains.run_batch": _registry_entry(
-                handler,
-                RunTaskChainBatchRequest,
-                RunTaskChainBatchResult,
-            )
-        },
+    _patch_command(
+        monkeypatch,
+        "task_chains.run_batch",
+        handler,
     )
 
     await actions.run_task_chains_from_file(
@@ -450,7 +502,7 @@ async def test_task_chain_adapter_writes_exact_result(
             "task_chain": "CHAIN_A",
             "space": "SPACE_A",
             "status": "completed",
-            "sap_status": "COMPLETED",
+            "log_status": "COMPLETED",
             "log_id": "operation-1",
             "runtime_seconds": "15",
         }
@@ -461,6 +513,9 @@ async def test_task_chain_failure_preserves_previous_result(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that a failing command leaves the previous result file intact.
+    """
     file_setup(tmp_path)
     _write_task(
         "task_chains.run_batch",
@@ -473,16 +528,10 @@ async def test_task_chain_failure_preserves_previous_result(
     async def handler(context: CommandContext, request: object) -> object:
         raise RuntimeError("command failed")
 
-    monkeypatch.setattr(
-        dispatch_module,
-        "COMMANDS",
-        {
-            "task_chains.run_batch": _registry_entry(
-                handler,
-                RunTaskChainBatchRequest,
-                RunTaskChainBatchResult,
-            )
-        },
+    _patch_command(
+        monkeypatch,
+        "task_chains.run_batch",
+        handler,
     )
 
     with pytest.raises(RuntimeError, match="command failed"):
@@ -491,6 +540,8 @@ async def test_task_chain_failure_preserves_previous_result(
             workspace_root=tmp_path,
         )
 
+    # The result is only written after the command returned, so a raising
+    # command cannot overwrite what an earlier run produced
     assert previous_path.read_text(encoding="utf-8") == "previous result\n"
 
 
@@ -498,6 +549,9 @@ async def test_view_export_adapters_preserve_boundary_details(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that the two view export adapters keep their edge cases in the CSV.
+    """
     file_setup(tmp_path)
     candidates = FindViewPersistenceCandidatesBatchResult(
         results=(
@@ -554,26 +608,20 @@ async def test_view_export_adapters_preserve_boundary_details(
         requests.append(request)
         return attributes
 
-    monkeypatch.setattr(
-        dispatch_module,
-        "COMMANDS",
-        {
-            "views.find_persistence_candidates_batch": _registry_entry(
-                candidate_handler,
-                FindViewPersistenceCandidatesBatchRequest,
-                FindViewPersistenceCandidatesBatchResult,
-            ),
-            "views.find_attribute_matches_batch": _registry_entry(
-                attribute_handler,
-                FindViewAttributeMatchesBatchRequest,
-                FindViewAttributeMatchesBatchResult,
-            ),
-        },
+    _patch_command(
+        monkeypatch,
+        "views.find_persistence_candidates_batch",
+        candidate_handler,
+    )
+    _patch_command(
+        monkeypatch,
+        "views.find_attribute_matches_batch",
+        attribute_handler,
     )
 
     await actions.export_view_persistence_candidates(
         _context(),
-        candidate_score=10,
+        minimum_candidate_score=10,
         timeout_seconds=45,
         max_concurrency=2,
         workspace_root=tmp_path,
@@ -588,7 +636,7 @@ async def test_view_export_adapters_preserve_boundary_details(
 
     assert requests == [
         FindViewPersistenceCandidatesBatchRequest(
-            candidate_score=10,
+            minimum_candidate_score=10,
             timeout_seconds=45,
             max_concurrency=2,
         ),
@@ -637,6 +685,9 @@ async def test_view_file_adapters_map_every_batch_request(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """
+    Checks that every file-driven view adapter maps its request and result.
+    """
     file_setup(tmp_path)
     commands_and_rows = {
         "views.create_partitioning_batch": {
@@ -691,7 +742,7 @@ async def test_view_file_adapters_map_every_batch_request(
                     view="VIEW_C",
                     space="SPACE_C",
                     status=PersistViewStatus.COMPLETED,
-                    sap_status="COMPLETED",
+                    log_status="COMPLETED",
                     log_id="persist-1",
                     runtime_seconds=20,
                 ),
@@ -730,15 +781,6 @@ async def test_view_file_adapters_map_every_batch_request(
         ),
     }
     requests: dict[str, object] = {}
-    registry: dict[str, SimpleNamespace] = {}
-    request_types: dict[str, type[object]] = {
-        "views.create_partitioning_batch": CreateViewPartitioningBatchRequest,
-        "views.delete_partitioning_batch": DeleteViewPartitioningBatchRequest,
-        "views.persist_batch": PersistViewBatchRequest,
-        "views.unpersist_batch": UnpersistViewBatchRequest,
-        "views.lock_partitions_batch": LockViewPartitionsBatchRequest,
-        "views.unlock_partitions_batch": UnlockViewPartitionsBatchRequest,
-    }
     for command, result in results.items():
 
         async def handler(
@@ -751,12 +793,7 @@ async def test_view_file_adapters_map_every_batch_request(
             requests[command] = request
             return result
 
-        registry[command] = _registry_entry(
-            handler,
-            request_types[command],
-            type(result),
-        )
-    monkeypatch.setattr(dispatch_module, "COMMANDS", registry)
+        _patch_command(monkeypatch, command, handler)
 
     await actions.create_view_partitioning_from_file(
         _context(),
@@ -863,7 +900,7 @@ async def test_view_file_adapters_map_every_batch_request(
             "view": "VIEW_C",
             "space": "SPACE_C",
             "status": "completed",
-            "sap_status": "COMPLETED",
+            "log_status": "COMPLETED",
             "log_id": "persist-1",
             "runtime_seconds": "20",
         }
@@ -876,7 +913,7 @@ async def test_view_file_adapters_map_every_batch_request(
             "view": "VIEW_D",
             "space": "SPACE_D",
             "status": "already_absent",
-            "sap_status": "",
+            "log_status": "",
             "log_id": "",
             "runtime_seconds": "",
         }
