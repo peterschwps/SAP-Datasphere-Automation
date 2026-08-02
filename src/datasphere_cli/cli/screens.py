@@ -691,6 +691,32 @@ class ParamScreen(BaseScreen):
             await self._handle_back()
 
 
+def progress_line(update: CommandProgress) -> str:
+    """
+    Builds the status line of a running batch.
+
+    Args:
+        update (CommandProgress): Progress update carrying the counters.
+
+    Returns:
+        str: Completed items and the outcomes counted so far.
+    """
+    total = "?" if update.total_items is None else str(update.total_items)
+    counts = {
+        "succeeded": update.succeeded_items,
+        "failed": update.failed_items,
+        "skipped": update.skipped_items,
+        "timed out": update.timed_out_items,
+    }
+
+    # Outcomes that never occurred would only pad the line
+    outcomes = ", ".join(
+        f"{count} {name}" for name, count in counts.items() if count
+    )
+    completed = f"{update.completed_items}/{total}"
+    return f"{completed} · {outcomes}" if outcomes else completed
+
+
 class ExecutionScreen(BaseScreen):
     """
     Screen that executes the selected action and shows live log output.
@@ -760,20 +786,16 @@ class ExecutionScreen(BaseScreen):
 
             async def report_progress(update: CommandProgress) -> None:
                 """
-                Writes one progress update to the log widget.
+                Updates the status line with the progress of a batch.
 
                 Args:
                     update (CommandProgress): Progress update to show.
                 """
-                message = update.message or update.phase.replace("_", " ")
-                if update.completed_items is not None:
-                    total = (
-                        str(update.total_items)
-                        if update.total_items is not None
-                        else "?"
-                    )
-                    message = f"{message}: {update.completed_items}/{total}"
-                log_widget.write(f"{update.command}: {message}")
+                # Only completed batch items carry a count. Everything else
+                # is already covered by the log messages of the action.
+                if update.completed_items is None:
+                    return
+                status.update(progress_line(update))
 
             context = CommandContext(
                 client=session.client,

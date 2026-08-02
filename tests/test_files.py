@@ -259,6 +259,8 @@ def test_definitions_use_exact_result_filenames() -> None:
         "analytical_models_get_view_dependencies.json",
         "analytical_models_measure_view_persistence.json",
         "task_chains_run.csv",
+        "remote_tables_configure_statistics.csv",
+        "remote_tables_refresh_statistics.csv",
         "views_find_persistence_candidates.csv",
         "views_find_attribute_matches.csv",
         "views_create_partitioning.csv",

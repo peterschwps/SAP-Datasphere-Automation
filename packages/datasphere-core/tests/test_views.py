@@ -454,14 +454,44 @@ async def test_lock_and_unlock_partitions_map_their_outcomes() -> None:
     """
     Checks that lock and unlock outcomes are mapped to their statuses.
     """
-    async def lock_partitions(view: str, space: str, until_year: int) -> str:
-        return "locked"
+    written: list[dict[str, Any]] = []
 
-    async def unlock_partitions(view: str, space: str) -> str:
-        return "no_partitions"
+    def _partitioning(*years: int) -> dict[str, Any]:
+        ranges = [
+            {"low": {"value": str(year)}, "locked": False} for year in years
+        ]
+        return {
+            "remoteSourceName": "SOURCE",
+            "objectName": "OBJECT",
+            "numParallelPartitions": 1,
+            "ranges": ranges,
+            "column": "YEAR",
+            "columnType": "INTEGER",
+            "runtimeDataCalculation": False,
+            "type": "RANGE",
+        }
+
+    async def get_partitioning(view: str, space: str) -> dict[str, Any]:
+        return _partitioning(2021, 2022, 2023)
+
+    async def set_partitioning(
+        view: str,
+        space: str,
+        data: dict[str, Any],
+    ) -> bool:
+        written.append(data)
+        return True
+
+    async def get_empty_partitioning(view: str, space: str) -> dict[str, Any]:
+        return _partitioning()
 
     locked = await lock_view_partitions(
-        CommandContext(client=_client(lock_partitions=lock_partitions)),
+        CommandContext(
+            client=_client(
+                get_partitioning=get_partitioning,
+                set_partitioning=set_partitioning,
+            )
+        ),
         LockViewPartitionsRequest(
             view="VIEW_A",
             space="SPACE_A",
@@ -469,13 +499,22 @@ async def test_lock_and_unlock_partitions_map_their_outcomes() -> None:
         ),
     )
     unlocked = await unlock_view_partitions(
-        CommandContext(client=_client(unlock_partitions=unlock_partitions)),
+        CommandContext(
+            client=_client(get_partitioning=get_empty_partitioning)
+        ),
         UnlockViewPartitionsRequest(view="VIEW_A", space="SPACE_A"),
     )
 
     assert locked.status is LockViewPartitionsStatus.LOCKED
     assert unlocked.status is UnlockViewPartitionsStatus.NO_PARTITIONS
     assert unlocked.status.outcome == "skipped"
+
+    # Only the years up to the requested one are locked
+    assert [partition["locked"] for partition in written[0]["ranges"]] == [
+        True,
+        True,
+        False,
+    ]
 
 
 def test_requests_reject_unusable_values() -> None:

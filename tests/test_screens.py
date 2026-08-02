@@ -1,7 +1,15 @@
+from datasphere_core.models.common import (
+    CommandProgress,
+    CommandProgressPhase,
+)
 from textual.widgets import Input
 
 from datasphere_cli import actions
-from datasphere_cli.cli.screens import DatasphereApp, ParamScreen
+from datasphere_cli.cli.screens import (
+    DatasphereApp,
+    ParamScreen,
+    progress_line,
+)
 
 
 def test_optional_string_none_is_rendered_as_empty_input() -> None:
@@ -62,3 +70,40 @@ async def test_number_with_default_is_pre_filled() -> None:
     assert step.name == "minimum_candidate_score"
     assert isinstance(widget, Input)
     assert widget.value == "10"
+
+
+def test_progress_line_lists_only_recorded_outcomes() -> None:
+    """
+    Checks that the status line names the counters that are not zero.
+    """
+    line = progress_line(
+        CommandProgress(
+            command="views.persist_batch",
+            phase=CommandProgressPhase.ADVANCED,
+            completed_items=34,
+            total_items=53,
+            succeeded_items=30,
+            failed_items=3,
+            skipped_items=1,
+            timed_out_items=0,
+        )
+    )
+
+    # A zero counter would only pad the line
+    assert line == "34/53 · 30 succeeded, 3 failed, 1 skipped"
+
+
+def test_progress_line_without_outcomes_shows_the_count_alone() -> None:
+    """
+    Checks that the status line falls back to the bare item count.
+    """
+    line = progress_line(
+        CommandProgress(
+            command="views.persist_batch",
+            phase=CommandProgressPhase.ADVANCED,
+            completed_items=1,
+            total_items=2,
+        )
+    )
+
+    assert line == "1/2"

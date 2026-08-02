@@ -102,6 +102,25 @@ class ViewPersistenceCandidateResultRecord(TypedDict):
     log_id: str | None
 
 
+class RemoteTableStatisticsResultRecord(TypedDict):
+    """
+    One row of the remote table statistics configuration result file.
+    """
+    table: str
+    space: str
+    statistics_type: str
+    status: str
+
+
+class RemoteTableRefreshResultRecord(TypedDict):
+    """
+    One row of the remote table statistics refresh result file.
+    """
+    table: str
+    space: str
+    status: str
+
+
 class BatchSummaryRecord(TypedDict):
     """
     Outcome counts of a batch in a JSON result file.

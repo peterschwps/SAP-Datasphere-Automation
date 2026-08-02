@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any
 
 from datasphere_api import (
@@ -634,6 +635,59 @@ async def unpersist_view_batch(
     return UnpersistViewBatchResult(results=results, summary=summary)
 
 
+# Fields the partitioning endpoint expects back when it is written
+_PARTITIONING_FIELDS = (
+    "remoteSourceName",
+    "objectName",
+    "numParallelPartitions",
+    "ranges",
+    "column",
+    "columnType",
+    "runtimeDataCalculation",
+    "type",
+)
+
+
+async def _set_partition_lock(
+    context: CommandContext,
+    *,
+    view: str,
+    space: str,
+    locked: Callable[[dict[str, Any]], bool],
+    success_status: str,
+) -> str:
+    """
+    Rewrites the lock flag of every partition of one view.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+        locked (Callable[[dict[str, Any]], bool]): Decides whether one
+                                                   partition ends up locked.
+        success_status (str): Status to report once the write was accepted.
+
+    Returns:
+        str: The requested status, 'no_partitions' or 'failed'.
+    """
+    # Read the current partitioning
+    partitioning = await context.client.views.get_partitioning(view, space)
+    if not partitioning["ranges"]:
+        return "no_partitions"
+
+    # Write back every field the endpoint expects, with the new lock flags
+    payload = {field: partitioning[field] for field in _PARTITIONING_FIELDS}
+    for partition in payload["ranges"]:
+        partition["locked"] = locked(partition)
+
+    accepted = await context.client.views.set_partitioning(
+        view,
+        space,
+        payload,
+    )
+    return success_status if accepted else "failed"
+
+
 @command(LOCK_PARTITIONS_COMMAND_NAME)
 async def lock_view_partitions(
     context: CommandContext,
@@ -649,15 +703,19 @@ async def lock_view_partitions(
     Returns:
         LockViewPartitionsResult: Result of the partition lock.
     """
-    outcome = await context.client.views.lock_partitions(
+    status = await _set_partition_lock(
+        context,
         view=request.view,
         space=request.space,
-        until_year=request.until_year,
+        locked=lambda partition: (
+            int(partition["low"]["value"]) <= request.until_year
+        ),
+        success_status="locked",
     )
     return LockViewPartitionsResult(
         view=request.view,
         space=request.space,
-        status=LockViewPartitionsStatus(outcome),
+        status=LockViewPartitionsStatus(status),
     )
 
 
@@ -703,14 +761,17 @@ async def unlock_view_partitions(
     Returns:
         UnlockViewPartitionsResult: Result of the partition unlock.
     """
-    outcome = await context.client.views.unlock_partitions(
+    status = await _set_partition_lock(
+        context,
         view=request.view,
         space=request.space,
+        locked=lambda partition: False,
+        success_status="unlocked",
     )
     return UnlockViewPartitionsResult(
         view=request.view,
         space=request.space,
-        status=UnlockViewPartitionsStatus(outcome),
+        status=UnlockViewPartitionsStatus(status),
     )
 
 

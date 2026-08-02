@@ -77,6 +77,14 @@ RESULT_FILES: Mapping[str, FileDefinition] = MappingProxyType(
                 "runtime_seconds",
             ),
         ),
+        "remote_tables.configure_statistics_batch": FileDefinition(
+            "remote_tables_configure_statistics.csv",
+            ("table", "space", "statistics_type", "status"),
+        ),
+        "remote_tables.refresh_statistics_batch": FileDefinition(
+            "remote_tables_refresh_statistics.csv",
+            ("table", "space", "status"),
+        ),
         "views.find_persistence_candidates_batch": FileDefinition(
             "views_find_persistence_candidates.csv",
             (

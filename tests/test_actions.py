@@ -87,6 +87,10 @@ from datasphere_cli.actions import (
 from datasphere_cli.actions import remote_tables as remote_table_actions
 from datasphere_cli.actions import task_chains as task_chain_actions
 from datasphere_cli.actions import views as view_actions
+from datasphere_cli.actions.remote_tables import (
+    _CONFIGURE_MESSAGES,
+    _REFRESH_MESSAGES,
+)
 from datasphere_cli.files.workspace import file_setup, result_path, task_path
 
 # Core command each action calls, so a test can replace it with a stub
@@ -355,10 +359,11 @@ async def test_analytical_model_adapters_map_requests_and_json(
 
 
 async def test_remote_table_adapters_dispatch_batch_commands(
+    tmp_path: Path,
     monkeypatch,
 ) -> None:
     """
-    Checks that both remote table adapters build their batch request.
+    Checks that both remote table adapters write their request and result.
     """
     configured = ConfigureRemoteTableStatisticsBatchResult(
         results=(
@@ -413,11 +418,13 @@ async def test_remote_table_adapters_dispatch_batch_commands(
         space="SPACE_A",
         statistics_type=StatisticsType.HISTOGRAM,
         max_concurrency=5,
+        workspace_root=tmp_path,
     )
     refresh_result = await actions.refresh_remote_table_statistics(
         _context(),
         space="SPACE_A",
         max_concurrency=6,
+        workspace_root=tmp_path,
     )
 
     assert requests == [
@@ -435,6 +442,35 @@ async def test_remote_table_adapters_dispatch_batch_commands(
     ]
     assert configure_result is configured
     assert refresh_result is refreshed
+
+    # Both commands write a result file, so the run leaves a record behind
+    assert _read_csv("remote_tables.configure_statistics_batch", tmp_path) == [
+        {
+            "table": "TABLE_A",
+            "space": "SPACE_A",
+            "statistics_type": "HISTOGRAM",
+            "status": "created",
+        }
+    ]
+    assert _read_csv("remote_tables.refresh_statistics_batch", tmp_path) == [
+        {
+            "table": "TABLE_A",
+            "space": "SPACE_A",
+            "status": "refreshed",
+        }
+    ]
+
+
+def test_every_remote_table_status_has_its_own_message() -> None:
+    """
+    Checks that both remote table commands name every status they can report.
+    """
+    # The two enums compare equal by value, so a shared mapping would drop
+    # entries instead of failing loudly
+    assert set(_CONFIGURE_MESSAGES) == set(
+        ConfigureRemoteTableStatisticsStatus
+    )
+    assert set(_REFRESH_MESSAGES) == set(RefreshRemoteTableStatisticsStatus)
 
 
 async def test_task_chain_adapter_writes_exact_result(
