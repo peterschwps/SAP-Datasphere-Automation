@@ -5,7 +5,6 @@ from typing import Protocol, cast
 
 import keyring
 from datasphere_api import TokenDict
-from keyring.errors import KeyringError, PasswordDeleteError
 
 from datasphere_core.errors import TokenStoreError
 
@@ -71,6 +70,9 @@ class KeyringTokenStore:
     """
     Stores OAuth tokens in the OS credential store.
     """
+
+    # INFO: Uses broad excepts to catch all errors. Not all backends report a
+    #       KeyringError, e.g. the Windows backend raises pywintypes.error.
 
     async def load_tokens(self, key: str) -> TokenDict | None:
         """
@@ -149,7 +151,7 @@ class KeyringTokenStore:
                 TOKEN_SERVICE,
                 key,
             )
-        except KeyringError as error:
+        except Exception as error:
             raise TokenStoreError(
                 "Unable to read from the operating system credential store."
             ) from error
@@ -175,7 +177,7 @@ class KeyringTokenStore:
                 key,
                 value,
             )
-        except KeyringError as error:
+        except Exception as error:
             raise TokenStoreError(
                 "Unable to write to the operating system credential store."
             ) from error
@@ -203,7 +205,7 @@ class KeyringTokenStore:
                 TOKEN_SERVICE,
                 key,
             )
-        except (PasswordDeleteError, KeyringError) as error:
+        except Exception as error:
             raise TokenStoreError(
                 "Unable to delete from the operating system credential store."
             ) from error

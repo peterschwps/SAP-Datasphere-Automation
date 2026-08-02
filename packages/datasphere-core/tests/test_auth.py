@@ -82,7 +82,8 @@ def _client_factory(
 
 async def test_session_loads_and_replaces_tokens(tmp_path: Path) -> None:
     """
-    Checks that a session loads stored tokens and writes back new ones.
+    Checks that a session loads stored tokens and writes back the new refresh
+    token.
     """
     config = _config()
     store = MemoryTokenStore()
@@ -110,12 +111,54 @@ async def test_session_loads_and_replaces_tokens(tmp_path: Path) -> None:
             False,
         )
     ]
+
+    # Only the refresh token is persisted
     assert store.tokens[config.credential_key] == {
-        "access_token": "new-access",
         "refresh_token": "new-refresh",
     }
     assert configs[0].client_secret == "secret"
     assert session.client is not None
+
+
+async def test_session_keeps_tokens_without_a_new_refresh_token(
+    tmp_path: Path,
+) -> None:
+    """
+    Checks that a login without a refresh token leaves the stored one alone.
+    """
+    config = _config()
+    store = MemoryTokenStore()
+    store.tokens[config.credential_key] = {"refresh_token": "old-refresh"}
+
+    def create(api_config: DatasphereConfig) -> DatasphereClient:
+        async def login(
+            tokens: TokenDict | None = None,
+            *,
+            allow_interactive_fallback: bool = True,
+        ) -> TokenDict:
+            return {"access_token": "new-access"}
+
+        async def aclose() -> None:
+            return None
+
+        return cast(
+            DatasphereClient,
+            SimpleNamespace(login=login, aclose=aclose),
+        )
+
+    session = DatasphereSession(
+        config,
+        token_store=store,
+        client_factory=create,
+        lock_directory=tmp_path,
+    )
+
+    await session.authenticate(interactive=False)
+
+    # Overwriting with nothing would force an interactive login next time
+    assert store.tokens[config.credential_key] == {
+        "refresh_token": "old-refresh",
+    }
 
 
 def test_session_config_requires_client_secret() -> None:

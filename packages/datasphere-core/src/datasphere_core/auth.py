@@ -175,8 +175,15 @@ class DatasphereSession:
                 allow_interactive_fallback=interactive,
             )
 
-            # Save tokens to the credential store (only saves if they changed)
-            await self._token_store.save_tokens(key, new_tokens)
+            # Store the refresh token to the credential store
+            # All other tokens are not needed, since the token is always
+            # refreshed on startup
+            refresh_token = new_tokens.get("refresh_token")
+            if refresh_token is not None:
+                await self._token_store.save_tokens(
+                    key,
+                    {"refresh_token": refresh_token},
+                )
 
     async def logout(self) -> None:
         """
