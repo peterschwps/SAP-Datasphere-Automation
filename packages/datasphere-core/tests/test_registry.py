@@ -8,7 +8,6 @@ from datasphere_core.commands.task_chains import (
     run_task_chain,
     run_task_chain_batch,
 )
-from datasphere_core.definitions import build_command_registry
 from datasphere_core.models.common import BatchSummary
 from datasphere_core.models.task_chains import (
     RunTaskChainBatchRequest,
@@ -17,6 +16,7 @@ from datasphere_core.models.task_chains import (
     RunTaskChainResult,
     TaskChainStatus,
 )
+from datasphere_core.runtime.definitions import build_command_registry
 
 EXPECTED_COMMAND_NAMES = {
     "analytical_models.measure_view_persistence",

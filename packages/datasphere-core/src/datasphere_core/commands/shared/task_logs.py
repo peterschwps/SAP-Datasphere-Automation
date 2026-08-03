@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from datasphere_core.context import CommandContext
+from datasphere_core.runtime.context import CommandContext
 
 # Reads the task log of one started run
 type LogFetcher = Callable[

@@ -7,11 +7,15 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
-from datasphere_core.context import CommandContext
-from datasphere_core.conversion import runtime_to_seconds, to_text
-from datasphere_core.definitions import CommandDefinition
+from datasphere_core.commands.shared.conversion import (
+    runtime_to_seconds,
+    to_text,
+)
+from datasphere_core.commands.shared.persistence import (
+    run_persistence,
+    run_persistence_removal,
+)
 from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
-from datasphere_core.execution import batch_command, command, run_batch
 from datasphere_core.models.views import (
     DEFAULT_VIEW_TIMEOUT_SECONDS,
     MAXIMUM_VIEW_TIMEOUT_SECONDS,
@@ -58,11 +62,10 @@ from datasphere_core.models.views import (
     ViewDetailsDict,
     ViewPersistenceCandidate,
 )
-from datasphere_core.persistence import (
-    run_persistence,
-    run_persistence_removal,
-)
-from datasphere_core.session import request_headers
+from datasphere_core.runtime.context import CommandContext
+from datasphere_core.runtime.definitions import CommandDefinition
+from datasphere_core.runtime.execution import batch_command, command, run_batch
+from datasphere_core.session.config import request_headers
 
 FIND_PERSISTENCE_CANDIDATES_COMMAND_NAME = "views.find_persistence_candidates"
 FIND_PERSISTENCE_CANDIDATES_BATCH_COMMAND_NAME = (

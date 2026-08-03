@@ -4,7 +4,10 @@ import httpx
 import pytest
 import respx
 from datasphere_core import InvalidConfigurationError, SessionConfig
-from datasphere_core.oauth import authenticate_interactively, refresh_tokens
+from datasphere_core.session.oauth import (
+    authenticate_interactively,
+    refresh_tokens,
+)
 
 TOKEN_URL = "https://auth.example/token"
 

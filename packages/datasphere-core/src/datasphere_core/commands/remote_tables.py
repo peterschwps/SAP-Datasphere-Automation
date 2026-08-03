@@ -2,9 +2,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from datasphere_core.context import CommandContext
-from datasphere_core.definitions import CommandDefinition
-from datasphere_core.execution import batch_command, command, run_batch
 from datasphere_core.models.remote_tables import (
     ConfigureRemoteTableStatisticsBatchRequest,
     ConfigureRemoteTableStatisticsBatchResult,
@@ -21,6 +18,9 @@ from datasphere_core.models.remote_tables import (
     StatisticsType,
     StatisticsWriteOutcome,
 )
+from datasphere_core.runtime.context import CommandContext
+from datasphere_core.runtime.definitions import CommandDefinition
+from datasphere_core.runtime.execution import batch_command, command, run_batch
 
 CONFIGURE_REMOTE_TABLE_STATISTICS_COMMAND_NAME = (
     "remote_tables.configure_statistics"

@@ -5,7 +5,6 @@ from dataclasses import replace
 from functools import wraps
 from typing import Any, Protocol
 
-from datasphere_core.context import CommandContext
 from datasphere_core.errors import CommandTimeoutError
 from datasphere_core.models.common import (
     BatchItemResult,
@@ -16,6 +15,7 @@ from datasphere_core.models.common import (
     Outcome,
     validate_max_concurrency,
 )
+from datasphere_core.runtime.context import CommandContext
 
 # Type alias for a command handler: receives RequestT and returns ResultT
 type CommandHandler[RequestT, ResultT] = Callable[

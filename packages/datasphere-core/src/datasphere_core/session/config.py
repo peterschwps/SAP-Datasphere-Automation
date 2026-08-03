@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import uuid4
 
-from datasphere_core.credentials import build_credential_key
 from datasphere_core.errors import InvalidConfigurationError
+from datasphere_core.session.credentials import build_credential_key
 
 # Browsers supported for the interactive OAuth login
 type Browser = Literal["CHROME", "EDGE"]

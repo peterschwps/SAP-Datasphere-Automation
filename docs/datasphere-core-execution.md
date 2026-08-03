@@ -196,12 +196,14 @@ Command names are validated at import time to catch registry typos.
 
 | Module | Contents |
 | --- | --- |
-| `execution.py` | `command`, `batch_command`, `run_batch`, `BatchReporter`, `execute_with_concurrency_limit` |
-| `context.py` | `CommandContext` and its callbacks |
+| `runtime/execution.py` | `command`, `batch_command`, `run_batch`, `BatchReporter`, `execute_with_concurrency_limit` |
+| `runtime/context.py` | `CommandContext` and its callbacks |
+| `runtime/definitions.py`, `runtime/registry.py` | Command metadata and the registry |
+| `commands/<domain>.py` | Command bodies, their requests, and their `CommandDefinition`s |
+| `commands/shared/persistence.py` | Persisting a view and removing it again, shared by two domains |
+| `commands/shared/task_logs.py` | Polling the task log of a started run |
+| `commands/shared/conversion.py` | Normalizing Datasphere log IDs, statuses, and runtimes |
 | `models/common.py` | `CommandStatus`, `Outcome`, `CommandProgress`, `BatchSummary` |
 | `models/<domain>.py` | Requests, results, and status enums per domain |
-| `commands/<domain>.py` | Command bodies and their `CommandDefinition`s |
-| `conversion.py` | Normalizing Datasphere log IDs, statuses, and runtimes |
+| `session/` | The authenticated session, its configuration, the OAuth flows, and the OS credential store |
 | `errors.py` | `CommandError` and its subclasses |
-| `definitions.py`, `registry.py` | Command metadata and the registry |
-| `auth.py`, `credentials.py` | Session handling and the OS credential store |

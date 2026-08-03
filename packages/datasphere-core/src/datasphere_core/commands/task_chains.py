@@ -2,14 +2,15 @@ import asyncio
 import logging
 from typing import Any
 
-from datasphere_core.context import CommandContext
-from datasphere_core.conversion import runtime_to_seconds, to_text
-from datasphere_core.definitions import CommandDefinition
+from datasphere_core.commands.shared.conversion import (
+    runtime_to_seconds,
+    to_text,
+)
+from datasphere_core.commands.shared.task_logs import await_task_log
 from datasphere_core.errors import (
     CommandCancelledError,
     CommandTimeoutError,
 )
-from datasphere_core.execution import batch_command, command, run_batch
 from datasphere_core.models.task_chains import (
     DEFAULT_TASK_CHAIN_TIMEOUT_SECONDS,
     MAXIMUM_TASK_CHAIN_TIMEOUT_SECONDS,
@@ -19,8 +20,10 @@ from datasphere_core.models.task_chains import (
     RunTaskChainResult,
     TaskChainStatus,
 )
-from datasphere_core.session import request_headers
-from datasphere_core.task_logs import await_task_log
+from datasphere_core.runtime.context import CommandContext
+from datasphere_core.runtime.definitions import CommandDefinition
+from datasphere_core.runtime.execution import batch_command, command, run_batch
+from datasphere_core.session.config import request_headers
 
 RUN_TASK_CHAIN_COMMAND_NAME = "task_chains.run"
 RUN_TASK_CHAIN_BATCH_COMMAND_NAME = "task_chains.run_batch"

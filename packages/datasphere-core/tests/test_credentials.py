@@ -1,5 +1,5 @@
 from datasphere_core import KeyringTokenStore
-from datasphere_core.credentials import build_credential_key
+from datasphere_core.session.credentials import build_credential_key
 
 
 def test_credential_key_normalizes_trailing_slash() -> None:
@@ -28,11 +28,11 @@ async def test_keyring_store_serializes_tokens(monkeypatch) -> None:
         passwords[(service, key)] = value
 
     monkeypatch.setattr(
-        "datasphere_core.credentials.keyring.get_password",
+        "datasphere_core.session.credentials.keyring.get_password",
         get_password,
     )
     monkeypatch.setattr(
-        "datasphere_core.credentials.keyring.set_password",
+        "datasphere_core.session.credentials.keyring.set_password",
         set_password,
     )
     store = KeyringTokenStore()

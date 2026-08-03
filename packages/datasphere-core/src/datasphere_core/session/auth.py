@@ -6,17 +6,20 @@ import httpx
 from filelock import AsyncFileLock
 from platformdirs import user_cache_path
 
-from datasphere_core.credentials import (
-    KeyringTokenStore,
-    TokenDict,
-    TokenStore,
-)
 from datasphere_core.errors import (
     AuthenticationError,
     SessionNotAuthenticatedError,
 )
-from datasphere_core.oauth import authenticate_interactively, refresh_tokens
-from datasphere_core.session import DEFAULT_HEADERS, SessionConfig
+from datasphere_core.session.config import DEFAULT_HEADERS, SessionConfig
+from datasphere_core.session.credentials import (
+    KeyringTokenStore,
+    TokenDict,
+    TokenStore,
+)
+from datasphere_core.session.oauth import (
+    authenticate_interactively,
+    refresh_tokens,
+)
 
 logger = logging.getLogger(__name__)
 

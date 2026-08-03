@@ -2,14 +2,14 @@ import asyncio
 import logging
 from typing import Any
 
-from datasphere_core.context import CommandContext
+from datasphere_core.commands.shared.task_logs import await_task_log
 from datasphere_core.errors import (
     CommandCancelledError,
     CommandTimeoutError,
     UnexpectedResponseError,
 )
-from datasphere_core.session import request_headers
-from datasphere_core.task_logs import await_task_log
+from datasphere_core.runtime.context import CommandContext
+from datasphere_core.session.config import request_headers
 
 logger = logging.getLogger(__name__)
 

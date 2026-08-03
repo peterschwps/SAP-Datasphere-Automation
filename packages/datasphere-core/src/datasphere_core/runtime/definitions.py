@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from datasphere_core.execution import CommandHandler
+from datasphere_core.runtime.execution import CommandHandler
 
 # Command name pattern: lowercase words separated by underscores, with a single
 #                       dot separating the adapter and command names

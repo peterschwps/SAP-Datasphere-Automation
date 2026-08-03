@@ -10,10 +10,10 @@ from datasphere_core import (
     CommandCancelledError,
     CommandContext,
     UnexpectedResponseError,
-    persistence,
-    task_logs,
 )
 from datasphere_core.commands import views as views_commands
+from datasphere_core.commands.shared import persistence, task_logs
+from datasphere_core.commands.shared.persistence import is_persisted
 from datasphere_core.commands.views import (
     create_view_partitioning,
     delete_view_partitioning,
@@ -49,7 +49,6 @@ from datasphere_core.models.views import (
     UnpersistViewStatus,
     ViewPersistenceCandidate,
 )
-from datasphere_core.persistence import is_persisted
 
 SEARCH_PATH = "/deepsea/repository/search/$all"
 DESIGN_OBJECTS_PATH = "/deepsea/repository/SPACE_A/designObjects"

@@ -8,7 +8,7 @@ from datasphere_core.commands.task_chains import (
     TASK_CHAINS_COMMAND_DEFINITIONS,
 )
 from datasphere_core.commands.views import VIEWS_COMMAND_DEFINITIONS
-from datasphere_core.definitions import build_command_registry
+from datasphere_core.runtime.definitions import build_command_registry
 
 # Build mapping of all commands to their definitions
 COMMANDS = build_command_registry(

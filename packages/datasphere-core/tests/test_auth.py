@@ -12,7 +12,7 @@ from datasphere_core import (
     SessionNotAuthenticatedError,
     TokenDict,
 )
-from datasphere_core import auth as auth_module
+from datasphere_core.session import auth as auth_module
 
 TOKEN_URL = "https://auth.example/token"
 

@@ -12,12 +12,12 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 from playwright.async_api import async_playwright
 
-from datasphere_core.credentials import TokenDict
 from datasphere_core.errors import (
     AuthenticationError,
     InvalidConfigurationError,
 )
-from datasphere_core.session import BROWSER_MAPPING, SessionConfig
+from datasphere_core.session.config import BROWSER_MAPPING, SessionConfig
+from datasphere_core.session.credentials import TokenDict
 
 logger = logging.getLogger(__name__)
 

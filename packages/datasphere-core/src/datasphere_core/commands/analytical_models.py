@@ -4,18 +4,17 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from datasphere_core.commands.views import get_all_views
-from datasphere_core.context import CommandContext
-from datasphere_core.conversion import runtime_to_seconds, to_text
-from datasphere_core.definitions import CommandDefinition
-from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
-from datasphere_core.execution import (
-    BatchReporter,
-    batch_command,
-    command,
-    execute_with_concurrency_limit,
-    run_batch,
+from datasphere_core.commands.shared.conversion import (
+    runtime_to_seconds,
+    to_text,
 )
+from datasphere_core.commands.shared.persistence import (
+    is_persisted,
+    run_persistence,
+    run_persistence_removal,
+)
+from datasphere_core.commands.views import get_all_views
+from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
 from datasphere_core.models.analytical_models import (
     DEFAULT_ANALYTICAL_MODEL_MAX_CONCURRENCY,
     DEFAULT_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS,
@@ -39,12 +38,16 @@ from datasphere_core.models.analytical_models import (
     MeasureAnalyticalModelViewPersistenceRequest,
     MeasureAnalyticalModelViewPersistenceResult,
 )
-from datasphere_core.persistence import (
-    is_persisted,
-    run_persistence,
-    run_persistence_removal,
+from datasphere_core.runtime.context import CommandContext
+from datasphere_core.runtime.definitions import CommandDefinition
+from datasphere_core.runtime.execution import (
+    BatchReporter,
+    batch_command,
+    command,
+    execute_with_concurrency_limit,
+    run_batch,
 )
-from datasphere_core.session import request_headers
+from datasphere_core.session.config import request_headers
 
 GET_VIEW_DEPENDENCIES_COMMAND_NAME = "analytical_models.get_view_dependencies"
 GET_VIEW_DEPENDENCIES_BATCH_COMMAND_NAME = (
