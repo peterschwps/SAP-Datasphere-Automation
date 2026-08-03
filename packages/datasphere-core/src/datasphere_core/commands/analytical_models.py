@@ -2,8 +2,11 @@ import asyncio
 from contextlib import suppress
 from dataclasses import replace
 from typing import Any
-from urllib.parse import quote, urlencode
 
+from datasphere_core.commands.repository import (
+    search_analytical_models,
+    search_views,
+)
 from datasphere_core.commands.shared.conversion import (
     runtime_to_seconds,
     to_text,
@@ -13,7 +16,6 @@ from datasphere_core.commands.shared.persistence import (
     run_persistence,
     run_persistence_removal,
 )
-from datasphere_core.commands.views import get_all_views
 from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
 from datasphere_core.models.analytical_models import (
     DEFAULT_ANALYTICAL_MODEL_MAX_CONCURRENCY,
@@ -68,63 +70,6 @@ type ResolvedModel = tuple[
 ]
 type DependencyItem = tuple[ResolvedModel, dict[str, str]]
 type ViewMeasurement = MeasureAnalyticalModelViewPersistenceItemResult
-
-
-async def _get_all_models(
-    context: CommandContext,
-) -> list[AnalyticalModelsDetailsDict]:
-    """
-    Loads the metadata of every analytical model of the tenant.
-
-    Args:
-        context (CommandContext): Authenticated client and progress callbacks.
-
-    Returns:
-        list[AnalyticalModelsDetailsDict]: Details of every analytical model.
-    """
-    params = {
-        # Without a page size the search returns nothing at all
-        "$top": 1000,
-        "$skip": 0,
-        "whyfound": "true",
-        "$count": "true",
-        "valuehierarchy": "folder_id",
-        "facets": "all",
-        "facetlimit": 5,
-        "$apply": (
-            "filter(Search.search(query='SCOPE:SEARCH_DESIGN "
-            '(technical_type_description:EQ(S):"Analysemodell" AND '
-            '(technical_type:EQ(S):"DWC_REMOTE_TABLE" OR technical_type:'
-            'EQ(S):"DWC_LOCAL_TABLE" OR technical_type:EQ(S):"DWC_VIEW" '
-            'OR technical_type:EQ(S):"DWC_ERMODEL" OR technical_type:'
-            'EQ(S):"DWC_DATAFLOW" OR technical_type:EQ(S):"DWC_IDT" OR '
-            'technical_type:EQ(S):"DWC_BUSINESS_ENTITY" OR technical_type:'
-            'EQ(S):"DWC_AUTH_SCENARIO" OR technical_type:EQ(S):'
-            '"DWC_FACT_MODEL" OR technical_type:EQ(S):'
-            '"DWC_CONSUMPTION_MODEL" OR technical_type:EQ(S):'
-            '"DWC_PERSPECTIVE" OR kind:EQ(S):"sap.dis.dataflow" OR kind:'
-            'EQ(S):"sap.dwc.dac" OR kind:EQ(S):"sap.repo.folder" OR kind:'
-            'EQ(S):"sap.dwc.analyticModel" OR kind:EQ(S):'
-            '"sap.dwc.taskChain" OR kind:EQ(S):"sap.dis.replicationflow" '
-            'OR technical_type:EQ(S):"DWC_TRANSFORMATIONFLOW")) *\'))'
-        ),
-    }
-
-    # The query is encoded by hand, because httpx would escape the
-    # parentheses and asterisks the search syntax is built from
-    response = await context.session.get(
-        url=(
-            "/deepsea/repository/search/$all"
-            f"?{urlencode(params, safe='()*', quote_via=quote)}"
-        ),
-        headers={
-            "Accept": "application/json",
-            # The filter above matches the German type description
-            "Accept-Language": "de",
-            "Cache-Control": "no-cache",
-        },
-    )
-    return response.json()["value"]
 
 
 def _collect_views(entity: dict[str, Any]) -> list[tuple[str, str]]:
@@ -270,8 +215,8 @@ async def _load_model_context(
     """
     # Load all models and views
     tasks = (
-        asyncio.create_task(_get_all_models(context)),
-        asyncio.create_task(get_all_views(context)),
+        asyncio.create_task(search_analytical_models(context)),
+        asyncio.create_task(search_views(context)),
     )
     try:
         all_models, all_views = await asyncio.gather(*tasks)

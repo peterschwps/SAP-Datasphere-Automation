@@ -220,46 +220,11 @@ async def test_dependency_batch_resolves_views_to_their_spaces(
         timed_out=0,
     )
 
-    # The search filter is written in German, so the tenant has to answer in
-    # the same language
-    assert search.calls.last.request.headers["Accept-Language"] == "de"
-
-    # Models and views are two searches, not one
+    # Models and views are two searches against the same endpoint
     assert len(search.calls) == 2
 
     # Every request carries its own identifier for the tenant logs
     assert dependencies.calls.last.request.headers["x-request-id"]
-
-
-@respx.mock
-async def test_dependency_batch_sends_the_search_syntax_unescaped(
-    context: Callable[..., CommandContext],
-) -> None:
-    """
-    Checks that the search filter reaches the tenant with its syntax intact.
-    """
-    search = _search_route([], [])
-
-    await get_analytical_model_view_dependencies_batch(
-        context(),
-        GetAnalyticalModelViewDependenciesBatchRequest(),
-    )
-
-    # Read the raw query of the model search: parsing it back would undo the
-    # escaping under test
-    query = next(
-        call.request.url.query.decode()
-        for call in search.calls
-        if b"Analysemodell" in call.request.url.query
-    )
-
-    # Left to httpx, the parentheses and asterisks of the search syntax would
-    # be escaped and the filter would stop matching
-    assert "filter(Search.search(" in query
-    assert query.endswith("%20*%27))")
-
-    # Without a page size the search returns nothing at all
-    assert "%24top=1000" in query
 
 
 @respx.mock

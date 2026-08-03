@@ -3,10 +3,10 @@ import logging
 from collections.abc import Callable
 from json import JSONDecodeError
 from typing import Any
-from urllib.parse import quote, urlencode
 
 import httpx
 
+from datasphere_core.commands.repository import search_views
 from datasphere_core.commands.shared.conversion import (
     runtime_to_seconds,
     to_text,
@@ -59,7 +59,6 @@ from datasphere_core.models.views import (
     UnpersistViewRequest,
     UnpersistViewResult,
     UnpersistViewStatus,
-    ViewDetailsDict,
     ViewPersistenceCandidate,
 )
 from datasphere_core.runtime.context import CommandContext
@@ -92,62 +91,6 @@ logger = logging.getLogger(__name__)
 
 # Partitioning endpoint of one persisted view
 _PARTITIONING_URL = "/dwaas-core/partitioning/{space}/persistedViews/{view}"
-
-
-async def get_all_views(context: CommandContext) -> list[ViewDetailsDict]:
-    """
-    Loads the metadata of every view of the tenant.
-
-    Args:
-        context (CommandContext): Authenticated client and progress callbacks.
-
-    Returns:
-        list[ViewDetailsDict]: Details of every view.
-    """
-    params = {
-        # Without a page size the search returns nothing at all
-        "$top": 10000,
-        "$skip": 0,
-        "whyfound": "true",
-        "$count": "true",
-        "valuehierarchy": "folder_id",
-        "facets": "all",
-        "facetlimit": 5,
-        "$apply": (
-            "filter(Search.search(query='SCOPE:SEARCH_DESIGN "
-            '(technical_type_description:EQ(S):"View" AND (technical_type:'
-            'EQ(S):"DWC_REMOTE_TABLE" OR technical_type:EQ(S):'
-            '"DWC_LOCAL_TABLE" OR technical_type:EQ(S):"DWC_VIEW" OR '
-            'technical_type:EQ(S):"DWC_ERMODEL" OR technical_type:EQ(S):'
-            '"DWC_DATAFLOW" OR technical_type:EQ(S):"DWC_IDT" OR '
-            'technical_type:EQ(S):"DWC_BUSINESS_ENTITY" OR technical_type:'
-            'EQ(S):"DWC_AUTH_SCENARIO" OR technical_type:EQ(S):'
-            '"DWC_FACT_MODEL" OR technical_type:EQ(S):'
-            '"DWC_CONSUMPTION_MODEL" OR technical_type:EQ(S):'
-            '"DWC_PERSPECTIVE" OR kind:EQ(S):"sap.dis.dataflow" OR kind:'
-            'EQ(S):"sap.dwc.dac" OR kind:EQ(S):"sap.repo.folder" OR kind:'
-            'EQ(S):"sap.dwc.analyticModel" OR kind:EQ(S):'
-            '"sap.dwc.taskChain" OR kind:EQ(S):"sap.dis.replicationflow" '
-            'OR technical_type:EQ(S):"DWC_TRANSFORMATIONFLOW")) *\'))'
-        ),
-    }
-
-    # The query is encoded by hand, because httpx would escape the
-    # parentheses and asterisks the search syntax is built from
-    logger.debug("Loading all views...")
-    response = await context.session.get(
-        url=(
-            "/deepsea/repository/search/$all"
-            f"?{urlencode(params, safe='()*', quote_via=quote)}"
-        ),
-        headers={
-            "Accept": "application/json",
-            # The filter matches the type description in German
-            "Accept-Language": "de",
-            "Cache-Control": "no-cache",
-        },
-    )
-    return response.json()["value"]
 
 
 async def _get_view_attributes(
@@ -646,7 +589,7 @@ async def find_view_persistence_candidates_batch(
 
     # Fetch all views to create mapping for the view analyzing
     if requests is None:
-        views = await get_all_views(context)
+        views = await search_views(context)
         requests = tuple(
             FindViewPersistenceCandidatesRequest(
                 view=view["name"],
@@ -742,7 +685,7 @@ async def find_view_attribute_matches_batch(
     """
     requests = request.requests
     if requests is None:
-        views = await get_all_views(context)
+        views = await search_views(context)
         requests = tuple(
             FindViewAttributeMatchesRequest(
                 view_id=view["id"],

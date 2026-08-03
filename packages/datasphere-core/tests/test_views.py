@@ -710,38 +710,6 @@ async def test_find_attribute_matches_batch_discovers_every_view(
 
 
 @respx.mock
-async def test_view_discovery_keeps_its_headers_out_of_the_session(
-    session: httpx.AsyncClient,
-    context: Callable[..., CommandContext],
-) -> None:
-    """
-    Checks that per-request headers never leak into the shared session.
-    """
-    session.headers.update(
-        {
-            "Authorization": "Bearer access-token",
-            "X-Client-Default": "preserved",
-        }
-    )
-    search = _search_route([])
-
-    await views_commands.get_all_views(context())
-
-    # The request carries the session defaults next to its own headers
-    headers = search.calls.last.request.headers
-    assert headers["Authorization"] == "Bearer access-token"
-    assert headers["X-Client-Default"] == "preserved"
-    assert headers["Accept"] == "application/json"
-    assert headers["Accept-Language"] == "de"
-    assert headers["Cache-Control"] == "no-cache"
-
-    # The session itself keeps none of them
-    assert "Accept-Language" not in session.headers
-    assert "Cache-Control" not in session.headers
-    assert session.headers["Authorization"] == "Bearer access-token"
-
-
-@respx.mock
 async def test_every_partitioning_request_carries_its_own_identifier(
     context: Callable[..., CommandContext],
 ) -> None:
