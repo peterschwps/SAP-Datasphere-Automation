@@ -4,8 +4,6 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from datasphere_api.models import AnalyticalModelsDetailsDict
-
 from datasphere_core.commands.views import get_all_views
 from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
@@ -29,6 +27,7 @@ from datasphere_core.models.analytical_models import (
     AnalyticalModelPersistenceItemStatus,
     AnalyticalModelPersistenceStatus,
     AnalyticalModelReference,
+    AnalyticalModelsDetailsDict,
     AnalyticalModelViewDependency,
     GetAnalyticalModelViewDependenciesBatchRequest,
     GetAnalyticalModelViewDependenciesBatchResult,
@@ -110,7 +109,7 @@ async def _get_all_models(
 
     # The query is encoded by hand, because httpx would escape the
     # parentheses and asterisks the search syntax is built from
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=(
             "/deepsea/repository/search/$all"
             f"?{urlencode(params, safe='()*', quote_via=quote)}"
@@ -160,7 +159,7 @@ async def _get_view_dependencies(
         dict[str, str]: Name of every view the model depends on, keyed by view
                         ID and ordered bottom-up.
     """
-    response = await context.client.session.get(
+    response = await context.session.get(
         url="/deepsea/repository/dependencies/",
         params={
             "ids": model_id,

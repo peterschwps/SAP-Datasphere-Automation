@@ -15,8 +15,8 @@ LEVEL_STREAM = logging.DEBUG  # Logging level for output to stdout (console)
 PROJECT_PATH = os.getcwd()
 DIRECTORY_LOGS = os.path.join(PROJECT_PATH, ".logs")
 
-# Name of the datasphere-api library logger to capture its output
-LIBRARY_LOGGER_NAME = "datasphere_api"
+# Name of the datasphere-core library logger to capture its output
+LIBRARY_LOGGER_NAME = "datasphere_core"
 
 # Mapping of the logging levels to the rich colors
 FORMATS = {
@@ -145,7 +145,7 @@ STREAM_FORMAT = MultiLineFormatter(
 
 def configure_logging() -> None:
     """
-    Configures the application logger and the datasphere-api library
+    Configures the application logger and the datasphere-core library
     logger with the rich stream handler and the daily rotating file
     handler. Creates the log directory if it doesn't exist yet.
     """

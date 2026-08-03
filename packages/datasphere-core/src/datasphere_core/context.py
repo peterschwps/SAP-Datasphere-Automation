@@ -1,7 +1,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from datasphere_api import DatasphereClient
+import httpx
 
 from datasphere_core.models.common import BatchItemResult, CommandProgress
 
@@ -14,8 +14,9 @@ class CommandContext:
     """
     Runtime dependencies available to command handlers.
     """
-    # Authenticated DatasphereClient
-    client: DatasphereClient
+    # Authenticated HTTP client of a DatasphereSession, which every command
+    # sends its requests on
+    session: httpx.AsyncClient
 
     # Optional callback to report progress of the command call
     # This reports very general progress of the command, e.g. if it has been

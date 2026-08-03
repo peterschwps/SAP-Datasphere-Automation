@@ -146,10 +146,10 @@ _CORE_FUNCTIONS: dict[str, tuple[Any, str]] = {
 
 def _context() -> CommandContext:
     """
-    Builds a context whose client is never reached, because the Core command
+    Builds a context whose session is never reached, because the Core command
     itself is replaced in these tests.
     """
-    return CommandContext(client=cast(Any, object()))
+    return CommandContext(session=cast(Any, object()))
 
 
 def _summary(
@@ -257,7 +257,7 @@ async def test_analytical_model_adapters_map_requests_and_json(
         context: CommandContext,
         request: object,
     ) -> object:
-        assert context.client is command_context.client
+        assert context.session is command_context.session
         requests.append(request)
         return measure_result
 

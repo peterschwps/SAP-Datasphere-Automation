@@ -768,7 +768,7 @@ class ExecutionScreen(BaseScreen):
         status = self.query_one("#result-status", Static)
 
         # Configure LogHandler for RichLog widget (also captures the
-        # datasphere-api library logs)
+        # datasphere-core library logs)
         handler = LogHandler(log_widget)
         handler.setFormatter(STREAM_FORMAT)
         library_logger = logging.getLogger(LIBRARY_LOGGER_NAME)
@@ -798,7 +798,7 @@ class ExecutionScreen(BaseScreen):
                 status.update(progress_line(update))
 
             context = CommandContext(
-                client=session.client,
+                session=session.client,
                 progress_callback=report_progress,
             )
             await self._action(context, **self._params)

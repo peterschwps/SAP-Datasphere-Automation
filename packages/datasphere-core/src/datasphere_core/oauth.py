@@ -7,26 +7,23 @@ import socketserver
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 from playwright.async_api import async_playwright
 
-from datasphere_api.config import BROWSER_MAPPING, DatasphereConfig
-from datasphere_api.exceptions import (
-    AuthenticationFailed,
-    InvalidConfiguration,
+from datasphere_core.credentials import TokenDict
+from datasphere_core.errors import (
+    AuthenticationError,
+    InvalidConfigurationError,
 )
+from datasphere_core.session import BROWSER_MAPPING, SessionConfig
 
 logger = logging.getLogger(__name__)
 
-# Raw token response of the OAuth token endpoint
-type TokenDict = dict[str, Any]
-
 
 async def refresh_tokens(
-    config: DatasphereConfig,
+    config: SessionConfig,
     session: httpx.AsyncClient,
     refresh_token: str,
 ) -> TokenDict | None:
@@ -34,8 +31,8 @@ async def refresh_tokens(
     Requests new tokens from the token endpoint using a refresh token.
 
     Args:
-        config (DatasphereConfig): Configuration with the token URL and
-                                   the client credentials.
+        config (SessionConfig): Configuration with the token URL and the
+                               client credentials.
         session (httpx.AsyncClient): Session to send the request with.
         refresh_token (str): Refresh token of a previous login.
 
@@ -76,7 +73,7 @@ async def refresh_tokens(
 
 
 async def authenticate_interactively(
-    config: DatasphereConfig,
+    config: SessionConfig,
     session: httpx.AsyncClient,
 ) -> TokenDict:
     """
@@ -86,15 +83,15 @@ async def authenticate_interactively(
     received code for tokens at the token endpoint.
 
     Args:
-        config (DatasphereConfig): Configuration with the URLs, the
-                                   client credentials and the browser to
-                                   use for the login.
+        config (SessionConfig): Configuration with the URLs, the client
+                               credentials and the browser to use for the
+                               login.
         session (httpx.AsyncClient): Session to send the token request
                                      with.
 
     Raises:
-        AuthenticationFailed: If the login is not completed in time or
-                              the token endpoint doesn't return tokens.
+        AuthenticationError: If the login is not completed in time or the
+                             token endpoint doesn't return tokens.
 
     Returns:
         TokenDict: Tokens returned by the token endpoint.
@@ -108,7 +105,7 @@ async def authenticate_interactively(
         or redirect.query
         or redirect.fragment
     ):
-        raise InvalidConfiguration(
+        raise InvalidConfigurationError(
             "The OAuth redirect URI must be an HTTP loopback URI without "
             "credentials, query parameters or fragments."
         )
@@ -237,13 +234,13 @@ async def authenticate_interactively(
             try:
                 await asyncio.wait_for(received.wait(), timeout=120)
             except TimeoutError:
-                raise AuthenticationFailed(
+                raise AuthenticationError(
                     "Timed out waiting for the login to complete."
                 ) from None
 
             # check if OAuth server returned an error in the callback URL
             if callback["error"] is not None:
-                raise AuthenticationFailed(
+                raise AuthenticationError(
                     "The authorization server rejected the login."
                 )
 
@@ -263,7 +260,7 @@ async def authenticate_interactively(
             auth=auth,
         )
     except httpx.HTTPError:
-        raise AuthenticationFailed(
+        raise AuthenticationError(
             "Unable to contact the token endpoint."
         ) from None
 
@@ -273,7 +270,7 @@ async def authenticate_interactively(
     except json.JSONDecodeError:
         tokens = {}
     if "access_token" not in tokens:
-        raise AuthenticationFailed(
+        raise AuthenticationError(
             "Token endpoint returned an unexpected response "
             f"[{response.status_code}]: {response.text}."
         )

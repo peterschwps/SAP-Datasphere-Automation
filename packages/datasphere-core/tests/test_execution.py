@@ -1,10 +1,9 @@
 import asyncio
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import cast
 
+import httpx
 import pytest
-from datasphere_api import DatasphereClient
 from datasphere_core import CommandContext
 from datasphere_core.errors import CommandTimeoutError
 from datasphere_core.execution import (
@@ -65,7 +64,7 @@ def _context() -> tuple[
         items.append(update)
 
     context = CommandContext(
-        client=cast(DatasphereClient, SimpleNamespace()),
+        session=cast(httpx.AsyncClient, None),
         progress_callback=report,
         batch_item_result_callback=report_item,
     )

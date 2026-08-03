@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
+from typing import Literal, TypedDict
 
 from datasphere_core.models.common import (
     BatchSummary,
@@ -144,3 +146,18 @@ class RefreshRemoteTableStatisticsBatchResult:
     """
     results: tuple[RefreshRemoteTableStatisticsResult, ...]
     summary: BatchSummary
+
+
+# What a write against the statistics endpoint achieved
+StatisticsWriteOutcome = Literal["accepted", "already_exists", "failed"]
+
+
+class StatisticsInformationDict(TypedDict):
+    statisticsSupported: bool
+    statisticsLimitedToRecordCount: bool
+    statisticsType: StatisticsType | None
+    businessName: str
+    statisticsLatestUpdate: datetime | None
+
+
+StatisticsDict = dict[str, StatisticsInformationDict]

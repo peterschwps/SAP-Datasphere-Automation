@@ -17,10 +17,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "datasphere-api==0.4.0", # x-release-please-version
     "filelock>=3.20.0",
+    "httpx>=0.28.1",
     "keyring>=25.6.0",
     "platformdirs>=4.4.0",
+    "playwright>=1.54.0",
 ]
 
 [project.urls]
@@ -33,6 +34,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/datasphere_core"]
-
-[tool.uv.sources]
-datasphere-api = { workspace = true }

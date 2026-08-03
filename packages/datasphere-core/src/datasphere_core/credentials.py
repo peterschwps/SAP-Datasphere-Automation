@@ -1,15 +1,18 @@
 import asyncio
 import json
 from hashlib import sha256
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import keyring
-from datasphere_api import TokenDict
 
 from datasphere_core.errors import TokenStoreError
 
 # Service name used in the credential store
 TOKEN_SERVICE = "Datasphere-Core OAuth Tokens"
+
+# Raw token response of the OAuth token endpoint. It lives here because the
+# token store is the only part that outlives one session.
+type TokenDict = dict[str, Any]
 
 
 def build_credential_key(base_url: str, client_id: str) -> str:

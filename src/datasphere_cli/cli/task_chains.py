@@ -93,7 +93,7 @@ async def _run_with_session(
     async with DatasphereSession(config) as session:
         await session.authenticate(interactive=True)
         return await run_task_chain(
-            CommandContext(client=session.client),
+            CommandContext(session=session.client),
             request,
         )
 

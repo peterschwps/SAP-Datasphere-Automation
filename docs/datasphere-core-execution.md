@@ -3,9 +3,9 @@
 `datasphere-core` is the presentation-independent command layer shared by the
 CLI and the planned MCP adapter.
 
-Core owns typed requests and results, the command registry, calls into
-`datasphere-api`, lifecycle and progress reporting, bounded concurrency, batch
-summaries, and local session and credential handling.
+Core owns typed requests and results, the command registry, the requests it
+sends to the tenant, lifecycle and progress reporting, bounded concurrency,
+batch summaries, and local session and credential handling.
 
 Core does not own Textual or Rich state, CSV and JSON file formats, terminal
 rendering, MCP protocol objects, or process exit handling.

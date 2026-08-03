@@ -6,7 +6,6 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 import httpx
-from datasphere_api.models import ViewDetailsDict
 
 from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
@@ -56,6 +55,7 @@ from datasphere_core.models.views import (
     UnpersistViewRequest,
     UnpersistViewResult,
     UnpersistViewStatus,
+    ViewDetailsDict,
     ViewPersistenceCandidate,
 )
 from datasphere_core.runs import (
@@ -132,7 +132,7 @@ async def get_all_views(context: CommandContext) -> list[ViewDetailsDict]:
     # The query is encoded by hand, because httpx would escape the
     # parentheses and asterisks the search syntax is built from
     logger.debug("Loading all views...")
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=(
             "/deepsea/repository/search/$all"
             f"?{urlencode(params, safe='()*', quote_via=quote)}"
@@ -166,7 +166,7 @@ async def _get_view_attributes(
     Returns:
         list[str]: Attribute names, empty if the details cannot be read.
     """
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=f"/deepsea/repository/{space}/designObjects",
         params={
             "ids": view_id,
@@ -224,7 +224,7 @@ async def _get_partitioning(
     Returns:
         dict[str, Any]: Partitioning with 'ranges' and 'partitioningColumns'.
     """
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=_PARTITIONING_URL.format(space=space, view=view),
         headers=request_headers(),
     )
@@ -250,7 +250,7 @@ async def _set_partitioning(
     Returns:
         bool: Whether the tenant accepted the partitioning.
     """
-    response = await context.client.session.post(
+    response = await context.session.post(
         url=_PARTITIONING_URL.format(space=space, view=view),
         json=partitioning,
         headers=request_headers(),
@@ -277,7 +277,7 @@ async def _delete_partitioning(
     Returns:
         bool: Whether the partitioning was removed.
     """
-    response = await context.client.session.delete(
+    response = await context.session.delete(
         url=_PARTITIONING_URL.format(space=space, view=view),
         headers=request_headers(),
     )
@@ -300,7 +300,7 @@ async def _get_task_logs(
     Returns:
         list[dict[str, Any]]: Log entries with 'status' and 'logId'.
     """
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=f"/dwaas-core/tf/{space}/logs",
         params={"objectId": view, "getLocks": True},
         headers=request_headers(**{"X-Requested-With": "XMLHttpRequest"}),
@@ -326,7 +326,7 @@ async def _start_view_analyzer(
                                        log ID if the start reported one, and
                                        whether it was already running before.
     """
-    response = await context.client.session.post(
+    response = await context.session.post(
         url=f"/dwaas-core/advisor/{space}/execute/{view}",
         json={
             "withMemoryAnalysis": False,
@@ -370,7 +370,7 @@ async def _get_view_analyzer_result(
     Returns:
         dict[str, Any]: Analyzer result with 'entityStats'.
     """
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=f"/dwaas-core/advisor/{space}/result/{log_id}",
         headers=request_headers(**{"X-Requested-With": "XMLHttpRequest"}),
     )

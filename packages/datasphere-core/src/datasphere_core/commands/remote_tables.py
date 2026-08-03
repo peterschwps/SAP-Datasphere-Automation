@@ -2,12 +2,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from datasphere_api.models import (
-    StatisticsDict,
-    StatisticsInformationDict,
-    StatisticsWriteOutcome,
-)
-
 from datasphere_core.context import CommandContext
 from datasphere_core.definitions import CommandDefinition
 from datasphere_core.execution import batch_command, command, run_batch
@@ -22,7 +16,10 @@ from datasphere_core.models.remote_tables import (
     RefreshRemoteTableStatisticsRequest,
     RefreshRemoteTableStatisticsResult,
     RefreshRemoteTableStatisticsStatus,
+    StatisticsDict,
+    StatisticsInformationDict,
     StatisticsType,
+    StatisticsWriteOutcome,
 )
 
 CONFIGURE_REMOTE_TABLE_STATISTICS_COMMAND_NAME = (
@@ -98,7 +95,7 @@ async def _get_all_tables(
         StatisticsDict: Metadata of every table, keyed by table name.
     """
     logger.debug("Loading all remote tables...")
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=f"/dwaas-core/statistics/{space}/remotetables",
         params={"includeBusinessNames": "true"},
     )
@@ -159,7 +156,7 @@ async def _write_statistics(
     """
     # Both endpoints share their URL and payload, only the verb differs
     send = (
-        context.client.session.post if creating else context.client.session.put
+        context.session.post if creating else context.session.put
     )
     response = await send(
         url=f"/dwaas-core/statistics/{space}/remoteTables/{table}",
@@ -194,7 +191,7 @@ async def _refresh_statistics(
     Returns:
         bool: Whether the refresh was accepted.
     """
-    response = await context.client.session.post(
+    response = await context.session.post(
         url=f"/dwaas-core/statistics/{space}/remoteTables/{table}/refresh",
     )
     return response.status_code == 202

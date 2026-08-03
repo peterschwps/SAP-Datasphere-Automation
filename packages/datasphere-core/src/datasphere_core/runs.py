@@ -85,7 +85,7 @@ async def _start_chain(
         int | None: Task log ID of the started run, or None if the tenant
                     refused it.
     """
-    response = await context.client.session.post(
+    response = await context.session.post(
         url=f"/dwaas-core/tf/{space}/taskchains/{chain}/start",
         json={
             "objectId": chain,
@@ -122,7 +122,7 @@ async def _get_chain_log(
     Returns:
         dict[str, Any]: Log details with 'status' and 'runTime'.
     """
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=f"/dwaas-core/tf/{space}/logs",
         params={"taskLogId": log_id},
         headers=request_headers(),
@@ -147,7 +147,7 @@ async def _get_extended_log(
     Returns:
         dict[str, Any]: Log details with 'status' and 'runTime'.
     """
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=f"/dwaas-core/tf/{space}/extendedlogs/{log_id}",
         headers=request_headers(),
     )
@@ -171,7 +171,7 @@ async def _get_monitor_details(
     Returns:
         dict[str, Any]: Monitor details, empty if the tenant refused to answer.
     """
-    response = await context.client.session.get(
+    response = await context.session.get(
         url=f"/dwaas-core/monitor/{space}/persistedViews/{view}",
     )
     if response.status_code != 200:
@@ -200,7 +200,7 @@ async def _start_view_activity(
         int | None: Task log ID of the started run, or None if the tenant
                     refused it.
     """
-    response = await context.client.session.post(
+    response = await context.session.post(
         url="/dwaas-core/tf/directexecute",
         json={
             "applicationId": "VIEWS",

@@ -1,79 +1,29 @@
 import asyncio
-from collections.abc import Callable
-from dataclasses import dataclass
+import logging
 from pathlib import Path
 
-from datasphere_api import (
-    Browser,
-    DatasphereClient,
-    DatasphereConfig,
-)
+import httpx
 from filelock import AsyncFileLock
 from platformdirs import user_cache_path
 
 from datasphere_core.credentials import (
     KeyringTokenStore,
+    TokenDict,
     TokenStore,
-    build_credential_key,
 )
-from datasphere_core.errors import SessionNotAuthenticatedError
+from datasphere_core.errors import (
+    AuthenticationError,
+    SessionNotAuthenticatedError,
+)
+from datasphere_core.oauth import authenticate_interactively, refresh_tokens
+from datasphere_core.session import DEFAULT_HEADERS, SessionConfig
 
-
-@dataclass(frozen=True, slots=True)
-class SessionConfig:
-    """
-    Configuration required to create an authenticated API session.
-    """
-    base_url: str
-    authorization_url: str
-    token_url: str
-    client_id: str
-    client_secret: str
-    browser: Browser = "EDGE"
-    redirect_uri: str = "http://localhost:8080"
-    timeout: float = 60.0
-
-    def __post_init__(self) -> None:
-        """
-        Validates if a client secret was provided.
-
-        Raises:
-            ValueError: If no client secret was provided.
-        """
-        if not self.client_secret.strip():
-            raise ValueError("Client secret must not be empty.")
-
-    def to_api_config(self) -> DatasphereConfig:
-        """
-        Creates the API configuration.
-        """
-        return DatasphereConfig(
-            base_url=self.base_url,
-            authorization_url=self.authorization_url,
-            token_url=self.token_url,
-            client_id=self.client_id,
-            client_secret=self.client_secret,
-            browser=self.browser,
-            redirect_uri=self.redirect_uri,
-            timeout=self.timeout,
-        )
-
-    @property
-    def credential_key(self) -> str:
-        """
-        Returns a stable, non-secret key for the tenant and client.
-        """
-        return build_credential_key(self.base_url, self.client_id)
-
-
-# Type alias for a factory function that creates a DatasphereClient
-# (can be overridden for testing purposes)
-type ClientFactory = Callable[[DatasphereConfig], DatasphereClient]
+logger = logging.getLogger(__name__)
 
 
 class DatasphereSession:
     """
-    Owns one authenticated API client and its persisted OAuth tokens.
+    Owns one authenticated HTTP client and its persisted OAuth tokens.
     """
 
     def __init__(
@@ -81,7 +31,6 @@ class DatasphereSession:
         config: SessionConfig,
         *,
         token_store: TokenStore | None = None,
-        client_factory: ClientFactory = DatasphereClient,
         lock_directory: Path | None = None,
     ) -> None:
         """
@@ -97,13 +46,6 @@ class DatasphereSession:
                                                        used to swap the store
                                                        in tests.
                                                        Defaults to None.
-            client_factory (ClientFactory, optional): Callable that turns a
-                                                      DatasphereConfig into a
-                                                      DatasphereClient. Mainly
-                                                      used to inject a mock
-                                                      client in tests.
-                                                      Defaults to
-                                                      DatasphereClient.
             lock_directory (Path | None, optional): Directory for the lock
                                                     file that keeps parallel
                                                     processes from writing
@@ -116,8 +58,7 @@ class DatasphereSession:
         """
         self._config = config
         self._token_store = token_store or KeyringTokenStore()
-        self._client_factory = client_factory
-        self._client: DatasphereClient | None = None
+        self._client: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
 
         # Create a lock file
@@ -130,9 +71,9 @@ class DatasphereSession:
         )
 
     @property
-    def client(self) -> DatasphereClient:
+    def client(self) -> httpx.AsyncClient:
         """
-        Returns the authenticated API client.
+        Returns the authenticated HTTP client of the session.
 
         Raises:
             SessionNotAuthenticatedError: If the session was not
@@ -155,6 +96,8 @@ class DatasphereSession:
                                 refresh token is available.
         Raises:
             TokenStoreError: If local tokens could not be read or written.
+            AuthenticationError: If interactive login is required but disabled,
+                                 or if the interactive login fails.
         """
         # Start authentication with lock to prevent parallel processes from
         # writing tokens
@@ -163,15 +106,19 @@ class DatasphereSession:
             # Load identifier to load and store tokens in the credential store
             key = self._config.credential_key
 
-            # Create the API client if it doesn't exist yet
+            # Create the HTTP client if it doesn't exist yet
             if self._client is None:
-                api_config = self._config.to_api_config()
-                self._client = self._client_factory(api_config)
+                self._client = httpx.AsyncClient(
+                    base_url=self._config.base_url,
+                    timeout=self._config.timeout,
+                    follow_redirects=True,
+                    headers=DEFAULT_HEADERS,
+                )
 
             # Load tokens from the credential store and login
             tokens = await self._token_store.load_tokens(key)
-            new_tokens = await self._client.login(
-                tokens=tokens,
+            new_tokens = await self._login(
+                tokens,
                 allow_interactive_fallback=interactive,
             )
 
@@ -185,6 +132,76 @@ class DatasphereSession:
                     {"refresh_token": refresh_token},
                 )
 
+    async def _login(
+        self,
+        tokens: TokenDict | None,
+        *,
+        allow_interactive_fallback: bool,
+    ) -> TokenDict:
+        """
+        Authenticates the HTTP client against the tenant. Tries to refresh the
+        given tokens if they contain a refresh token. Falls back to the
+        interactive browser login if no tokens are given or the refresh fails,
+        unless interactive fallback is disabled.
+
+        Args:
+            tokens (TokenDict | None): Tokens of a previous login to refresh.
+            allow_interactive_fallback (bool): Whether to open a browser when
+                                               no valid refresh token is
+                                               available.
+
+        Raises:
+            AuthenticationError: If interactive login is required but disabled,
+                                 or if the interactive login fails.
+
+        Returns:
+            TokenDict: Tokens returned by the token endpoint.
+        """
+        # Try to refresh the given tokens
+        if tokens is not None and "refresh_token" in tokens:
+            logger.info("Refreshing session tokens...")
+            new_tokens = await refresh_tokens(
+                config=self._config,
+                session=self.client,
+                refresh_token=tokens["refresh_token"],
+            )
+            if new_tokens is not None:
+                # Only add saved refresh token to the new tokens if the token
+                # endpoint didn't return a new one
+                new_tokens.setdefault("refresh_token", tokens["refresh_token"])
+                self._apply_tokens(new_tokens)
+                return new_tokens
+            logger.warning(
+                "Unable to refresh session tokens. Starting a new login..."
+            )
+        else:
+            logger.debug("No session tokens provided.")
+
+        if not allow_interactive_fallback:
+            raise AuthenticationError(
+                "Interactive login is required to authenticate."
+            )
+
+        # Start interactive login
+        logger.debug("Opening browser window to log in...")
+        new_tokens = await authenticate_interactively(
+            config=self._config,
+            session=self.client,
+        )
+        self._apply_tokens(new_tokens)
+        return new_tokens
+
+    def _apply_tokens(self, tokens: TokenDict) -> None:
+        """
+        Adds the access token to the client headers.
+
+        Args:
+            tokens (TokenDict): Tokens returned by the token endpoint.
+        """
+        self.client.headers.update(
+            {"Authorization": f"Bearer {tokens['access_token']}"}
+        )
+
     async def logout(self) -> None:
         """
         Deletes persisted credentials for the configured tenant.
@@ -193,11 +210,11 @@ class DatasphereSession:
             key = self._config.credential_key
             await self._token_store.delete_tokens(key)
             if self._client is not None:
-                self._client.session.headers.pop("Authorization", None)
+                self._client.headers.pop("Authorization", None)
 
     async def aclose(self) -> None:
         """
-        Closes the API client when one was created.
+        Closes the HTTP client when one was created.
         """
         if self._client is not None:
             await self._client.aclose()
@@ -213,7 +230,7 @@ class DatasphereSession:
 
     async def __aexit__(self, *args: object) -> None:
         """
-        Closes the API client when leaving the session context.
+        Closes the HTTP client when leaving the session context.
         """
         _ = args
         await self.aclose()

@@ -173,7 +173,7 @@ async def test_execute_calls_the_core_command_with_the_session_client(
         context: CommandContext,
         request: RunTaskChainRequest,
     ) -> RunTaskChainResult:
-        assert context.client is FakeSession.client
+        assert context.session is FakeSession.client
         requests.append(request)
         return _result()
 

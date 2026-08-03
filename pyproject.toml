@@ -40,11 +40,10 @@ build-backend = "hatchling.build"
 packages = ["src/datasphere_cli"]
 
 [tool.uv.sources]
-datasphere-api = { workspace = true }
 datasphere-core = { workspace = true }
 
 [tool.uv.workspace]
-members = ["packages/datasphere-api", "packages/datasphere-core"]
+members = ["packages/datasphere-core"]
 
 [tool.ruff]
 line-length = 79
@@ -66,17 +65,13 @@ venvPath = "."
 venv = ".venv"
 extraPaths = [
     "src",
-    "packages/datasphere-api/src",
     "packages/datasphere-core/src",
 ]
 
 [tool.pytest.ini_options]
-# Five test module names exist in more than one package, so pytest is
-# told to import them by location instead of by name
-addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+addopts = "-ra --strict-markers --strict-config"
 testpaths = [
     "tests",
-    "packages/datasphere-api/tests",
     "packages/datasphere-core/tests",
 ]
 asyncio_mode = "auto"
@@ -87,6 +82,7 @@ dev = [
     "pyright>=1.1.405",
     "pytest>=9.0.0",
     "pytest-asyncio>=1.3.0",
+    "respx>=0.22.0",
     "ruff>=0.13.0",
     "textual-dev>=1.8.0",
 ]

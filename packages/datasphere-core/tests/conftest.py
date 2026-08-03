@@ -1,10 +1,8 @@
 from collections.abc import AsyncIterator, Callable
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import httpx
 import pytest
-from datasphere_api import DatasphereClient
 from datasphere_core import CommandContext
 
 # Tenant the mocked requests are matched against
@@ -37,9 +35,6 @@ def context(
         Returns:
             CommandContext: Context for one command execution.
         """
-        return CommandContext(
-            client=cast(DatasphereClient, SimpleNamespace(session=session)),
-            **callbacks,
-        )
+        return CommandContext(session=session, **callbacks)
 
     return build

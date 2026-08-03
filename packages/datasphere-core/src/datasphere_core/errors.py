@@ -31,6 +31,18 @@ class TokenStoreError(CommandError):
     """
 
 
+class AuthenticationError(CommandError):
+    """
+    Raised when a session cannot be authenticated against its tenant.
+    """
+
+
+class InvalidConfigurationError(CommandError):
+    """
+    Raised when a session configuration cannot be used as given.
+    """
+
+
 class SessionNotAuthenticatedError(CommandError):
     """
     Raised when a command requests an unauthenticated client.

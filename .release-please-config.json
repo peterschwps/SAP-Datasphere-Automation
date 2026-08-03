@@ -15,11 +15,6 @@
           "jsonpath": "$.project.version"
         },
         {
-          "type": "toml",
-          "path": "packages/datasphere-api/pyproject.toml",
-          "jsonpath": "$.project.version"
-        },
-        {
           "type": "generic",
           "path": "pyproject.toml"
         }
