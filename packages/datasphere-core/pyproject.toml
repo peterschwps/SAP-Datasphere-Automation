@@ -17,7 +17,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "datasphere-api>=0.3.0,<0.4.0",
+    "datasphere-api==0.4.0", # x-release-please-version
     "filelock>=3.20.0",
     "keyring>=25.6.0",
     "platformdirs>=4.4.0",
@@ -35,4 +35,4 @@ build-backend = "hatchling.build"
 packages = ["src/datasphere_core"]
 
 [tool.uv.sources]
-datasphere-api = { path = "../../../SAP-Datasphere-API", editable = true }
+datasphere-api = { workspace = true }

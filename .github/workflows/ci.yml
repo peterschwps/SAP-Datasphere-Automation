@@ -21,15 +21,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      # Installs CLI and Core packages from the workspace, resolves
-      # the datasphere-api from PyPI and ignores the local path in the
-      # pyproject.toml
-      - run: >
-          uv sync --all-packages --no-dev
-          --no-sources-package datasphere-api
-      - run: >
-          uv run --no-sources-package datasphere-api
-          --with ruff ruff check .
+      - run: uv sync --all-packages --no-dev
+      - run: uv run --with ruff ruff check .
 
   test:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
@@ -47,10 +40,8 @@ jobs:
       - run: uv python install ${{ matrix.python-version }}
       - run: >
           uv sync --all-packages
-          --no-sources-package datasphere-api
           --python ${{ matrix.python-version }}
-      - run: >
-          uv run --no-sources-package datasphere-api pytest
+      - run: uv run pytest
 
   build:
     name: Build distributions

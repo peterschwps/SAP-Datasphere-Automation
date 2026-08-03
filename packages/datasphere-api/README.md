@@ -1,13 +1,15 @@
-# SAP-Datasphere-API
+# Datasphere-API
 
 [![PyPI](https://img.shields.io/pypi/v/Datasphere-API?label=PyPI)](https://pypi.org/project/Datasphere-API/)
 [![Python](https://img.shields.io/pypi/pyversions/Datasphere-API?label=Python)](https://pypi.org/project/Datasphere-API/)
-[![CI](https://github.com/peterschwps/SAP-Datasphere-API/actions/workflows/ci.yml/badge.svg)](https://github.com/peterschwps/SAP-Datasphere-API/actions/workflows/ci.yml)
+[![CI](https://github.com/peterschwps/SAP-Datasphere-CLI/actions/workflows/ci.yml/badge.svg)](https://github.com/peterschwps/SAP-Datasphere-CLI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Asynchronous client for the internal SAP Datasphere API. This library powers the
-[SAP-Datasphere-CLI](https://github.com/peterschwps/SAP-Datasphere-CLI)
-and can be used to build your own automations.
+Asynchronous client for the internal SAP Datasphere API. It sends the
+requests and returns the answers; waiting for a run and judging its outcome
+is left to the caller. Datasphere-API powers
+[Datasphere-Core](https://github.com/peterschwps/SAP-Datasphere-CLI) and can
+be used to build your own automations.
 
 ## Features
 

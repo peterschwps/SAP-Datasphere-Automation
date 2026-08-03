@@ -1,7 +1,0 @@
-{
-  "recommendations": [
-    "charliermarsh.ruff",
-    "editorconfig.editorconfig",
-    "vivaxy.vscode-conventional-commits"
-  ]
-}
