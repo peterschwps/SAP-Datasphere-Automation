@@ -6,6 +6,7 @@ from urllib.parse import quote, urlencode
 
 from datasphere_api.models import AnalyticalModelsDetailsDict
 
+from datasphere_core.commands.views import get_all_views
 from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
 from datasphere_core.definitions import CommandDefinition
@@ -40,6 +41,7 @@ from datasphere_core.models.analytical_models import (
     MeasureAnalyticalModelViewPersistenceResult,
 )
 from datasphere_core.runs import (
+    is_persisted,
     run_persistence,
     run_persistence_removal,
 )
@@ -267,7 +269,7 @@ async def _load_model_context(
     # Load all models and views
     tasks = (
         asyncio.create_task(_get_all_models(context)),
-        asyncio.create_task(context.client.views.get_all_views()),
+        asyncio.create_task(get_all_views(context)),
     )
     try:
         all_models, all_views = await asyncio.gather(*tasks)
@@ -715,9 +717,10 @@ async def _measure_view(
     assert space is not None, "Only resolved dependencies can be measured."
 
     # Check if the view is already persisted
-    previously_persisted = await context.client.views.is_persisted(
-        view=dependency.view_name,
-        space=space,
+    previously_persisted = await is_persisted(
+        context,
+        dependency.view_name,
+        space,
     )
 
     # Start the persistence run

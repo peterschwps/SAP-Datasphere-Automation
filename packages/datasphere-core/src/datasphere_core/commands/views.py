@@ -1,6 +1,12 @@
 import asyncio
+import logging
 from collections.abc import Callable
+from json import JSONDecodeError
 from typing import Any
+from urllib.parse import quote, urlencode
+
+import httpx
+from datasphere_api.models import ViewDetailsDict
 
 from datasphere_core.context import CommandContext
 from datasphere_core.conversion import runtime_to_seconds, to_text
@@ -56,6 +62,7 @@ from datasphere_core.runs import (
     run_persistence,
     run_persistence_removal,
 )
+from datasphere_core.session import request_headers
 
 FIND_PERSISTENCE_CANDIDATES_COMMAND_NAME = "views.find_persistence_candidates"
 FIND_PERSISTENCE_CANDIDATES_BATCH_COMMAND_NAME = (
@@ -77,6 +84,297 @@ LOCK_PARTITIONS_COMMAND_NAME = "views.lock_partitions"
 LOCK_PARTITIONS_BATCH_COMMAND_NAME = "views.lock_partitions_batch"
 UNLOCK_PARTITIONS_COMMAND_NAME = "views.unlock_partitions"
 UNLOCK_PARTITIONS_BATCH_COMMAND_NAME = "views.unlock_partitions_batch"
+
+logger = logging.getLogger(__name__)
+
+# Partitioning endpoint of one persisted view
+_PARTITIONING_URL = "/dwaas-core/partitioning/{space}/persistedViews/{view}"
+
+
+async def get_all_views(context: CommandContext) -> list[ViewDetailsDict]:
+    """
+    Loads the metadata of every view of the tenant.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+
+    Returns:
+        list[ViewDetailsDict]: Details of every view.
+    """
+    params = {
+        # Without a page size the search returns nothing at all
+        "$top": 10000,
+        "$skip": 0,
+        "whyfound": "true",
+        "$count": "true",
+        "valuehierarchy": "folder_id",
+        "facets": "all",
+        "facetlimit": 5,
+        "$apply": (
+            "filter(Search.search(query='SCOPE:SEARCH_DESIGN "
+            '(technical_type_description:EQ(S):"View" AND (technical_type:'
+            'EQ(S):"DWC_REMOTE_TABLE" OR technical_type:EQ(S):'
+            '"DWC_LOCAL_TABLE" OR technical_type:EQ(S):"DWC_VIEW" OR '
+            'technical_type:EQ(S):"DWC_ERMODEL" OR technical_type:EQ(S):'
+            '"DWC_DATAFLOW" OR technical_type:EQ(S):"DWC_IDT" OR '
+            'technical_type:EQ(S):"DWC_BUSINESS_ENTITY" OR technical_type:'
+            'EQ(S):"DWC_AUTH_SCENARIO" OR technical_type:EQ(S):'
+            '"DWC_FACT_MODEL" OR technical_type:EQ(S):'
+            '"DWC_CONSUMPTION_MODEL" OR technical_type:EQ(S):'
+            '"DWC_PERSPECTIVE" OR kind:EQ(S):"sap.dis.dataflow" OR kind:'
+            'EQ(S):"sap.dwc.dac" OR kind:EQ(S):"sap.repo.folder" OR kind:'
+            'EQ(S):"sap.dwc.analyticModel" OR kind:EQ(S):'
+            '"sap.dwc.taskChain" OR kind:EQ(S):"sap.dis.replicationflow" '
+            'OR technical_type:EQ(S):"DWC_TRANSFORMATIONFLOW")) *\'))'
+        ),
+    }
+
+    # The query is encoded by hand, because httpx would escape the
+    # parentheses and asterisks the search syntax is built from
+    logger.debug("Loading all views...")
+    response = await context.client.session.get(
+        url=(
+            "/deepsea/repository/search/$all"
+            f"?{urlencode(params, safe='()*', quote_via=quote)}"
+        ),
+        headers={
+            "Accept": "application/json",
+            # The filter matches the type description in German
+            "Accept-Language": "de",
+            "Cache-Control": "no-cache",
+        },
+    )
+    return response.json()["value"]
+
+
+async def _get_view_attributes(
+    context: CommandContext,
+    *,
+    view_id: str,
+    view_name: str,
+    space: str,
+) -> list[str]:
+    """
+    Loads the attribute names of one view from its design object details.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        view_id (str): Repository ID of the view.
+        view_name (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        list[str]: Attribute names, empty if the details cannot be read.
+    """
+    response = await context.client.session.get(
+        url=f"/deepsea/repository/{space}/designObjects",
+        params={
+            "ids": view_id,
+            "details": (
+                "id,#repairedCsn,#ownerBusinessName,#creatorBusinessName,"
+                "#repositoryPackage,@EnterpriseSearch.enabled,"
+                "@remote.source,@DataWarehouse.external.schema,"
+                "#objectPathIdentifier,#repositoryPackage,"
+                "#repositoryValidationDate,hasPendingError,#isI18nEnabled"
+            ),
+            "kinds": (
+                "entity,view,sap.dwc.ermodel,sap.dis.dataflow,"
+                "sap.dwc.taskChain,sap.dwc.analyticModel,"
+                "sap.dwc.dac,sap.repo.folder,sap.dis.replicationflow,"
+                "sap.dis.transformationflow,sap.dwc.perspective,"
+                "sap.dwc.consumptionModel,sap.dwc.factModel,"
+                "sap.dwc.businessEntity,sap.dwc.authscenario"
+            ),
+        },
+        headers=request_headers(
+            Accept="application/json, text/javascript, */*; q=0.01",
+            **{"X-Requested-With": "XMLHttpRequest"},
+        ),
+    )
+
+    # The attribute names sit in the CSN the tenant repaired for the view
+    try:
+        view_data = response.json()["results"][0]
+        return list(
+            view_data["#repairedCsn"]["definitions"][view_name]["elements"]
+        )
+    except (httpx.HTTPError, JSONDecodeError, KeyError, IndexError):
+        logger.error(
+            "Error fetching details of view '%s' in '%s'.",
+            view_name,
+            space,
+        )
+        logger.debug("Response: %s\n", response.text.strip())
+        return []
+
+
+async def _get_partitioning(
+    context: CommandContext,
+    view: str,
+    space: str,
+) -> dict[str, Any]:
+    """
+    Reads the partitioning of one persisted view.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        dict[str, Any]: Partitioning with 'ranges' and 'partitioningColumns'.
+    """
+    response = await context.client.session.get(
+        url=_PARTITIONING_URL.format(space=space, view=view),
+        headers=request_headers(),
+    )
+    return response.json()
+
+
+async def _set_partitioning(
+    context: CommandContext,
+    view: str,
+    space: str,
+    partitioning: dict[str, Any],
+) -> bool:
+    """
+    Creates or replaces the partitioning of one persisted view.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+        partitioning (dict[str, Any]): Full partitioning definition, in the
+                                       shape the read returns.
+
+    Returns:
+        bool: Whether the tenant accepted the partitioning.
+    """
+    response = await context.client.session.post(
+        url=_PARTITIONING_URL.format(space=space, view=view),
+        json=partitioning,
+        headers=request_headers(),
+    )
+    if response.status_code != 201:
+        logger.debug("Response: %s\n", response.text)
+        return False
+    return True
+
+
+async def _delete_partitioning(
+    context: CommandContext,
+    view: str,
+    space: str,
+) -> bool:
+    """
+    Removes the partitioning of one persisted view.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        bool: Whether the partitioning was removed.
+    """
+    response = await context.client.session.delete(
+        url=_PARTITIONING_URL.format(space=space, view=view),
+        headers=request_headers(),
+    )
+    return response.status_code == 200
+
+
+async def _get_task_logs(
+    context: CommandContext,
+    view: str,
+    space: str,
+) -> list[dict[str, Any]]:
+    """
+    Reads the task logs of one view.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        list[dict[str, Any]]: Log entries with 'status' and 'logId'.
+    """
+    response = await context.client.session.get(
+        url=f"/dwaas-core/tf/{space}/logs",
+        params={"objectId": view, "getLocks": True},
+        headers=request_headers(**{"X-Requested-With": "XMLHttpRequest"}),
+    )
+    return response.json()["logs"]
+
+
+async def _start_view_analyzer(
+    context: CommandContext,
+    view: str,
+    space: str,
+) -> tuple[bool, int | None, bool]:
+    """
+    Starts the view analyzer without waiting for its result.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        tuple[bool, int | None, bool]: Whether an analyzer run is going, its
+                                       log ID if the start reported one, and
+                                       whether it was already running before.
+    """
+    response = await context.client.session.post(
+        url=f"/dwaas-core/advisor/{space}/execute/{view}",
+        json={
+            "withMemoryAnalysis": False,
+            "maximumMemoryConsumptionInGiB": 1,
+        },
+        headers=request_headers(**{"X-Requested-With": "XMLHttpRequest"}),
+    )
+
+    # A run that was already going is as good as one this call started
+    already_running = (
+        response.status_code == 409 and "taskAlreadyRunning" in response.text
+    )
+    started = response.status_code == 202 and "Running" in response.text
+    if not (already_running or started):
+        return False, None, False
+
+    # Neither answer is guaranteed to carry a usable log ID
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    log_id = payload.get("logId") if isinstance(payload, dict) else None
+    if not isinstance(log_id, int):
+        log_id = None
+    return True, log_id, already_running
+
+
+async def _get_view_analyzer_result(
+    context: CommandContext,
+    log_id: int,
+    space: str,
+) -> dict[str, Any]:
+    """
+    Reads the result of one completed view analyzer run.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        log_id (int): Task log ID of the analyzer run.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        dict[str, Any]: Analyzer result with 'entityStats'.
+    """
+    response = await context.client.session.get(
+        url=f"/dwaas-core/advisor/{space}/result/{log_id}",
+        headers=request_headers(**{"X-Requested-With": "XMLHttpRequest"}),
+    )
+    return response.json()
 
 
 def _candidate_from_entity(
@@ -197,12 +495,14 @@ async def _run_view_analyzer(
     # Remember the existing runs, so a new one can be told apart from them
     known_log_ids = {
         log_id
-        for log in await context.client.views.get_task_logs(view, space)
+        for log in await _get_task_logs(context, view, space)
         if (log_id := _log_id_of(log)) is not None
     }
 
-    started, log_id, already_running = (
-        await context.client.views.start_view_analyzer(view, space)
+    started, log_id, already_running = await _start_view_analyzer(
+        context,
+        view,
+        space,
     )
     if not started:
         return None, []
@@ -210,7 +510,7 @@ async def _run_view_analyzer(
     try:
         async with asyncio.timeout(timeout_seconds):
             while True:
-                logs = await context.client.views.get_task_logs(view, space)
+                logs = await _get_task_logs(context, view, space)
                 matching = _match_analyzer_log(
                     logs,
                     log_id=log_id,
@@ -245,10 +545,7 @@ async def _run_view_analyzer(
             log_id=to_text(log_id),
         ) from None
 
-    result = await context.client.views.get_view_analyzer_result(
-        log_id,
-        space,
-    )
+    result = await _get_view_analyzer_result(context, log_id, space)
     entities = result.get("entityStats", [])
     return log_id, entities if isinstance(entities, list) else []
 
@@ -346,7 +643,7 @@ async def find_view_persistence_candidates_batch(
 
     # Fetch all views to create mapping for the view analyzing
     if requests is None:
-        views = await context.client.views.get_all_views()
+        views = await get_all_views(context)
         requests = tuple(
             FindViewPersistenceCandidatesRequest(
                 view=view["name"],
@@ -388,7 +685,8 @@ async def find_view_attribute_matches(
         FindViewAttributeMatchesResult: Result of the attribute search.
     """
     # Fetch all attributes of the view
-    attributes = await context.client.views.get_view_attributes(
+    attributes = await _get_view_attributes(
+        context,
         view_id=request.view_id,
         view_name=request.view,
         space=request.space,
@@ -441,7 +739,7 @@ async def find_view_attribute_matches_batch(
     """
     requests = request.requests
     if requests is None:
-        views = await context.client.views.get_all_views()
+        views = await get_all_views(context)
         requests = tuple(
             FindViewAttributeMatchesRequest(
                 view_id=view["id"],
@@ -484,7 +782,8 @@ async def create_view_partitioning(
     Returns:
         CreateViewPartitioningResult: Result of the partition creation.
     """
-    partitioning = await context.client.views.get_partitioning(
+    partitioning = await _get_partitioning(
+        context,
         request.view,
         request.space,
     )
@@ -499,7 +798,8 @@ async def create_view_partitioning(
         status = CreateViewPartitioningStatus.ALREADY_EXISTS
 
     else:
-        accepted = await context.client.views.set_partitioning(
+        accepted = await _set_partitioning(
+            context,
             request.view,
             request.space,
             _yearly_partitioning(request),
@@ -561,9 +861,10 @@ async def delete_view_partitioning(
     Returns:
         DeleteViewPartitioningResult: Result of the partition deletion.
     """
-    deleted = await context.client.views.delete_partitioning(
-        view=request.view,
-        space=request.space,
+    deleted = await _delete_partitioning(
+        context,
+        request.view,
+        request.space,
     )
     return DeleteViewPartitioningResult(
         view=request.view,
@@ -850,7 +1151,7 @@ async def _set_partition_lock(
         str: The requested status, 'no_partitions' or 'failed'.
     """
     # Read the current partitioning
-    partitioning = await context.client.views.get_partitioning(view, space)
+    partitioning = await _get_partitioning(context, view, space)
     if not partitioning["ranges"]:
         return "no_partitions"
 
@@ -859,11 +1160,7 @@ async def _set_partition_lock(
     for partition in payload["ranges"]:
         partition["locked"] = locked(partition)
 
-    accepted = await context.client.views.set_partitioning(
-        view,
-        space,
-        payload,
-    )
+    accepted = await _set_partitioning(context, view, space, payload)
     return success_status if accepted else "failed"
 
 

@@ -37,6 +37,12 @@ class SessionNotAuthenticatedError(CommandError):
     """
 
 
+class UnexpectedResponseError(CommandError):
+    """
+    Raised when the tenant answers in a way a command cannot work with.
+    """
+
+
 class CommandCancelledError(asyncio.CancelledError):
     """
     Raised when local command work is cancelled after a remote start.

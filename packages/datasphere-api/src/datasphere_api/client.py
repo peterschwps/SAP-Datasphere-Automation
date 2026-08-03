@@ -1,5 +1,4 @@
 import logging
-from typing import TYPE_CHECKING
 
 import httpx
 
@@ -14,9 +13,6 @@ from datasphere_api.exceptions import (
     InvalidConfiguration,
     MissingCredentials,
 )
-
-if TYPE_CHECKING:
-    from datasphere_api.resources.views import Views
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +47,6 @@ class DatasphereClient:
             timeout=config.timeout,
             follow_redirects=True,
         )
-
-        # Lazily created resource instances
-        self._views: Views | None = None
 
     async def login(
         self,
@@ -148,16 +141,3 @@ class DatasphereClient:
         Closes the underlying httpx session.
         """
         await self.session.aclose()
-
-    @property
-    def views(self) -> "Views":
-        """
-        Lazy-loads the views resource.
-
-        Returns:
-            Views: Resource for the view APIs.
-        """
-        if self._views is None:
-            from datasphere_api.resources.views import Views
-            self._views = Views(self)
-        return self._views

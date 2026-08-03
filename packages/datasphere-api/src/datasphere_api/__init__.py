@@ -8,7 +8,6 @@ from datasphere_api.exceptions import (
     DatasphereException,
     InvalidConfiguration,
     MissingCredentials,
-    UnexpectedResponse,
 )
 
 # Library logger stays silent unless the consumer adds handlers
@@ -23,5 +22,4 @@ __all__ = [
     "InvalidConfiguration",
     "MissingCredentials",
     "TokenDict",
-    "UnexpectedResponse",
 ]

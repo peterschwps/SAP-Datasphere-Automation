@@ -40,7 +40,8 @@ adapter
   -> _persist_view_batch           (command body)
   -> run_batch                     (concurrency + item reporting)
   -> _persist_view                 (one item)
-  -> client.views.persist_view
+  -> run_persistence               (start the run, poll its task log)
+  -> _start_view_activity          (the HTTP request itself)
 ```
 
 ## Anatomy of a Command

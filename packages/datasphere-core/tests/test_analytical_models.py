@@ -1,11 +1,11 @@
 import asyncio
-from types import SimpleNamespace
-from typing import Any, cast
+import json
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 import pytest
 import respx
-from datasphere_api import DatasphereClient
 from datasphere_core import CommandContext
 from datasphere_core.commands.analytical_models import (
     get_analytical_model_view_dependencies_batch,
@@ -27,8 +27,9 @@ from datasphere_core.models.common import BatchItemResult, BatchSummary
 
 SEARCH_PATH = "/deepsea/repository/search/$all"
 DEPENDENCIES_PATH = "/deepsea/repository/dependencies/"
+EXECUTE_PATH = "/dwaas-core/tf/directexecute"
 
-# Task log IDs the default fakes report for the two runs of a measurement
+# Task log IDs the mocked tenant reports for the two runs of a measurement
 PERSIST_LOG_ID = 11
 CLEANUP_LOG_ID = 12
 
@@ -52,13 +53,22 @@ def _view(view_id: str, name: str, space: str) -> dict[str, Any]:
     }
 
 
-def _models_route(models: list[dict[str, Any]]) -> respx.Route:
+def _search_route(
+    models: list[dict[str, Any]],
+    views: list[dict[str, Any]],
+) -> respx.Route:
     """
-    Mocks the repository search that discovers the analytical models.
+    Mocks the repository search. Analytical models and views are discovered
+    through the same endpoint and differ only in the filter they send.
     """
-    return respx.get(path=SEARCH_PATH).mock(
-        return_value=httpx.Response(200, json={"value": models})
-    )
+    def respond(request: httpx.Request) -> httpx.Response:
+        searches_models = "Analysemodell" in request.url.query.decode()
+        return httpx.Response(
+            200,
+            json={"value": models if searches_models else views},
+        )
+
+    return respx.get(path=SEARCH_PATH).mock(side_effect=respond)
 
 
 def _dependency_tree(views: dict[str, str]) -> dict[str, Any]:
@@ -105,76 +115,90 @@ def _dependencies_route(
     return respx.get(path=DEPENDENCIES_PATH).mock(side_effect=respond)
 
 
-def _client(
-    session: httpx.AsyncClient,
-    views: list[dict[str, Any]],
+def _persistence_routes(
     *,
-    is_persisted: bool = False,
-    **view_calls: Any,
-) -> DatasphereClient:
+    persisted: bool = False,
+    status: str = "COMPLETED",
+    persist_log_id: int = PERSIST_LOG_ID,
+    before_start: Callable[[str], Any] | None = None,
+) -> respx.Route:
     """
-    Builds a client that sends the analytical model requests through the
-    mocked session and fakes the view calls of the measurement workflow.
-    Every view call can be replaced through a keyword argument.
+    Mocks the tenant side of a measurement: the monitor of every view, the
+    endpoint that starts the runs and their task logs. The monitor reports
+    persisted data as soon as a run persisted it, so a measurement sees the
+    state it created itself.
     """
-    async def get_all_views() -> list[dict[str, Any]]:
-        return views
+    persisted_views: set[str] = set()
 
-    async def check_persisted(view: str, space: str) -> bool:
-        return is_persisted
+    async def start(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        view = payload["objectId"]
+        if before_start is not None:
+            await before_start(view)
+        if payload["activity"] == "PERSIST":
+            persisted_views.add(view)
+            return httpx.Response(202, json={"taskLogId": persist_log_id})
+        persisted_views.discard(view)
+        return httpx.Response(202, json={"taskLogId": CLEANUP_LOG_ID})
 
-    async def start_persistence(view: str, space: str) -> int | None:
-        return PERSIST_LOG_ID
+    def monitor(request: httpx.Request) -> httpx.Response:
+        view = request.url.path.rsplit("/", 1)[-1]
+        is_persisted = persisted or view in persisted_views
+        return httpx.Response(
+            200,
+            json={
+                "dataPersistency": (
+                    "Persisted" if is_persisted else "NotPersisted"
+                )
+            },
+        )
 
-    async def start_persistence_removal(view: str, space: str) -> int | None:
-        return CLEANUP_LOG_ID
+    def log(request: httpx.Request) -> httpx.Response:
+        details: dict[str, Any] = {"status": status}
 
-    async def get_monitor_details(view: str, space: str) -> dict[str, Any]:
-        return {"dataPersistency": "Persisted"}
+        # Only the persistence run is measured, the cleanup just has to finish
+        if request.url.path.endswith(f"/{persist_log_id}"):
+            details["runTime"] = 4000
+        return httpx.Response(200, json={"logDetails": details})
 
-    async def get_extended_log(log_id: int, space: str) -> dict[str, Any]:
-        if log_id == PERSIST_LOG_ID:
-            return {"status": "COMPLETED", "runTime": 4000}
-        return {"status": "COMPLETED"}
+    respx.get(
+        path__regex=r"/dwaas-core/monitor/VIEW_SPACE/persistedViews/.+"
+    ).mock(side_effect=monitor)
+    respx.get(
+        path__regex=r"/dwaas-core/tf/VIEW_SPACE/extendedlogs/\d+"
+    ).mock(side_effect=log)
+    return respx.post(path=EXECUTE_PATH).mock(side_effect=start)
 
-    return cast(
-        DatasphereClient,
-        SimpleNamespace(
-            session=session,
-            views=SimpleNamespace(
-                **{
-                    "get_all_views": get_all_views,
-                    "is_persisted": check_persisted,
-                    "start_persistence": start_persistence,
-                    "start_persistence_removal": start_persistence_removal,
-                    "get_monitor_details": get_monitor_details,
-                    "get_extended_log": get_extended_log,
-                    **view_calls,
-                }
-            ),
-        ),
-    )
+
+def _started(route: respx.Route, activity: str) -> list[tuple[str, str]]:
+    """
+    Collects the view and space of every run started for one activity.
+    """
+    payloads = [json.loads(call.request.content) for call in route.calls]
+    return [
+        (payload["objectId"], payload["spaceId"])
+        for payload in payloads
+        if payload["activity"] == activity
+    ]
 
 
 @respx.mock
 async def test_dependency_batch_resolves_views_to_their_spaces(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a resolved view carries its space and an unknown one does not.
     """
-    search = _models_route([_model("MODEL_1", "One", "SPACE_A")])
+    search = _search_route(
+        [_model("MODEL_1", "One", "SPACE_A")],
+        [_view("VIEW_1", "Sales", "VIEW_SPACE")],
+    )
     dependencies = _dependencies_route(
         {"MODEL_1": {"VIEW_1": "Sales", "VIEW_X": "Unknown"}}
     )
 
     result = await get_analytical_model_view_dependencies_batch(
-        CommandContext(
-            client=_client(
-                session,
-                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
-            )
-        ),
+        context(),
         GetAnalyticalModelViewDependenciesBatchRequest(),
     )
 
@@ -200,26 +224,34 @@ async def test_dependency_batch_resolves_views_to_their_spaces(
     # the same language
     assert search.calls.last.request.headers["Accept-Language"] == "de"
 
+    # Models and views are two searches, not one
+    assert len(search.calls) == 2
+
     # Every request carries its own identifier for the tenant logs
     assert dependencies.calls.last.request.headers["x-request-id"]
 
 
 @respx.mock
 async def test_dependency_batch_sends_the_search_syntax_unescaped(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that the search filter reaches the tenant with its syntax intact.
     """
-    search = _models_route([])
+    search = _search_route([], [])
 
     await get_analytical_model_view_dependencies_batch(
-        CommandContext(client=_client(session, views=[])),
+        context(),
         GetAnalyticalModelViewDependenciesBatchRequest(),
     )
 
-    # Read the raw query: parsing it back would undo the escaping under test
-    query = search.calls.last.request.url.query.decode()
+    # Read the raw query of the model search: parsing it back would undo the
+    # escaping under test
+    query = next(
+        call.request.url.query.decode()
+        for call in search.calls
+        if b"Analysemodell" in call.request.url.query
+    )
 
     # Left to httpx, the parentheses and asterisks of the search syntax would
     # be escaped and the filter would stop matching
@@ -232,12 +264,18 @@ async def test_dependency_batch_sends_the_search_syntax_unescaped(
 
 @respx.mock
 async def test_dependency_batch_maps_nested_views_bottom_up(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that the deepest view of a dependency tree is mapped first.
     """
-    _models_route([_model("MODEL_1", "One", "SPACE_A")])
+    _search_route(
+        [_model("MODEL_1", "One", "SPACE_A")],
+        [
+            _view("OUTER", "Outer", "VIEW_SPACE"),
+            _view("INNER", "Inner", "VIEW_SPACE"),
+        ],
+    )
     respx.get(path=DEPENDENCIES_PATH).mock(
         return_value=httpx.Response(
             200,
@@ -267,15 +305,7 @@ async def test_dependency_batch_maps_nested_views_bottom_up(
     )
 
     result = await get_analytical_model_view_dependencies_batch(
-        CommandContext(
-            client=_client(
-                session,
-                views=[
-                    _view("OUTER", "Outer", "VIEW_SPACE"),
-                    _view("INNER", "Inner", "VIEW_SPACE"),
-                ],
-            )
-        ),
+        context(),
         GetAnalyticalModelViewDependenciesBatchRequest(),
     )
 
@@ -287,26 +317,22 @@ async def test_dependency_batch_maps_nested_views_bottom_up(
 
 @respx.mock
 async def test_dependency_batch_selects_the_models_of_one_space(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a space filter keeps only the models of that space.
     """
-    _models_route(
+    _search_route(
         [
             _model("MODEL_1", "One", "SPACE_A"),
             _model("MODEL_2", "Two", "OTHER_SPACE"),
-        ]
+        ],
+        [_view("VIEW_1", "Sales", "VIEW_SPACE")],
     )
     _dependencies_route({"MODEL_1": {"VIEW_1": "Sales"}})
 
     result = await get_analytical_model_view_dependencies_batch(
-        CommandContext(
-            client=_client(
-                session,
-                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
-            )
-        ),
+        context(),
         GetAnalyticalModelViewDependenciesBatchRequest(space="SPACE_A"),
     )
 
@@ -315,18 +341,16 @@ async def test_dependency_batch_selects_the_models_of_one_space(
 
 @respx.mock
 async def test_dependency_batch_reports_a_missing_model_as_skipped(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a model the tenant does not know is skipped, not failed.
     """
     # No dependency route: a missing model must not be looked up at all
-    _models_route([_model("MODEL_1", "One", "SPACE_A")])
+    _search_route([_model("MODEL_1", "One", "SPACE_A")], [])
 
     result = await get_analytical_model_view_dependencies_batch(
-        CommandContext(
-            client=_client(session, views=[]),
-        ),
+        context(),
         GetAnalyticalModelViewDependenciesBatchRequest(
             analytical_models=(AnalyticalModelReference("Missing", "SPACE_A"),)
         ),
@@ -340,16 +364,17 @@ async def test_dependency_batch_reports_a_missing_model_as_skipped(
 
 @respx.mock
 async def test_dependency_batch_deduplicates_shared_views(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a shared view stays with the first model claiming it.
     """
-    _models_route(
+    _search_route(
         [
             _model("MODEL_1", "One", "SPACE_A"),
             _model("MODEL_2", "Two", "SPACE_A"),
-        ]
+        ],
+        [_view("VIEW_1", "Sales", "VIEW_SPACE")],
     )
     _dependencies_route(
         {
@@ -359,12 +384,7 @@ async def test_dependency_batch_deduplicates_shared_views(
     )
 
     result = await get_analytical_model_view_dependencies_batch(
-        CommandContext(
-            client=_client(
-                session,
-                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
-            )
-        ),
+        context(),
         GetAnalyticalModelViewDependenciesBatchRequest(
             deduplicate_views=True
         ),
@@ -377,42 +397,30 @@ async def test_dependency_batch_deduplicates_shared_views(
 
 @respx.mock
 async def test_measure_persists_a_view_and_removes_it_again(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a measured view is persisted and cleaned up again.
     """
-    persisted: list[tuple[str, str]] = []
-    unpersisted: list[tuple[str, str]] = []
-
-    _models_route([_model("MODEL_1", "One", "SPACE_A")])
+    _search_route(
+        [_model("MODEL_1", "One", "SPACE_A")],
+        [_view("VIEW_1", "Sales", "VIEW_SPACE")],
+    )
     _dependencies_route({"MODEL_1": {"VIEW_1": "Sales"}})
-
-    async def start_persistence(view: str, space: str) -> int | None:
-        persisted.append((view, space))
-        return PERSIST_LOG_ID
-
-    async def start_persistence_removal(view: str, space: str) -> int | None:
-        unpersisted.append((view, space))
-        return CLEANUP_LOG_ID
+    runs_route = _persistence_routes()
 
     result = await measure_analytical_model_view_persistence(
-        CommandContext(
-            client=_client(
-                session,
-                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
-                start_persistence=start_persistence,
-                start_persistence_removal=start_persistence_removal,
-            )
-        ),
+        context(),
         MeasureAnalyticalModelViewPersistenceRequest(
             analytical_model_name="One",
             space="SPACE_A",
         ),
     )
 
-    assert persisted == [("Sales", "VIEW_SPACE")]
-    assert unpersisted == [("Sales", "VIEW_SPACE")]
+    assert _started(runs_route, "PERSIST") == [("Sales", "VIEW_SPACE")]
+    assert _started(runs_route, "REMOVE_PERSISTED_DATA") == [
+        ("Sales", "VIEW_SPACE")
+    ]
     assert result.status is AnalyticalModelPersistenceStatus.COMPLETED
 
     measurement = result.dependencies[0]
@@ -426,29 +434,20 @@ async def test_measure_persists_a_view_and_removes_it_again(
 
 @respx.mock
 async def test_measure_keeps_a_view_that_was_persisted_before(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a view persisted before the run keeps its persistence.
     """
-    unpersisted: list[str] = []
-
-    _models_route([_model("MODEL_1", "One", "SPACE_A")])
+    _search_route(
+        [_model("MODEL_1", "One", "SPACE_A")],
+        [_view("VIEW_1", "Sales", "VIEW_SPACE")],
+    )
     _dependencies_route({"MODEL_1": {"VIEW_1": "Sales"}})
-
-    async def start_persistence_removal(view: str, space: str) -> int | None:
-        unpersisted.append(view)
-        return CLEANUP_LOG_ID
+    runs_route = _persistence_routes(persisted=True)
 
     result = await measure_analytical_model_view_persistence(
-        CommandContext(
-            client=_client(
-                session,
-                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
-                start_persistence_removal=start_persistence_removal,
-                is_persisted=True,
-            )
-        ),
+        context(),
         MeasureAnalyticalModelViewPersistenceRequest(
             analytical_model_name="One",
             space="SPACE_A",
@@ -456,7 +455,7 @@ async def test_measure_keeps_a_view_that_was_persisted_before(
     )
 
     # A previously persisted view must keep its persistence
-    assert unpersisted == []
+    assert _started(runs_route, "REMOVE_PERSISTED_DATA") == []
     assert result.dependencies[0].status is (
         AnalyticalModelPersistenceItemStatus.ALREADY_PERSISTED
     )
@@ -465,30 +464,22 @@ async def test_measure_keeps_a_view_that_was_persisted_before(
 
 @respx.mock
 async def test_measure_reports_a_timeout_as_needing_manual_action(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a timed-out persistence is flagged for manual intervention.
     """
-    _models_route([_model("MODEL_1", "One", "SPACE_A")])
+    _search_route(
+        [_model("MODEL_1", "One", "SPACE_A")],
+        [_view("VIEW_1", "Sales", "VIEW_SPACE")],
+    )
     _dependencies_route({"MODEL_1": {"VIEW_1": "Sales"}})
 
-    async def start_persistence(view: str, space: str) -> int | None:
-        return 31
-
     # The run never leaves the running state, so the timeout decides
-    async def get_extended_log(log_id: int, space: str) -> dict[str, Any]:
-        return {"status": "RUNNING", "runTime": 1000}
+    _persistence_routes(status="RUNNING", persist_log_id=31)
 
     result = await measure_analytical_model_view_persistence(
-        CommandContext(
-            client=_client(
-                session,
-                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
-                start_persistence=start_persistence,
-                get_extended_log=get_extended_log,
-            )
-        ),
+        context(),
         MeasureAnalyticalModelViewPersistenceRequest(
             analytical_model_name="One",
             space="SPACE_A",
@@ -507,20 +498,20 @@ async def test_measure_reports_a_timeout_as_needing_manual_action(
 
 @respx.mock
 async def test_measure_batch_runs_a_shared_view_once_and_projects_it(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a view shared by two models is measured once and projected onto
     both of them.
     """
-    persisted: list[tuple[str, str]] = []
     item_results: list[BatchItemResult] = []
 
-    _models_route(
+    _search_route(
         [
             _model("MODEL_1", "One", "SPACE_A"),
             _model("MODEL_2", "Two", "SPACE_A"),
-        ]
+        ],
+        [_view("SHARED", "Shared", "VIEW_SPACE")],
     )
 
     # Both models depend on the very same view
@@ -530,23 +521,13 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it(
             "MODEL_2": {"SHARED": "Shared"},
         }
     )
-
-    async def start_persistence(view: str, space: str) -> int | None:
-        persisted.append((view, space))
-        return PERSIST_LOG_ID
+    runs_route = _persistence_routes()
 
     async def report_item(update: BatchItemResult) -> None:
         item_results.append(update)
 
     result = await measure_analytical_model_view_persistence_batch(
-        CommandContext(
-            client=_client(
-                session,
-                views=[_view("SHARED", "Shared", "VIEW_SPACE")],
-                start_persistence=start_persistence,
-            ),
-            batch_item_result_callback=report_item,
-        ),
+        context(batch_item_result_callback=report_item),
         MeasureAnalyticalModelViewPersistenceBatchRequest(
             analytical_models=(
                 AnalyticalModelReference("One", "SPACE_A"),
@@ -558,7 +539,7 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it(
     )
 
     # Both models point at the same physical view, so it runs only once
-    assert persisted == [("Shared", "VIEW_SPACE")]
+    assert _started(runs_route, "PERSIST") == [("Shared", "VIEW_SPACE")]
     assert [item.status for item in result.results] == [
         AnalyticalModelPersistenceStatus.COMPLETED,
         AnalyticalModelPersistenceStatus.ANALYTICAL_MODEL_NOT_FOUND,
@@ -584,29 +565,17 @@ async def test_measure_batch_runs_a_shared_view_once_and_projects_it(
 
 @respx.mock
 async def test_measure_skips_a_dependency_without_a_resolved_space(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that an unresolved dependency is never persisted.
     """
-    persistence_called = False
-
-    _models_route([_model("MODEL_1", "One", "SPACE_A")])
+    _search_route([_model("MODEL_1", "One", "SPACE_A")], [])
     _dependencies_route({"MODEL_1": {"UNKNOWN": "Unknown"}})
-
-    async def start_persistence(view: str, space: str) -> int | None:
-        nonlocal persistence_called
-        persistence_called = True
-        return PERSIST_LOG_ID
+    runs_route = _persistence_routes()
 
     result = await measure_analytical_model_view_persistence(
-        CommandContext(
-            client=_client(
-                session,
-                views=[],
-                start_persistence=start_persistence,
-            )
-        ),
+        context(),
         MeasureAnalyticalModelViewPersistenceRequest(
             analytical_model_name="One",
             space="SPACE_A",
@@ -614,7 +583,7 @@ async def test_measure_skips_a_dependency_without_a_resolved_space(
     )
 
     # An unresolved view must never be persisted
-    assert persistence_called is False
+    assert not runs_route.called
     assert result.dependencies[0].status is (
         AnalyticalModelPersistenceItemStatus.DEPENDENCY_NOT_FOUND
     )
@@ -623,7 +592,7 @@ async def test_measure_skips_a_dependency_without_a_resolved_space(
 
 @respx.mock
 async def test_measure_batch_reports_a_model_before_the_batch_finished(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a completed model is reported while others still run.
@@ -631,11 +600,15 @@ async def test_measure_batch_reports_a_model_before_the_batch_finished(
     item_results: list[BatchItemResult] = []
     blocked = asyncio.Event()
 
-    _models_route(
+    _search_route(
         [
             _model("MODEL_1", "One", "SPACE_A"),
             _model("MODEL_2", "Two", "SPACE_A"),
-        ]
+        ],
+        [
+            _view("VIEW_1", "View1", "VIEW_SPACE"),
+            _view("VIEW_2", "View2", "VIEW_SPACE"),
+        ],
     )
 
     # Each model depends on a view of its own
@@ -647,31 +620,22 @@ async def test_measure_batch_reports_a_model_before_the_batch_finished(
     )
 
     # The view of the second model blocks until the test releases it
-    async def start_persistence(view: str, space: str) -> int | None:
+    async def hold(view: str) -> None:
         if view == "View2":
             await blocked.wait()
-        return PERSIST_LOG_ID
+
+    _persistence_routes(before_start=hold)
 
     async def report_item(update: BatchItemResult) -> None:
         item_results.append(update)
 
-    context = CommandContext(
-        client=_client(
-            session,
-            views=[
-                _view("VIEW_1", "View1", "VIEW_SPACE"),
-                _view("VIEW_2", "View2", "VIEW_SPACE"),
-            ],
-            start_persistence=start_persistence,
-        ),
-        batch_item_result_callback=report_item,
-    )
+    measurement_context = context(batch_item_result_callback=report_item)
 
     async def run_measurement() -> (
         MeasureAnalyticalModelViewPersistenceBatchResult
     ):
         return await measure_analytical_model_view_persistence_batch(
-            context,
+            measurement_context,
             MeasureAnalyticalModelViewPersistenceBatchRequest(
                 analytical_models=(
                     AnalyticalModelReference("One", "SPACE_A"),
@@ -704,18 +668,19 @@ async def test_measure_batch_reports_a_model_before_the_batch_finished(
 
 @respx.mock
 async def test_dependency_batch_reports_deduplicated_models_in_order(
-    session: httpx.AsyncClient,
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that the deduplication path reports in input order.
     """
     item_results: list[BatchItemResult] = []
 
-    _models_route(
+    _search_route(
         [
             _model("MODEL_1", "One", "SPACE_A"),
             _model("MODEL_2", "Two", "SPACE_A"),
-        ]
+        ],
+        [_view("VIEW_1", "Sales", "VIEW_SPACE")],
     )
     _dependencies_route(
         {
@@ -728,13 +693,7 @@ async def test_dependency_batch_reports_deduplicated_models_in_order(
         item_results.append(update)
 
     result = await get_analytical_model_view_dependencies_batch(
-        CommandContext(
-            client=_client(
-                session,
-                views=[_view("VIEW_1", "Sales", "VIEW_SPACE")],
-            ),
-            batch_item_result_callback=report_item,
-        ),
+        context(batch_item_result_callback=report_item),
         GetAnalyticalModelViewDependenciesBatchRequest(
             deduplicate_views=True
         ),

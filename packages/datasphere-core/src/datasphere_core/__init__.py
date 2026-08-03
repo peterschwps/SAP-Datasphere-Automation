@@ -17,6 +17,7 @@ from datasphere_core.errors import (
     CommandTimeoutError,
     SessionNotAuthenticatedError,
     TokenStoreError,
+    UnexpectedResponseError,
 )
 from datasphere_core.execution import (
     BatchReporter,

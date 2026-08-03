@@ -4,19 +4,29 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from datasphere_core.context import CommandContext
-from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
+from datasphere_core.errors import (
+    CommandCancelledError,
+    CommandTimeoutError,
+    UnexpectedResponseError,
+)
 from datasphere_core.session import request_headers
 
 logger = logging.getLogger(__name__)
 
 # Reads the task log of one started run
-type LogFetcher = Callable[[int, str], Awaitable[dict[str, Any]]]
+type LogFetcher = Callable[
+    [CommandContext, int, str], Awaitable[dict[str, Any]]
+]
 
 # Seconds between two polls of a running task log
 POLL_INTERVAL_SECONDS = 1
 
+# Seconds before the monitor is asked again after a silent answer
+MONITOR_RETRY_INTERVAL_SECONDS = 1
+
 
 async def _await_task_log(
+    context: CommandContext,
     fetch: LogFetcher,
     *,
     log_id: int,
@@ -27,6 +37,8 @@ async def _await_task_log(
     Polls the task log of a started run until it leaves the running state.
 
     Args:
+        context (CommandContext): Authenticated session and progress
+                                  callbacks.
         fetch (LogFetcher): Reads the task log of the run.
         log_id (int): Task log ID of the started run.
         space (str): Technical name of the Datasphere space.
@@ -42,7 +54,7 @@ async def _await_task_log(
     """
     async with asyncio.timeout(timeout_seconds):
         while True:
-            details = await fetch(log_id, space)
+            details = await fetch(context, log_id, space)
 
             # The log itself does not carry its own ID
             details["logId"] = log_id
@@ -118,6 +130,123 @@ async def _get_chain_log(
     return response.json()[0]
 
 
+async def _get_extended_log(
+    context: CommandContext,
+    log_id: int,
+    space: str,
+) -> dict[str, Any]:
+    """
+    Reads the extended task log of one view run.
+
+    Args:
+        context (CommandContext): Authenticated session and progress
+                                  callbacks.
+        log_id (int): Task log ID of the run.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        dict[str, Any]: Log details with 'status' and 'runTime'.
+    """
+    response = await context.client.session.get(
+        url=f"/dwaas-core/tf/{space}/extendedlogs/{log_id}",
+        headers=request_headers(),
+    )
+    return response.json()["logDetails"]
+
+
+async def _get_monitor_details(
+    context: CommandContext,
+    view: str,
+    space: str,
+) -> dict[str, Any]:
+    """
+    Reads the monitor details of one view.
+
+    Args:
+        context (CommandContext): Authenticated session and progress
+                                  callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        dict[str, Any]: Monitor details, empty if the tenant refused to answer.
+    """
+    response = await context.client.session.get(
+        url=f"/dwaas-core/monitor/{space}/persistedViews/{view}",
+    )
+    if response.status_code != 200:
+        return {}
+    return response.json()
+
+
+async def _start_view_activity(
+    context: CommandContext,
+    view: str,
+    space: str,
+    activity: str,
+) -> int | None:
+    """
+    Starts one activity on a view without waiting for its result. A refusal is
+    reported by the caller, which is the one that knows what was refused.
+
+    Args:
+        context (CommandContext): Authenticated session and progress
+                                  callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+        activity (str): Activity to run, for example 'PERSIST'.
+
+    Returns:
+        int | None: Task log ID of the started run, or None if the tenant
+                    refused it.
+    """
+    response = await context.client.session.post(
+        url="/dwaas-core/tf/directexecute",
+        json={
+            "applicationId": "VIEWS",
+            "spaceId": space,
+            "objectId": view,
+            "activity": activity,
+        },
+        headers=request_headers(),
+    )
+    if response.status_code != 202:
+        return None
+    return response.json()["taskLogId"]
+
+
+async def is_persisted(
+    context: CommandContext,
+    view: str,
+    space: str,
+) -> bool:
+    """
+    Checks whether one view currently holds persisted data. The monitor
+    occasionally answers with nothing at all, so it is asked up to three times.
+
+    Args:
+        context (CommandContext): Authenticated session and progress
+                                  callbacks.
+        view (str): Technical name of the view.
+        space (str): Technical name of the Datasphere space.
+
+    Raises:
+        UnexpectedResponseError: If the monitor stayed silent every time.
+
+    Returns:
+        bool: Whether the view holds persisted data.
+    """
+    for _ in range(3):
+        monitor_details = await _get_monitor_details(context, view, space)
+        if not monitor_details:
+            await asyncio.sleep(MONITOR_RETRY_INTERVAL_SECONDS)
+            continue
+        return monitor_details.get("dataPersistency", "") == "Persisted"
+    raise UnexpectedResponseError(
+        f"Failed to check persistence of view '{view}' in '{space}'."
+    )
+
+
 async def run_persistence(
     context: CommandContext,
     *,
@@ -147,13 +276,19 @@ async def run_persistence(
                                      details. Both are empty if the run never
                                      started.
     """
-    log_id = await context.client.views.start_persistence(view, space)
+    log_id = await _start_view_activity(context, view, space, "PERSIST")
     if log_id is None:
+        logger.error(
+            "Error starting persistence for view '%s' in '%s'. Skipping...",
+            view,
+            space,
+        )
         return False, {}
 
     try:
         return await _await_task_log(
-            context.client.views.get_extended_log,
+            context,
+            _get_extended_log,
             log_id=log_id,
             space=space,
             timeout_seconds=timeout_seconds,
@@ -202,22 +337,30 @@ async def run_persistence_removal(
                                      had to be removed, or that no run started.
     """
     # An unreadable monitor cannot tell whether there is anything to remove
-    monitor_details = await context.client.views.get_monitor_details(
-        view,
-        space,
-    )
+    monitor_details = await _get_monitor_details(context, view, space)
     if "dataPersistency" not in monitor_details:
         return False, {}
     if monitor_details["dataPersistency"] != "Persisted":
         return True, {}
 
-    log_id = await context.client.views.start_persistence_removal(view, space)
+    log_id = await _start_view_activity(
+        context,
+        view,
+        space,
+        "REMOVE_PERSISTED_DATA",
+    )
     if log_id is None:
+        logger.error(
+            "Error removing persistence for view '%s' in '%s'. Skipping...",
+            view,
+            space,
+        )
         return False, {}
 
     try:
         return await _await_task_log(
-            context.client.views.get_extended_log,
+            context,
+            _get_extended_log,
             log_id=log_id,
             space=space,
             timeout_seconds=timeout_seconds,
@@ -270,11 +413,8 @@ async def run_chain(
 
     try:
         return await _await_task_log(
-            lambda task_log, task_space: _get_chain_log(
-                context,
-                task_log,
-                task_space,
-            ),
+            context,
+            _get_chain_log,
             log_id=log_id,
             space=space,
             timeout_seconds=timeout_seconds,

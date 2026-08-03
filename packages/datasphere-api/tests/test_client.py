@@ -138,7 +138,3 @@ async def test_login_without_tokens_starts_interactive(
         client.session.headers["Authorization"] == "Bearer browser-access"
     )
     assert tokens["refresh_token"] == "ref"
-
-
-def test_resources_are_cached(client: DatasphereClient) -> None:
-    assert client.views is client.views

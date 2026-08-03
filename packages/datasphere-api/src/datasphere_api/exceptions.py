@@ -18,7 +18,3 @@ class MissingCredentials(DatasphereException):
             "Client secret not found. Please provide a client secret in "
             "the configuration."
         )
-
-
-class UnexpectedResponse(DatasphereException):
-    pass
