@@ -2,11 +2,10 @@ import logging
 from datetime import UTC, datetime
 
 from datasphere_api.models import (
-    StatisticsCreateOutcome,
     StatisticsDict,
     StatisticsInformationDict,
     StatisticsType,
-    StatisticsUpdateOutcome,
+    StatisticsWriteOutcome,
 )
 from datasphere_api.resources.base import BaseResource
 
@@ -69,7 +68,7 @@ class RemoteTables(BaseResource):
         table: str,
         statistics_type: StatisticsType = "HISTOGRAM",
         space: str = "BWBRIDGESPACE",
-    ) -> StatisticsCreateOutcome:
+    ) -> StatisticsWriteOutcome:
         """
         Creates statistics for a single remote table. Does not check if
         the table supports statistics or already has some.
@@ -82,7 +81,8 @@ class RemoteTables(BaseResource):
                                    Defaults to "BWBRIDGESPACE".
 
         Returns:
-            StatisticsCreateOutcome: 'created', 'already_exists' or 'failed'.
+            StatisticsWriteOutcome: What the request achieved: 'accepted',
+                                    'already_exists' or 'failed'.
         """
         response = await self.session.post(
             url=f"{self._base_url}/dwaas-core/statistics"
@@ -96,13 +96,7 @@ class RemoteTables(BaseResource):
         ):
             return "already_exists"
         if response.status_code == 202:
-            return "created"
-        logger.error(
-            "Error creating statistics for table '%s'. Status code: %s",
-            table,
-            response.status_code,
-        )
-        logger.debug("Response: %s\n", response.text)
+            return "accepted"
         return "failed"
 
     async def update_statistics(
@@ -110,7 +104,7 @@ class RemoteTables(BaseResource):
         table: str,
         statistics_type: StatisticsType = "HISTOGRAM",
         space: str = "BWBRIDGESPACE",
-    ) -> StatisticsUpdateOutcome:
+    ) -> StatisticsWriteOutcome:
         """
         Changes the statistics type of a single remote table that
         already has statistics.
@@ -123,7 +117,8 @@ class RemoteTables(BaseResource):
                                    Defaults to "BWBRIDGESPACE".
 
         Returns:
-            StatisticsUpdateOutcome: 'updated', 'already_exists' or 'failed'.
+            StatisticsWriteOutcome: What the request achieved: 'accepted',
+                                    'already_exists' or 'failed'.
         """
         response = await self.session.put(
             url=f"{self._base_url}/dwaas-core/statistics"
@@ -137,13 +132,7 @@ class RemoteTables(BaseResource):
         ):
             return "already_exists"
         if response.status_code == 202:
-            return "updated"
-        logger.error(
-            "Error updating statistics for table '%s'. Status code: %s",
-            table,
-            response.status_code,
-        )
-        logger.debug("Response: %s\n", response.text)
+            return "accepted"
         return "failed"
 
     async def refresh_statistics(
@@ -167,13 +156,4 @@ class RemoteTables(BaseResource):
             url=f"{self._base_url}/dwaas-core/statistics/"
             f"{space}/remoteTables/{table}/refresh"
         )
-        if response.status_code != 202:
-            logger.error(
-                "Error refreshing statistics for table '%s'. "
-                "Status code: %s",
-                table,
-                response.status_code,
-            )
-            logger.debug("Response: %s\n", response.text)
-            return False
-        return True
+        return response.status_code == 202

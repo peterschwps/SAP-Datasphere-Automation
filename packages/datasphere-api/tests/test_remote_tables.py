@@ -49,7 +49,7 @@ async def test_create_statistics_outcomes(client: DatasphereClient) -> None:
 
     route.mock(return_value=httpx.Response(202))
     assert await client.remote_tables.create_statistics("TABLE_A") == (
-        "created"
+        "accepted"
     )
 
     route.mock(
@@ -72,7 +72,7 @@ async def test_update_statistics_outcomes(client: DatasphereClient) -> None:
     route.mock(return_value=httpx.Response(202))
     assert await client.remote_tables.update_statistics(
         "TABLE_A", statistics_type="SIMPLE"
-    ) == ("updated")
+    ) == ("accepted")
 
     route.mock(return_value=httpx.Response(400))
     assert await client.remote_tables.update_statistics("TABLE_A") == (

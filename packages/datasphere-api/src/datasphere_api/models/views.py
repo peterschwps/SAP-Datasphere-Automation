@@ -1,18 +1,4 @@
-from typing import Literal, TypedDict
-
-# Outcomes of the single-view partitioning workflows
-PartitionCreateOutcome = Literal[
-    "created",
-    "exists",
-    "invalid_column",
-    "failed",
-]
-PartitionLockOutcome = Literal[
-    "locked",
-    "unlocked",
-    "no_partitions",
-    "failed",
-]
+from typing import TypedDict
 
 # Full view details as returned by the repository search
 # (as of 10.07.2025)
@@ -83,7 +69,3 @@ ViewDetailsDict = TypedDict(
         "@com.sap.vocabularies.Search.v1.ParentHierarchies": list[dict],
     },
 )
-
-class ViewAnalyzerResultDict(TypedDict):
-    logId: int | None
-    entityStats: list[dict]

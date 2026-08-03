@@ -1,119 +1,44 @@
-import asyncio
-
 import httpx
 import pytest
 import respx
 
-from datasphere_api import (
-    DatasphereClient,
-    TaskChainCancelled,
-    TaskChainTimeout,
-)
+from datasphere_api import DatasphereClient
 
 
 @respx.mock
-async def test_run_success(client: DatasphereClient) -> None:
+async def test_start_returns_the_task_log_id(
+    client: DatasphereClient,
+) -> None:
     respx.post(path="/dwaas-core/tf/SP/taskchains/CHAIN/start").mock(
         return_value=httpx.Response(202, json={"logId": 3})
     )
-    respx.get(path="/dwaas-core/tf/SP/logs").mock(
-        return_value=httpx.Response(
-            200, json=[{"status": "COMPLETED", "runTime": 65432}]
-        )
-    )
-    success, log_details = await client.task_chains.run("CHAIN", "SP")
-    assert success is True
-    assert log_details["runTime"] == 65432
-    assert log_details["logId"] == 3
+
+    assert await client.task_chains.start("CHAIN", "SP") == 3
 
 
 @respx.mock
-async def test_run_start_failure(client: DatasphereClient) -> None:
+async def test_start_reports_a_refused_run(client: DatasphereClient) -> None:
     respx.post(path="/dwaas-core/tf/SP/taskchains/CHAIN/start").mock(
         return_value=httpx.Response(400)
     )
-    success, log_details = await client.task_chains.run("CHAIN", "SP")
-    assert success is False
-    assert log_details == {}
+
+    # Without a log ID the caller knows the run never reached Datasphere
+    assert await client.task_chains.start("CHAIN", "SP") is None
 
 
+@pytest.mark.parametrize("status", ["COMPLETED", "FAILED"])
 @respx.mock
-async def test_run_reports_failed_chains(client: DatasphereClient) -> None:
-    respx.post(path="/dwaas-core/tf/SP/taskchains/CHAIN/start").mock(
-        return_value=httpx.Response(202, json={"logId": 4})
-    )
+async def test_get_log_returns_the_latest_entry(
+    client: DatasphereClient,
+    status: str,
+) -> None:
     respx.get(path="/dwaas-core/tf/SP/logs").mock(
         return_value=httpx.Response(
-            200, json=[{"status": "FAILED", "runTime": 1000}]
-        )
-    )
-    success, log_details = await client.task_chains.run("CHAIN", "SP")
-    assert success is False
-    assert log_details["status"] == "FAILED"
-    assert log_details["logId"] == 4
-
-
-@respx.mock
-async def test_run_timeout_retains_log_id(client: DatasphereClient) -> None:
-    respx.post(path="/dwaas-core/tf/SP/taskchains/CHAIN/start").mock(
-        return_value=httpx.Response(202, json={"logId": 5})
-    )
-    respx.get(path="/dwaas-core/tf/SP/logs").mock(
-        return_value=httpx.Response(
-            200, json=[{"status": "RUNNING", "runTime": 1000}]
+            200, json=[{"status": status, "runTime": 65432}]
         )
     )
 
-    with pytest.raises(TaskChainTimeout) as error:
-        await client.task_chains.run(
-            "CHAIN",
-            "SP",
-            timeout_seconds=0.001,
-        )
+    log = await client.task_chains.get_log(3, "SP")
 
-    assert error.value.log_id == 5
-
-
-@pytest.mark.parametrize(
-    "timeout", [True, False, 0, -1, float("nan"), float("inf")]
-)
-@respx.mock
-async def test_run_rejects_invalid_timeout_before_start(
-    client: DatasphereClient,
-    timeout: float,
-) -> None:
-    route = respx.post(
-        path="/dwaas-core/tf/SP/taskchains/CHAIN/start"
-    ).mock(return_value=httpx.Response(202, json={"logId": 6}))
-
-    with pytest.raises(ValueError):
-        await client.task_chains.run(
-            "CHAIN",
-            "SP",
-            timeout_seconds=timeout,
-        )
-
-    assert route.called is False
-
-
-@respx.mock
-async def test_run_cancellation_retains_log_id(
-    client: DatasphereClient,
-) -> None:
-    respx.post(path="/dwaas-core/tf/SP/taskchains/CHAIN/start").mock(
-        return_value=httpx.Response(202, json={"logId": 7})
-    )
-    log_route = respx.get(path="/dwaas-core/tf/SP/logs").mock(
-        return_value=httpx.Response(
-            200, json=[{"status": "RUNNING", "runTime": 1000}]
-        )
-    )
-    task = asyncio.create_task(client.task_chains.run("CHAIN", "SP"))
-    while not log_route.called:
-        await asyncio.sleep(0)
-
-    task.cancel()
-
-    with pytest.raises(TaskChainCancelled) as error:
-        await task
-    assert error.value.log_id == 7
+    assert log["status"] == status
+    assert log["runTime"] == 65432

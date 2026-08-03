@@ -3,9 +3,8 @@ from typing import Literal, TypedDict
 
 StatisticsType = Literal["RECORD_COUNT", "SIMPLE", "HISTOGRAM"]
 
-# Outcomes of the single-table statistics operations
-StatisticsCreateOutcome = Literal["created", "already_exists", "failed"]
-StatisticsUpdateOutcome = Literal["updated", "already_exists", "failed"]
+# What a write against the statistics endpoint achieved
+StatisticsWriteOutcome = Literal["accepted", "already_exists", "failed"]
 
 
 class StatisticsInformationDict(TypedDict):
