@@ -39,7 +39,7 @@ from datasphere_core.models.analytical_models import (
     MeasureAnalyticalModelViewPersistenceRequest,
     MeasureAnalyticalModelViewPersistenceResult,
 )
-from datasphere_core.runs import (
+from datasphere_core.persistence import (
     is_persisted,
     run_persistence,
     run_persistence_removal,

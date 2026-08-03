@@ -7,6 +7,7 @@ from datasphere_core.models.common import (
     CommandStatus,
     Outcome,
     validate_max_concurrency,
+    validate_timeout,
 )
 
 DEFAULT_ANALYTICAL_MODEL_MAX_CONCURRENCY = 10
@@ -62,26 +63,6 @@ class AnalyticalModelPersistenceStatus(CommandStatus):
         "analytical_model_not_found",
         Outcome.SKIPPED,
     )
-
-
-def validate_timeout(timeout_seconds: float) -> None:
-    """
-    Validates an analytical model operation timeout. An invalid timeout would
-    either fail immediately or keep the caller waiting far longer than
-    intended.
-
-    Args:
-        timeout_seconds (float): Timeout of one operation in seconds.
-
-    Raises:
-        ValueError: If the timeout is not within the supported range.
-    """
-    maximum = MAXIMUM_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS
-    if not 0 < timeout_seconds <= maximum:
-        raise ValueError(
-            "Timeout must be greater than zero and at most "
-            f"{maximum} seconds."
-        )
 
 
 def validate_model_selection(
@@ -204,7 +185,10 @@ class MeasureAnalyticalModelViewPersistenceRequest:
             ValueError: If the timeout or the concurrency limit is not within
                         the supported range.
         """
-        validate_timeout(self.timeout_seconds)
+        validate_timeout(
+            self.timeout_seconds,
+            MAXIMUM_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS,
+        )
         validate_max_concurrency(self.max_concurrency)
 
 
@@ -267,7 +251,10 @@ class MeasureAnalyticalModelViewPersistenceBatchRequest:
                         supported range.
         """
         validate_model_selection(self.analytical_models, self.space)
-        validate_timeout(self.timeout_seconds)
+        validate_timeout(
+            self.timeout_seconds,
+            MAXIMUM_ANALYTICAL_MODEL_PERSISTENCE_TIMEOUT_SECONDS,
+        )
         validate_max_concurrency(self.max_concurrency)
 
 

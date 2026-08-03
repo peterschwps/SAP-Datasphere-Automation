@@ -6,6 +6,7 @@ from datasphere_core.models.common import (
     CommandStatus,
     Outcome,
     validate_max_concurrency,
+    validate_timeout,
 )
 
 DEFAULT_VIEW_TIMEOUT_SECONDS = 3600.0
@@ -87,24 +88,6 @@ class UnlockViewPartitionsStatus(CommandStatus):
     FAILED = "failed", Outcome.FAILED
 
 
-def validate_timeout(timeout_seconds: float) -> None:
-    """
-    Validates a view operation timeout. An invalid timeout would either fail
-    immediately or keep the caller waiting far longer than intended.
-
-    Args:
-        timeout_seconds (float): Timeout of one view operation in seconds.
-
-    Raises:
-        ValueError: If the timeout is not within the supported range.
-    """
-    if not 0 < timeout_seconds <= MAXIMUM_VIEW_TIMEOUT_SECONDS:
-        raise ValueError(
-            "Timeout must be greater than zero and at most "
-            f"{MAXIMUM_VIEW_TIMEOUT_SECONDS} seconds."
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class ViewPersistenceCandidate:
     """
@@ -135,7 +118,10 @@ class FindViewPersistenceCandidatesRequest:
         Raises:
             ValueError: If the timeout is not within the supported range.
         """
-        validate_timeout(self.timeout_seconds)
+        validate_timeout(
+            self.timeout_seconds,
+            MAXIMUM_VIEW_TIMEOUT_SECONDS,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +156,10 @@ class FindViewPersistenceCandidatesBatchRequest:
             ValueError: If the timeout or the concurrency limit is not within
                         the supported range.
         """
-        validate_timeout(self.timeout_seconds)
+        validate_timeout(
+            self.timeout_seconds,
+            MAXIMUM_VIEW_TIMEOUT_SECONDS,
+        )
         validate_max_concurrency(self.max_concurrency)
 
 
@@ -367,7 +356,10 @@ class PersistViewRequest:
         Raises:
             ValueError: If the timeout is not within the supported range.
         """
-        validate_timeout(self.timeout_seconds)
+        validate_timeout(
+            self.timeout_seconds,
+            MAXIMUM_VIEW_TIMEOUT_SECONDS,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,7 +419,10 @@ class UnpersistViewRequest:
         Raises:
             ValueError: If the timeout is not within the supported range.
         """
-        validate_timeout(self.timeout_seconds)
+        validate_timeout(
+            self.timeout_seconds,
+            MAXIMUM_VIEW_TIMEOUT_SECONDS,
+        )
 
 
 @dataclass(frozen=True, slots=True)

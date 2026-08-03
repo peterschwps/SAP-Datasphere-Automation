@@ -58,7 +58,7 @@ from datasphere_core.models.views import (
     ViewDetailsDict,
     ViewPersistenceCandidate,
 )
-from datasphere_core.runs import (
+from datasphere_core.persistence import (
     run_persistence,
     run_persistence_removal,
 )

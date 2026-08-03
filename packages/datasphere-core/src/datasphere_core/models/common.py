@@ -95,6 +95,26 @@ def validate_max_concurrency(max_concurrency: int) -> None:
         )
 
 
+def validate_timeout(timeout_seconds: float, maximum: float) -> None:
+    """
+    Validates that a timeout is within the range its command supports. An
+    invalid timeout would either fail immediately or keep the caller waiting
+    far longer than intended.
+
+    Args:
+        timeout_seconds (float): Timeout of one operation in seconds.
+        maximum (float): Longest timeout the command accepts.
+
+    Raises:
+        ValueError: If the timeout is not within the supported range.
+    """
+    if not 0 < timeout_seconds <= maximum:
+        raise ValueError(
+            "Timeout must be greater than zero and at most "
+            f"{maximum} seconds."
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class BatchItemResult:
     """

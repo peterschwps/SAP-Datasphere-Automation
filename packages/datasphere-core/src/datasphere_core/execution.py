@@ -135,7 +135,7 @@ class BatchReporter:
 
             # Report phase 'advanced' for each completed batch item
             await self._context.report(
-                batch_progress(
+                _batch_progress(
                     command=self._command,
                     phase=CommandProgressPhase.ADVANCED,
                     summary=self.summary,
@@ -157,7 +157,7 @@ class BatchReporter:
             )
 
 
-def batch_progress(
+def _batch_progress(
     command: str,
     phase: CommandProgressPhase,
     summary: BatchSummary,
@@ -394,7 +394,7 @@ def batch_command[RequestT, ResultT: BatchResult](
                 context=context,
                 command=name,
                 operation=handler(context, request),
-                terminal=lambda result: batch_progress(
+                terminal=lambda result: _batch_progress(
                     command=name,
                     phase=_batch_phase(result.summary),
                     summary=result.summary,

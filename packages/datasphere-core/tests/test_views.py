@@ -10,7 +10,8 @@ from datasphere_core import (
     CommandCancelledError,
     CommandContext,
     UnexpectedResponseError,
-    runs,
+    persistence,
+    task_logs,
 )
 from datasphere_core.commands import views as views_commands
 from datasphere_core.commands.views import (
@@ -48,7 +49,7 @@ from datasphere_core.models.views import (
     UnpersistViewStatus,
     ViewPersistenceCandidate,
 )
-from datasphere_core.runs import is_persisted
+from datasphere_core.persistence import is_persisted
 
 SEARCH_PATH = "/deepsea/repository/search/$all"
 DESIGN_OBJECTS_PATH = "/deepsea/repository/SPACE_A/designObjects"
@@ -230,7 +231,7 @@ async def test_persist_view_polls_until_the_run_leaves_running(
     """
     Checks that a running job is polled until it reaches a final status.
     """
-    monkeypatch.setattr(runs, "POLL_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(task_logs, "POLL_INTERVAL_SECONDS", 0)
     _execute_route()
     _log_route("RUNNING", "RUNNING", "FAILED")
 
@@ -983,7 +984,7 @@ async def test_is_persisted_gives_up_after_three_silent_answers(
     """
     Checks that a monitor that never answers becomes an error.
     """
-    monkeypatch.setattr(runs, "MONITOR_RETRY_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(persistence, "MONITOR_RETRY_INTERVAL_SECONDS", 0)
     monitor = _monitor_route(None)
 
     with pytest.raises(UnexpectedResponseError, match="VIEW_A"):
