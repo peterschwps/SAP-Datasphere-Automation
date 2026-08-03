@@ -10,8 +10,7 @@ from datasphere_core.runtime.context import CommandContext
 
 logger = logging.getLogger(__name__)
 
-# Page sizes the tenant needs to return anything at all. Views outnumber
-# analytical models by far, so they ask for more.
+# Page sizes the search needs, it returns nothing without one
 _ANALYTICAL_MODEL_PAGE_SIZE = 1000
 _VIEW_PAGE_SIZE = 10000
 

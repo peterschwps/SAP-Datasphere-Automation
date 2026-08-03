@@ -137,9 +137,8 @@ async def _get_view_dependencies(
         headers=request_headers(),
     )
 
-    # The tree descends from the model to the views it is built on, so
-    # reversing it puts the deepest view first. Persisting a view only pays
-    # off once the views below it are persisted.
+    # Reverse the tree to put the deepest view first
+    # Persisting a view only pays off once the views below it are persisted
     views = _collect_views(response.json()[0])
     views.reverse()
     return dict(views)

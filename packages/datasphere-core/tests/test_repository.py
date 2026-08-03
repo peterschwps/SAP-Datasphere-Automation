@@ -43,7 +43,7 @@ async def test_search_asks_for_the_requested_type(
     )
     assert search.calls[0].request.headers["Accept-Language"] == "de"
 
-    # Views outnumber analytical models by far
+    # Each search keeps the page size it was written with
     assert views["$top"] == "10000"
     assert models["$top"] == "1000"
 
