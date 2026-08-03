@@ -1,10 +1,12 @@
-from typing import Any, cast
+import logging
+from datetime import UTC, datetime
+from typing import Any
 
 from datasphere_api.models import (
+    StatisticsDict,
     StatisticsInformationDict,
     StatisticsWriteOutcome,
 )
-from datasphere_api.models import StatisticsType as ApiStatisticsType
 
 from datasphere_core.context import CommandContext
 from datasphere_core.definitions import CommandDefinition
@@ -35,6 +37,8 @@ REFRESH_REMOTE_TABLE_STATISTICS_COMMAND_NAME = (
 REFRESH_REMOTE_TABLE_STATISTICS_BATCH_COMMAND_NAME = (
     "remote_tables.refresh_statistics_batch"
 )
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT_SECONDS = 60.0
 _MAXIMUM_TIMEOUT_SECONDS = 600.0
@@ -79,6 +83,123 @@ def _write_status(
     )
 
 
+async def _get_all_tables(
+    context: CommandContext,
+    space: str,
+) -> StatisticsDict:
+    """
+    Loads every remote table of one space with its statistics metadata.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        StatisticsDict: Metadata of every table, keyed by table name.
+    """
+    logger.debug("Loading all remote tables...")
+    response = await context.client.session.get(
+        url=f"/dwaas-core/statistics/{space}/remotetables",
+        params={"includeBusinessNames": "true"},
+    )
+
+    tables: StatisticsDict = {}
+    for table in response.json()["tables"]:
+        tables[table["tableName"]] = {
+            "statisticsSupported": table.get("statisticsSupported", True),
+            "statisticsLimitedToRecordCount": table.get(
+                "statisticsLimitedToRecordCount", False
+            ),
+            "statisticsType": table.get("statisticsType"),
+            "businessName": table.get("businessName", ""),
+            "statisticsLatestUpdate": _to_utc(
+                table.get("statisticsLatestUpdate")
+            ),
+        }
+    return tables
+
+
+def _to_utc(latest_update: Any) -> datetime | None:
+    """
+    Converts the update timestamp of a table into an aware UTC datetime.
+    Localizing it is up to the caller.
+
+    Args:
+        latest_update (Any): Timestamp as returned by Datasphere.
+
+    Returns:
+        datetime | None: Aware timestamp, or None if there was none.
+    """
+    if not isinstance(latest_update, str):
+        return latest_update
+    parsed = datetime.strptime(latest_update, "%Y-%m-%d %H:%M:%S.%f000000")
+    return parsed.replace(tzinfo=UTC)
+
+
+async def _write_statistics(
+    context: CommandContext,
+    *,
+    table: str,
+    statistics_type: str,
+    space: str,
+    creating: bool,
+) -> StatisticsWriteOutcome:
+    """
+    Creates or replaces the statistics of one remote table.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        table (str): Name of the remote table.
+        statistics_type (str): Statistics type to write.
+        space (str): Technical name of the Datasphere space.
+        creating (bool): Whether statistics are created or replaced.
+
+    Returns:
+        StatisticsWriteOutcome: What the request achieved.
+    """
+    # Both endpoints share their URL and payload, only the verb differs
+    send = (
+        context.client.session.post if creating else context.client.session.put
+    )
+    response = await send(
+        url=f"/dwaas-core/statistics/{space}/remoteTables/{table}",
+        params={"type": statistics_type},
+        json={"type": statistics_type},
+    )
+
+    if (
+        response.status_code == 500
+        and "STATISTICS_ALREADY_EXISTS" in response.text
+    ):
+        return "already_exists"
+    if response.status_code == 202:
+        return "accepted"
+    return "failed"
+
+
+async def _refresh_statistics(
+    context: CommandContext,
+    *,
+    table: str,
+    space: str,
+) -> bool:
+    """
+    Starts a refresh of the statistics of one remote table.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        table (str): Name of the remote table.
+        space (str): Technical name of the Datasphere space.
+
+    Returns:
+        bool: Whether the refresh was accepted.
+    """
+    response = await context.client.session.post(
+        url=f"/dwaas-core/statistics/{space}/remoteTables/{table}/refresh",
+    )
+    return response.status_code == 202
+
+
 async def _configure_statistics_item(
     context: CommandContext,
     item: ConfigureStatisticsItem,
@@ -121,17 +242,12 @@ async def _configure_statistics_item(
     # replace the type that is already there
     else:
         creating = metadata["statisticsType"] is None
-        write = (
-            context.client.remote_tables.create_statistics
-            if creating
-            else context.client.remote_tables.update_statistics
-        )
-        outcome = await write(
+        outcome = await _write_statistics(
+            context,
             table=request.table,
-            statistics_type=cast(
-                ApiStatisticsType, request.statistics_type.value
-            ),
+            statistics_type=request.statistics_type.value,
             space=request.space,
+            creating=creating,
         )
         status = _write_status(outcome, creating=creating)
 
@@ -174,7 +290,8 @@ async def _refresh_statistics_item(
         status = RefreshRemoteTableStatisticsStatus.NO_STATISTICS
 
     # Start refresh
-    elif await context.client.remote_tables.refresh_statistics(
+    elif await _refresh_statistics(
+        context,
         table=request.table,
         space=request.space,
     ):
@@ -206,9 +323,7 @@ async def configure_remote_table_statistics(
     Returns:
         ConfigureRemoteTableStatisticsResult: Result of the configuration.
     """
-    all_tables = await context.client.remote_tables.get_all_tables(
-        space=request.space
-    )
+    all_tables = await _get_all_tables(context, request.space)
     return await _configure_statistics_item(
         context=context,
         item=(request, all_tables.get(request.table)),
@@ -230,9 +345,7 @@ async def refresh_remote_table_statistics(
     Returns:
         RefreshRemoteTableStatisticsResult: Result of the refresh.
     """
-    all_tables = await context.client.remote_tables.get_all_tables(
-        space=request.space
-    )
+    all_tables = await _get_all_tables(context, request.space)
     return await _refresh_statistics_item(
         context=context,
         item=(request, all_tables.get(request.table)),
@@ -259,9 +372,7 @@ async def configure_remote_table_statistics_batch(
                                                    configurations.
     """
     # Fetch the metadata of all tables once and select the requested ones
-    all_tables = await context.client.remote_tables.get_all_tables(
-        space=request.space
-    )
+    all_tables = await _get_all_tables(context, request.space)
     tables = (
         request.tables
         if request.tables is not None
@@ -314,9 +425,7 @@ async def refresh_remote_table_statistics_batch(
                                                  refreshes.
     """
     # Fetch the metadata of all tables once and select the requested ones
-    all_tables = await context.client.remote_tables.get_all_tables(
-        request.space
-    )
+    all_tables = await _get_all_tables(context, request.space)
     tables = (
         request.tables
         if request.tables is not None

@@ -17,7 +17,6 @@ from datasphere_api.exceptions import (
 
 if TYPE_CHECKING:
     from datasphere_api.resources.analytical_models import AnalyticalModels
-    from datasphere_api.resources.remote_tables import RemoteTables
     from datasphere_api.resources.views import Views
 
 logger = logging.getLogger(__name__)
@@ -56,7 +55,6 @@ class DatasphereClient:
 
         # Lazily created resource instances
         self._analytical_models: AnalyticalModels | None = None
-        self._remote_tables: RemoteTables | None = None
         self._views: Views | None = None
 
     async def login(
@@ -167,19 +165,6 @@ class DatasphereClient:
             )
             self._analytical_models = AnalyticalModels(self)
         return self._analytical_models
-
-    @property
-    def remote_tables(self) -> "RemoteTables":
-        """
-        Lazy-loads the remote tables resource.
-
-        Returns:
-            RemoteTables: Resource for the remote table APIs.
-        """
-        if self._remote_tables is None:
-            from datasphere_api.resources.remote_tables import RemoteTables
-            self._remote_tables = RemoteTables(self)
-        return self._remote_tables
 
     @property
     def views(self) -> "Views":

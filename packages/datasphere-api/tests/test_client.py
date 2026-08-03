@@ -142,5 +142,4 @@ async def test_login_without_tokens_starts_interactive(
 
 def test_resources_are_cached(client: DatasphereClient) -> None:
     assert client.views is client.views
-    assert client.remote_tables is client.remote_tables
     assert client.analytical_models is client.analytical_models

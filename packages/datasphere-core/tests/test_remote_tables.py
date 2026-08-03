@@ -1,7 +1,8 @@
-from types import SimpleNamespace
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any
 
-from datasphere_api import DatasphereClient
+import httpx
+import respx
 from datasphere_core import CommandContext
 from datasphere_core.commands.remote_tables import (
     _write_status,
@@ -38,45 +39,48 @@ def _table(
     }
 
 
-def _client(tables: dict[str, Any], **operations: Any) -> DatasphereClient:
-    """
-    Builds a client whose remote table resource returns the supplied tables.
-    """
-    async def get_all_tables(space: str = "SPACE_A") -> dict[str, Any]:
-        return tables
+TABLES_PATH = "/dwaas-core/statistics/SPACE_A/remotetables"
 
-    return cast(
-        DatasphereClient,
-        SimpleNamespace(
-            remote_tables=SimpleNamespace(
-                get_all_tables=get_all_tables,
-                **operations,
-            )
-        ),
+
+def _tables_route(tables: dict[str, Any]) -> None:
+    """
+    Answers the discovery endpoint with the supplied tables.
+    """
+    respx.get(path=TABLES_PATH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "tables": [
+                    {"tableName": name, **metadata}
+                    for name, metadata in tables.items()
+                ]
+            },
+        )
     )
 
 
-async def test_configure_creates_statistics_when_none_exist() -> None:
+def _write_route(table: str, method: str = "POST") -> respx.Route:
+    """
+    Answers the statistics endpoint of one table with an accepted write.
+    """
+    return respx.request(
+        method,
+        path=f"/dwaas-core/statistics/SPACE_A/remoteTables/{table}",
+    ).mock(return_value=httpx.Response(202))
+
+
+@respx.mock
+async def test_configure_creates_statistics_when_none_exist(
+    context: Callable[..., CommandContext],
+) -> None:
     """
     Checks that a table without statistics gets them created.
     """
-    created: list[tuple[str, str, str]] = []
-
-    async def create_statistics(
-        table: str,
-        statistics_type: str,
-        space: str,
-    ) -> str:
-        created.append((table, statistics_type, space))
-        return "accepted"
+    _tables_route({"TABLE_A": _table()})
+    created = _write_route("TABLE_A")
 
     result = await configure_remote_table_statistics(
-        CommandContext(
-            client=_client(
-                {"TABLE_A": _table()},
-                create_statistics=create_statistics,
-            )
-        ),
+        context(),
         ConfigureRemoteTableStatisticsRequest(
             table="TABLE_A",
             space="SPACE_A",
@@ -84,7 +88,8 @@ async def test_configure_creates_statistics_when_none_exist() -> None:
         ),
     )
 
-    assert created == [("TABLE_A", "HISTOGRAM", "SPACE_A")]
+    # A table without statistics is written with POST, not PUT
+    assert created.calls.last.request.url.params["type"] == "HISTOGRAM"
     assert result.status is ConfigureRemoteTableStatisticsStatus.CREATED
 
 
@@ -108,24 +113,18 @@ async def test_configure_maps_the_same_answer_per_endpoint() -> None:
     )
 
 
-async def test_configure_updates_statistics_of_a_different_type() -> None:
+@respx.mock
+async def test_configure_updates_statistics_of_a_different_type(
+    context: Callable[..., CommandContext],
+) -> None:
     """
     Checks that statistics of another type are updated, not created.
     """
-    async def update_statistics(
-        table: str,
-        statistics_type: str,
-        space: str,
-    ) -> str:
-        return "accepted"
+    _tables_route({"TABLE_A": _table(statistics_type="SIMPLE")})
+    updated = _write_route("TABLE_A", "PUT")
 
     result = await configure_remote_table_statistics(
-        CommandContext(
-            client=_client(
-                {"TABLE_A": _table(statistics_type="SIMPLE")},
-                update_statistics=update_statistics,
-            )
-        ),
+        context(),
         ConfigureRemoteTableStatisticsRequest(
             table="TABLE_A",
             space="SPACE_A",
@@ -133,31 +132,30 @@ async def test_configure_updates_statistics_of_a_different_type() -> None:
         ),
     )
 
+    # Replacing an existing type goes to PUT
+    assert updated.called
     assert result.status is ConfigureRemoteTableStatisticsStatus.UPDATED
 
 
-async def test_configure_batch_discovers_and_classifies_every_table() -> None:
+@respx.mock
+async def test_configure_batch_discovers_and_classifies_every_table(
+    context: Callable[..., CommandContext],
+) -> None:
     """
     Checks that a discovery batch classifies every table it finds.
     """
-    async def create_statistics(
-        table: str,
-        statistics_type: str,
-        space: str,
-    ) -> str:
-        return "accepted"
-
-    tables = {
-        "TABLE_A": _table(),
-        "TABLE_B": _table(supported=False),
-        "TABLE_C": _table(record_count_only=True),
-        "TABLE_D": _table(statistics_type="HISTOGRAM"),
-    }
+    _tables_route(
+        {
+            "TABLE_A": _table(),
+            "TABLE_B": _table(supported=False),
+            "TABLE_C": _table(record_count_only=True),
+            "TABLE_D": _table(statistics_type="HISTOGRAM"),
+        }
+    )
+    _write_route("TABLE_A")
 
     result = await configure_remote_table_statistics_batch(
-        CommandContext(
-            client=_client(tables, create_statistics=create_statistics)
-        ),
+        context(),
         ConfigureRemoteTableStatisticsBatchRequest(
             tables=None,
             space="SPACE_A",
@@ -189,25 +187,18 @@ async def test_configure_batch_discovers_and_classifies_every_table() -> None:
     )
 
 
+@respx.mock
 async def test_configure_batch_reports_an_unknown_table_as_not_found(
+    context: Callable[..., CommandContext],
 ) -> None:
     """
     Checks that a table the space does not hold is reported as not found.
     """
-    async def create_statistics(
-        table: str,
-        statistics_type: str,
-        space: str,
-    ) -> str:
-        return "accepted"
+    _tables_route({"TABLE_A": _table()})
+    _write_route("TABLE_A")
 
     result = await configure_remote_table_statistics_batch(
-        CommandContext(
-            client=_client(
-                {"TABLE_A": _table()},
-                create_statistics=create_statistics,
-            )
-        ),
+        context(),
         ConfigureRemoteTableStatisticsBatchRequest(
             tables=("TABLE_A", "TABLE_MISSING"),
             space="SPACE_A",
@@ -224,23 +215,27 @@ async def test_configure_batch_reports_an_unknown_table_as_not_found(
     assert result.summary.failed == 1
 
 
-async def test_refresh_batch_classifies_selected_tables() -> None:
+@respx.mock
+async def test_refresh_batch_classifies_selected_tables(
+    context: Callable[..., CommandContext],
+) -> None:
     """
     Checks that a refresh batch classifies each selected table.
     """
-    async def refresh_statistics(table: str, space: str) -> bool:
-        return table == "TABLE_A"
-
-    tables = {
-        "TABLE_A": _table(statistics_type="HISTOGRAM"),
-        "TABLE_B": _table(statistics_type="HISTOGRAM"),
-        "TABLE_C": _table(),
-    }
+    _tables_route(
+        {
+            "TABLE_A": _table(statistics_type="HISTOGRAM"),
+            "TABLE_B": _table(statistics_type="HISTOGRAM"),
+            "TABLE_C": _table(),
+        }
+    )
+    for table, accepted in (("TABLE_A", 202), ("TABLE_B", 500)):
+        respx.post(
+            path=f"/dwaas-core/statistics/SPACE_A/remoteTables/{table}/refresh"
+        ).mock(return_value=httpx.Response(accepted))
 
     result = await refresh_remote_table_statistics_batch(
-        CommandContext(
-            client=_client(tables, refresh_statistics=refresh_statistics)
-        ),
+        context(),
         RefreshRemoteTableStatisticsBatchRequest(
             tables=("TABLE_A", "TABLE_B", "TABLE_C", "TABLE_MISSING"),
             space="SPACE_A",

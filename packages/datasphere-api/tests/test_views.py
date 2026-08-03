@@ -37,25 +37,26 @@ async def test_request_headers_are_isolated_during_concurrent_requests(
     view_route = respx.get(path=SEARCH_PATH).mock(
         return_value=httpx.Response(200, json={"value": []})
     )
-    table_route = respx.get(
-        path="/dwaas-core/statistics/SP/remotetables"
-    ).mock(return_value=httpx.Response(200, json={"tables": []}))
+    monitor_route = respx.get(
+        path="/dwaas-core/monitor/SP/persistedViews/VIEW1"
+    ).mock(return_value=httpx.Response(200, json={}))
 
+    # get_all_views sets its own headers, get_monitor_details does not
     await asyncio.gather(
         client.views.get_all_views(),
-        client.remote_tables.get_all_tables("SP"),
+        client.views.get_monitor_details("VIEW1", "SP"),
     )
 
     view_headers = view_route.calls.last.request.headers
-    table_headers = table_route.calls.last.request.headers
+    monitor_headers = monitor_route.calls.last.request.headers
     assert view_headers["Authorization"] == "Bearer access-token"
     assert view_headers["X-Client-Default"] == "preserved"
     assert view_headers["Accept"] == "application/json"
     assert view_headers["Accept-Language"] == "de"
     assert view_headers["Cache-Control"] == "no-cache"
-    assert table_headers["Authorization"] == "Bearer access-token"
-    assert table_headers["X-Client-Default"] == "preserved"
-    assert "Cache-Control" not in table_headers
+    assert monitor_headers["Authorization"] == "Bearer access-token"
+    assert monitor_headers["X-Client-Default"] == "preserved"
+    assert "Cache-Control" not in monitor_headers
     assert "Cache-Control" not in client.session.headers
     assert client.session.headers["Authorization"] == "Bearer access-token"
 
