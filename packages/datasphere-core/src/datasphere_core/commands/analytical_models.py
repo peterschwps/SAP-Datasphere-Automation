@@ -2,6 +2,7 @@ import asyncio
 from contextlib import suppress
 from dataclasses import replace
 from typing import Any
+from urllib.parse import quote, urlencode
 
 from datasphere_api.models import AnalyticalModelsDetailsDict
 
@@ -42,6 +43,7 @@ from datasphere_core.runs import (
     run_persistence,
     run_persistence_removal,
 )
+from datasphere_core.session import request_headers
 
 GET_VIEW_DEPENDENCIES_COMMAND_NAME = "analytical_models.get_view_dependencies"
 GET_VIEW_DEPENDENCIES_BATCH_COMMAND_NAME = (
@@ -62,6 +64,136 @@ type ResolvedModel = tuple[
 ]
 type DependencyItem = tuple[ResolvedModel, dict[str, str]]
 type ViewMeasurement = MeasureAnalyticalModelViewPersistenceItemResult
+
+
+async def _get_all_models(
+    context: CommandContext,
+) -> list[AnalyticalModelsDetailsDict]:
+    """
+    Loads the metadata of every analytical model of the tenant.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+
+    Returns:
+        list[AnalyticalModelsDetailsDict]: Details of every analytical model.
+    """
+    params = {
+        # Without a page size the search returns nothing at all
+        "$top": 1000,
+        "$skip": 0,
+        "whyfound": "true",
+        "$count": "true",
+        "valuehierarchy": "folder_id",
+        "facets": "all",
+        "facetlimit": 5,
+        "$apply": (
+            "filter(Search.search(query='SCOPE:SEARCH_DESIGN "
+            '(technical_type_description:EQ(S):"Analysemodell" AND '
+            '(technical_type:EQ(S):"DWC_REMOTE_TABLE" OR technical_type:'
+            'EQ(S):"DWC_LOCAL_TABLE" OR technical_type:EQ(S):"DWC_VIEW" '
+            'OR technical_type:EQ(S):"DWC_ERMODEL" OR technical_type:'
+            'EQ(S):"DWC_DATAFLOW" OR technical_type:EQ(S):"DWC_IDT" OR '
+            'technical_type:EQ(S):"DWC_BUSINESS_ENTITY" OR technical_type:'
+            'EQ(S):"DWC_AUTH_SCENARIO" OR technical_type:EQ(S):'
+            '"DWC_FACT_MODEL" OR technical_type:EQ(S):'
+            '"DWC_CONSUMPTION_MODEL" OR technical_type:EQ(S):'
+            '"DWC_PERSPECTIVE" OR kind:EQ(S):"sap.dis.dataflow" OR kind:'
+            'EQ(S):"sap.dwc.dac" OR kind:EQ(S):"sap.repo.folder" OR kind:'
+            'EQ(S):"sap.dwc.analyticModel" OR kind:EQ(S):'
+            '"sap.dwc.taskChain" OR kind:EQ(S):"sap.dis.replicationflow" '
+            'OR technical_type:EQ(S):"DWC_TRANSFORMATIONFLOW")) *\'))'
+        ),
+    }
+
+    # The query is encoded by hand, because httpx would escape the
+    # parentheses and asterisks the search syntax is built from
+    response = await context.client.session.get(
+        url=(
+            "/deepsea/repository/search/$all"
+            f"?{urlencode(params, safe='()*', quote_via=quote)}"
+        ),
+        headers={
+            "Accept": "application/json",
+            # The filter above matches the German type description
+            "Accept-Language": "de",
+            "Cache-Control": "no-cache",
+        },
+    )
+    return response.json()["value"]
+
+
+def _collect_views(entity: dict[str, Any]) -> list[tuple[str, str]]:
+    """
+    Collects every view of one dependency tree, each entity before the
+    entities it depends on.
+
+    Args:
+        entity (dict[str, Any]): Entity to descend into, with its own
+                                 dependencies nested inside it.
+
+    Returns:
+        list[tuple[str, str]]: ID and name of every view of the tree.
+    """
+    views: list[tuple[str, str]] = []
+    if entity["properties"].get("#isViewEntity", "false") == "true":
+        views.append((entity["id"], entity["name"]))
+    for dependency in entity["dependencies"]:
+        views.extend(_collect_views(dependency))
+    return views
+
+
+async def _get_view_dependencies(
+    context: CommandContext,
+    model_id: str,
+) -> dict[str, str]:
+    """
+    Loads every view one analytical model is built on.
+
+    Args:
+        context (CommandContext): Authenticated client and progress callbacks.
+        model_id (str): Repository ID of the analytical model.
+
+    Returns:
+        dict[str, str]: Name of every view the model depends on, keyed by view
+                        ID and ordered bottom-up.
+    """
+    response = await context.client.session.get(
+        url="/deepsea/repository/dependencies/",
+        params={
+            "ids": model_id,
+            "recursive": True,
+            "impact": True,
+            "lineage": True,
+            "details": (
+                "#spaceName,#spaceLabel,qualified_name,@EndUserText.label,"
+                "@EnterpriseSearch.enabled,owner,deployment_date,"
+                "modification_date,#objectStatus,#businessType,"
+                "#technicalType,@Analytics.provider,#isViewEntity,"
+                "@DataWarehouse.remote.connection,#isToolingHidden,"
+                "releaseStateValue,releaseDate,deprecationDate,"
+                "decommissioningDate,@ObjectModel.supportedCapabilities,"
+                "@DataWarehouse.consumption.external,#columnsCount,"
+                "@Analytics.dbViewType,isMissingColumnLineage"
+            ),
+            "dependencyTypes": (
+                "csn.query.from,sap.dis.source,sap.dis.targetOf,"
+                "sap.dis.replicationflow.source,"
+                "sap.dis.replicationflow.targetOf,"
+                "sap.dwc.transformationflow.source,"
+                "sap.dwc.transformationflow.targetOf,sap.dwc.idtEntity,"
+                "csn.derivation.lookupEntity,csn.valueHelp.entity"
+            ),
+        },
+        headers=request_headers(),
+    )
+
+    # The tree descends from the model to the views it is built on, so
+    # reversing it puts the deepest view first. Persisting a view only pays
+    # off once the views below it are persisted.
+    views = _collect_views(response.json()[0])
+    views.reverse()
+    return dict(views)
 
 
 def _select_models(
@@ -134,9 +266,7 @@ async def _load_model_context(
     """
     # Load all models and views
     tasks = (
-        asyncio.create_task(
-            context.client.analytical_models.get_all_analytical_models()
-        ),
+        asyncio.create_task(_get_all_models(context)),
         asyncio.create_task(context.client.views.get_all_views()),
     )
     try:
@@ -183,14 +313,10 @@ async def _resolve_dependencies(
 
     # Fetch all views used by the analytical model
     model_id = metadata["id"]
-    dependencies_by_model = await (
-        context.client.analytical_models.get_views_for_analytical_model(
-            analytical_model_id=model_id
-        )
-    )
+    views = await _get_view_dependencies(context, model_id)
 
-    # Fetch view dependencies of the analytical model
-    # If a view doesn't have a space, it means that it could not be resolved
+    # Resolve every view to its space
+    # A view without a space could not be found in the repository
     dependencies = tuple(
         AnalyticalModelViewDependency(
             view_id=view_id,
@@ -202,7 +328,7 @@ async def _resolve_dependencies(
                 else AnalyticalModelDependencyStatus.NOT_FOUND
             ),
         )
-        for view_id, view_name in dependencies_by_model[model_id].items()
+        for view_id, view_name in views.items()
     )
 
     return GetAnalyticalModelViewDependenciesResult(

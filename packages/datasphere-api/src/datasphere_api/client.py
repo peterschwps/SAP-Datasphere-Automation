@@ -16,7 +16,6 @@ from datasphere_api.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from datasphere_api.resources.analytical_models import AnalyticalModels
     from datasphere_api.resources.views import Views
 
 logger = logging.getLogger(__name__)
@@ -54,7 +53,6 @@ class DatasphereClient:
         )
 
         # Lazily created resource instances
-        self._analytical_models: AnalyticalModels | None = None
         self._views: Views | None = None
 
     async def login(
@@ -150,21 +148,6 @@ class DatasphereClient:
         Closes the underlying httpx session.
         """
         await self.session.aclose()
-
-    @property
-    def analytical_models(self) -> "AnalyticalModels":
-        """
-        Lazy-loads the analytical models resource.
-
-        Returns:
-            AnalyticalModels: Resource for the analytical model APIs.
-        """
-        if self._analytical_models is None:
-            from datasphere_api.resources.analytical_models import (
-                AnalyticalModels,
-            )
-            self._analytical_models = AnalyticalModels(self)
-        return self._analytical_models
 
     @property
     def views(self) -> "Views":
