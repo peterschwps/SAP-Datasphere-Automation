@@ -1,9 +1,10 @@
 import asyncio
-from types import SimpleNamespace
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any
 
+import httpx
 import pytest
-from datasphere_api import DatasphereClient
+import respx
 from datasphere_core import CommandCancelledError, CommandContext
 from datasphere_core.commands.task_chains import (
     run_task_chain,
@@ -21,38 +22,33 @@ from datasphere_core.models.task_chains import (
     TaskChainStatus,
 )
 
+START_PATH = "/dwaas-core/tf/SPACE_A/taskchains/CHAIN_A/start"
+LOGS_PATH = "/dwaas-core/tf/SPACE_A/logs"
 
-def _client(**task_chain_calls: Any) -> DatasphereClient:
+
+def _log(status: str, **extra: Any) -> httpx.Response:
     """
-    Builds a client whose task chain resource starts one run and reports it
-    as completed. Every call can be replaced through a keyword argument.
+    Builds the answer of the task log endpoint for one run.
     """
-    async def start(chain: str, space: str) -> int | None:
-        return 123
-
-    async def get_log(log_id: int, space: str) -> dict[str, Any]:
-        return {"status": "COMPLETED", "runTime": 65432}
-
-    return cast(
-        DatasphereClient,
-        SimpleNamespace(
-            task_chains=SimpleNamespace(
-                **{"start": start, "get_log": get_log, **task_chain_calls}
-            )
-        ),
-    )
+    return httpx.Response(200, json=[{"status": status, **extra}])
 
 
-async def test_run_task_chain_maps_a_completed_run() -> None:
+@respx.mock
+async def test_run_task_chain_maps_a_completed_run(
+    context: Callable[..., CommandContext],
+) -> None:
     """
     Checks that a completed run is mapped to its result fields.
     """
-    async def start(chain: str, space: str) -> int | None:
-        assert (chain, space) == ("CHAIN_A", "SPACE_A")
-        return 123
+    start = respx.post(path=START_PATH).mock(
+        return_value=httpx.Response(202, json={"logId": 123})
+    )
+    respx.get(path=LOGS_PATH).mock(
+        return_value=_log("COMPLETED", runTime=65432)
+    )
 
     result = await run_task_chain(
-        CommandContext(client=_client(start=start)),
+        context(),
         RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
     )
 
@@ -66,37 +62,45 @@ async def test_run_task_chain_maps_a_completed_run() -> None:
         runtime_seconds=65,
     )
 
+    # Every request carries its own identifier for the tenant logs
+    assert start.calls.last.request.headers["x-request-id"]
 
-async def test_run_task_chain_maps_a_chain_that_never_started() -> None:
+
+@respx.mock
+async def test_run_task_chain_maps_a_chain_that_never_started(
+    context: Callable[..., CommandContext],
+) -> None:
     """
-    Checks that a run without log details becomes a start failure.
+    Checks that a refused start becomes a start failure.
     """
-    async def start(chain: str, space: str) -> int | None:
-        return None
+    respx.post(path=START_PATH).mock(return_value=httpx.Response(400))
+    logs = respx.get(path=LOGS_PATH)
 
     result = await run_task_chain(
-        CommandContext(client=_client(start=start)),
+        context(),
         RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
     )
 
-    # Without any log details the run never reached Datasphere
+    # Without a log ID there is nothing to poll
     assert result.status is TaskChainStatus.START_FAILED
     assert result.runtime_seconds is None
+    assert not logs.called
 
 
-async def test_run_task_chain_maps_a_timeout_to_its_status() -> None:
+@respx.mock
+async def test_run_task_chain_maps_a_timeout_to_its_status(
+    context: Callable[..., CommandContext],
+) -> None:
     """
     Checks that a timeout becomes a status instead of an exception.
     """
-    async def start(chain: str, space: str) -> int | None:
-        return 42
-
-    # The run never leaves the running state, so the timeout decides
-    async def get_log(log_id: int, space: str) -> dict[str, Any]:
-        return {"status": "RUNNING", "runTime": 1000}
+    respx.post(path=START_PATH).mock(
+        return_value=httpx.Response(202, json={"logId": 42})
+    )
+    respx.get(path=LOGS_PATH).mock(return_value=_log("RUNNING", runTime=1000))
 
     result = await run_task_chain(
-        CommandContext(client=_client(start=start, get_log=get_log)),
+        context(),
         RunTaskChainRequest(
             chain="CHAIN_A",
             space="SPACE_A",
@@ -108,21 +112,26 @@ async def test_run_task_chain_maps_a_timeout_to_its_status() -> None:
     assert result.log_id == "42"
 
 
-async def test_run_task_chain_reraises_a_cancellation_with_its_log_id() -> (
-    None
-):
+@respx.mock
+async def test_run_task_chain_reraises_a_cancellation_with_its_log_id(
+    context: Callable[..., CommandContext],
+) -> None:
     """
     Checks that a cancellation is re-raised with the log ID of the run.
     """
-    async def start(chain: str, space: str) -> int | None:
-        return 99
+    respx.post(path=START_PATH).mock(
+        return_value=httpx.Response(202, json={"logId": 99})
+    )
 
-    async def get_log(log_id: int, space: str) -> dict[str, Any]:
+    # respx refuses a BaseException as side effect, so it is raised inside
+    def cancel(request: httpx.Request) -> httpx.Response:
         raise asyncio.CancelledError
+
+    respx.get(path=LOGS_PATH).mock(side_effect=cancel)
 
     with pytest.raises(CommandCancelledError) as error:
         await run_task_chain(
-            CommandContext(client=_client(start=start, get_log=get_log)),
+            context(),
             RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
         )
 
@@ -130,29 +139,37 @@ async def test_run_task_chain_reraises_a_cancellation_with_its_log_id() -> (
     assert error.value.log_id == "99"
 
 
-async def test_run_task_chain_batch_keeps_order_and_reports_progress() -> None:
+@respx.mock
+async def test_run_task_chain_batch_keeps_order_and_reports_progress(
+    context: Callable[..., CommandContext],
+) -> None:
     """
     Checks that a batch keeps the input order and reports its progress.
     """
     progress: list[CommandProgress] = []
 
     # Chain B fails, every other chain completes
-    async def start(chain: str, space: str) -> int | None:
-        return 2 if chain == "B" else 1
+    for chain in ("A", "B", "C"):
+        respx.post(
+            path=f"/dwaas-core/tf/SPACE_A/taskchains/{chain}/start"
+        ).mock(
+            return_value=httpx.Response(
+                202, json={"logId": 2 if chain == "B" else 1}
+            )
+        )
 
-    async def get_log(log_id: int, space: str) -> dict[str, Any]:
-        if log_id == 2:
-            return {"status": "FAILED"}
-        return {"status": "COMPLETED", "runTime": 1000}
+    def log_for(request: httpx.Request) -> httpx.Response:
+        if request.url.params["taskLogId"] == "2":
+            return _log("FAILED")
+        return _log("COMPLETED", runTime=1000)
+
+    respx.get(path=LOGS_PATH).mock(side_effect=log_for)
 
     async def report(update: CommandProgress) -> None:
         progress.append(update)
 
     result = await run_task_chain_batch(
-        CommandContext(
-            client=_client(start=start, get_log=get_log),
-            progress_callback=report,
-        ),
+        context(progress_callback=report),
         RunTaskChainBatchRequest(
             requests=tuple(
                 RunTaskChainRequest(chain=chain, space="SPACE_A")

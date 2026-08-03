@@ -78,13 +78,8 @@ async def test_operation_headers_are_complete_and_fresh(
         return httpx.Response(202, json={"taskLogId": task_log_id})
 
     async def logs(request: httpx.Request) -> httpx.Response:
-        if request.url.params.get("taskLogId"):
-            return httpx.Response(200, json=[{"status": "RUNNING"}])
         return httpx.Response(200, json={"logs": []})
 
-    task_start = respx.post(
-        path="/dwaas-core/tf/SP/taskchains/CHAIN/start"
-    ).mock(return_value=httpx.Response(202, json={"logId": 3}))
     task_logs = respx.get(path="/dwaas-core/tf/SP/logs").mock(
         side_effect=logs
     )
@@ -106,8 +101,6 @@ async def test_operation_headers_are_complete_and_fresh(
     execute_route = respx.post(EXECUTE_PATH).mock(side_effect=execute)
 
     await asyncio.gather(
-        client.task_chains.start("CHAIN", "SP"),
-        client.task_chains.get_log(3, "SP"),
         client.views.start_view_analyzer("VIEW1", "SP"),
         client.views.get_task_logs("VIEW1", "SP"),
         client.views.get_view_analyzer_result(4, "SP"),
@@ -119,7 +112,6 @@ async def test_operation_headers_are_complete_and_fresh(
     )
 
     routes = [
-        task_start,
         task_logs,
         analyzer_start,
         analyzer_result,
@@ -136,7 +128,6 @@ async def test_operation_headers_are_complete_and_fresh(
         assert request.headers["X-Client-Default"] == "preserved"
 
     for request in [
-        task_start.calls.last.request,
         partition_get.calls.last.request,
         partition_set.calls.last.request,
         partition_delete.calls.last.request,
@@ -145,20 +136,9 @@ async def test_operation_headers_are_complete_and_fresh(
     ]:
         assert request.headers["Accept"] == "*/*"
 
-    task_log_request = next(
-        call.request
-        for call in task_logs.calls
-        if call.request.url.params.get("taskLogId")
-    )
-    analyzer_log_request = next(
-        call.request
-        for call in task_logs.calls
-        if not call.request.url.params.get("taskLogId")
-    )
-    assert task_log_request.headers["Accept"] == "*/*"
     for request in [
         analyzer_start.calls.last.request,
-        analyzer_log_request,
+        task_logs.calls.last.request,
         analyzer_result.calls.last.request,
     ]:
         assert request.headers["Accept"] == "*/*"

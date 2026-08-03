@@ -18,7 +18,6 @@ from datasphere_api.exceptions import (
 if TYPE_CHECKING:
     from datasphere_api.resources.analytical_models import AnalyticalModels
     from datasphere_api.resources.remote_tables import RemoteTables
-    from datasphere_api.resources.task_chains import TaskChains
     from datasphere_api.resources.views import Views
 
 logger = logging.getLogger(__name__)
@@ -50,6 +49,7 @@ class DatasphereClient:
         # Initialize session
         self.config = config
         self.session: httpx.AsyncClient = httpx.AsyncClient(
+            base_url=config.base_url,
             timeout=config.timeout,
             follow_redirects=True,
         )
@@ -57,7 +57,6 @@ class DatasphereClient:
         # Lazily created resource instances
         self._analytical_models: AnalyticalModels | None = None
         self._remote_tables: RemoteTables | None = None
-        self._task_chains: TaskChains | None = None
         self._views: Views | None = None
 
     async def login(
@@ -181,19 +180,6 @@ class DatasphereClient:
             from datasphere_api.resources.remote_tables import RemoteTables
             self._remote_tables = RemoteTables(self)
         return self._remote_tables
-
-    @property
-    def task_chains(self) -> "TaskChains":
-        """
-        Lazy-loads the task chains resource.
-
-        Returns:
-            TaskChains: Resource for the task chain APIs.
-        """
-        if self._task_chains is None:
-            from datasphere_api.resources.task_chains import TaskChains
-            self._task_chains = TaskChains(self)
-        return self._task_chains
 
     @property
     def views(self) -> "Views":
