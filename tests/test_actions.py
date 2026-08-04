@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -19,7 +20,7 @@ from datasphere_core.models.analytical_models import (
     MeasureAnalyticalModelViewPersistenceBatchResult,
     MeasureAnalyticalModelViewPersistenceResult,
 )
-from datasphere_core.models.common import BatchSummary
+from datasphere_core.models.common import BatchItemResult, BatchSummary
 from datasphere_core.models.remote_tables import (
     ConfigureRemoteTableStatisticsBatchRequest,
     ConfigureRemoteTableStatisticsBatchResult,
@@ -964,3 +965,68 @@ async def test_view_file_adapters_map_every_batch_request(
     assert _read_csv("views.unlock_partitions_batch", tmp_path) == [
         {"view": "VIEW_F", "space": "SPACE_F", "status": "unlocked"}
     ]
+
+
+async def test_task_chain_adapter_reports_every_chain_while_it_runs(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+) -> None:
+    """
+    Checks that a finished chain is logged before the batch is done.
+    """
+    file_setup(tmp_path)
+    _write_task(
+        "task_chains.run_batch",
+        tmp_path,
+        {"task_chain": "CHAIN_A", "space": "SPACE_A"},
+    )
+
+    def _chain(chain: str, status: TaskChainStatus) -> RunTaskChainResult:
+        return RunTaskChainResult(
+            chain=chain, space="SPACE_A", status=status
+        )
+
+    reported: list[str] = []
+
+    async def handler(context: CommandContext, request: object) -> object:
+        # The Core hands every completed item to the adapter, so the log has
+        # to fill up while the batch is still running
+        for index, (chain, status) in enumerate(
+            (
+                ("CHAIN_A", TaskChainStatus.COMPLETED),
+                ("CHAIN_B", TaskChainStatus.FAILED),
+                ("CHAIN_C", TaskChainStatus.TIMED_OUT),
+                ("CHAIN_D", TaskChainStatus.START_FAILED),
+            )
+        ):
+            await context.report_batch_item_result(
+                BatchItemResult(
+                    command="task_chains.run_batch",
+                    item_index=index,
+                    total_items=4,
+                    result=_chain(chain, status),
+                )
+            )
+            reported.append(chain)
+        return RunTaskChainBatchResult(
+            results=(_chain("CHAIN_A", TaskChainStatus.COMPLETED),),
+            summary=_summary(succeeded=1),
+        )
+
+    _patch_command(monkeypatch, "task_chains.run_batch", handler)
+
+    with caplog.at_level(logging.DEBUG, logger="datasphere_cli.logging"):
+        await task_chain_actions.run_task_chains_from_file(
+            _context(), workspace_root=tmp_path
+        )
+
+    assert reported == ["CHAIN_A", "CHAIN_B", "CHAIN_C", "CHAIN_D"]
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Task chain 'CHAIN_A' completed." in messages
+    assert "Task chain 'CHAIN_B' failed." in messages
+    assert any("CHAIN_C" in m and "timed out" in m for m in messages)
+
+    # A refused start is already reported by the Core, so the adapter is quiet
+    assert not any("CHAIN_D" in m for m in messages)

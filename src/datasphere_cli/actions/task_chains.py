@@ -1,11 +1,16 @@
+import logging
+from dataclasses import replace
 from pathlib import Path
 
 from datasphere_core import CommandContext
 from datasphere_core.commands.task_chains import run_task_chain_batch
+from datasphere_core.models.common import BatchItemResult
 from datasphere_core.models.task_chains import (
     RunTaskChainBatchRequest,
     RunTaskChainBatchResult,
     RunTaskChainRequest,
+    RunTaskChainResult,
+    TaskChainStatus,
 )
 
 from datasphere_cli.files.records import TaskChainResultRecord
@@ -17,6 +22,43 @@ from datasphere_cli.files.storage import (
 from datasphere_cli.logging import logger
 
 _COMMAND = "task_chains.run_batch"
+
+# Log level and message per status. A start the tenant refused is left out:
+# the Core already reports why the request failed.
+_CHAIN_MESSAGES = {
+    TaskChainStatus.COMPLETED: (
+        logging.INFO,
+        "Task chain '%s' completed.",
+    ),
+    TaskChainStatus.FAILED: (
+        logging.ERROR,
+        "Task chain '%s' failed.",
+    ),
+    TaskChainStatus.TIMED_OUT: (
+        logging.ERROR,
+        "Task chain '%s' timed out. It may still be running.",
+    ),
+}
+
+
+async def _report_chain(update: BatchItemResult) -> None:
+    """
+    Logs the outcome of one task chain as soon as its run is done.
+
+    Args:
+        update (BatchItemResult): Result of one completed task chain.
+
+    Raises:
+        TypeError: If the item carries an unexpected result type.
+    """
+    if not isinstance(update.result, RunTaskChainResult):
+        raise TypeError("Task chain item has an unexpected result.")
+
+    item = update.result
+    message = _CHAIN_MESSAGES.get(item.status)
+    if message is None:
+        return
+    logger.log(message[0], message[1], item.chain)
 
 
 async def run_task_chains_from_file(
@@ -59,7 +101,11 @@ async def run_task_chains_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await run_task_chain_batch(context, request)
+    # Report every chain as soon as it is done
+    result = await run_task_chain_batch(
+        replace(context, batch_item_result_callback=_report_chain),
+        request,
+    )
     rows: list[TaskChainResultRecord] = [
         {
             "task_chain": item.chain,
