@@ -28,7 +28,7 @@ except PackageNotFoundError:
     _APP_VERSION = "dev"
 
 from datasphere_core import CommandContext, DatasphereSession
-from datasphere_core.models.common import CommandProgress
+from datasphere_core.models.common import CommandProgress, CommandProgressPhase
 from datasphere_core.models.remote_tables import StatisticsType
 
 from datasphere_cli import actions
@@ -717,6 +717,27 @@ def progress_line(update: CommandProgress) -> str:
     return f"{completed} · {outcomes}" if outcomes else completed
 
 
+def progress_status(update: CommandProgress) -> str | None:
+    """
+    Builds the status line for one progress update.
+
+    Args:
+        update (CommandProgress): Progress update to show.
+
+    Returns:
+        str | None: Line to show, or None if the update carries nothing the
+                    status line does not say already.
+    """
+    # Only completed items carry a count, so a batch reports its start
+    # without one. Skipping it would leave the screen unchanged until the
+    # first item is done, which can take minutes.
+    if update.completed_items is None:
+        if update.phase is CommandProgressPhase.STARTED:
+            return f"Running {update.command}..."
+        return None
+    return progress_line(update)
+
+
 class ExecutionScreen(BaseScreen):
     """
     Screen that executes the selected action and shows live log output.
@@ -791,11 +812,9 @@ class ExecutionScreen(BaseScreen):
                 Args:
                     update (CommandProgress): Progress update to show.
                 """
-                # Only completed batch items carry a count. Everything else
-                # is already covered by the log messages of the action.
-                if update.completed_items is None:
-                    return
-                status.update(progress_line(update))
+                line = progress_status(update)
+                if line is not None:
+                    status.update(line)
 
             context = CommandContext(
                 session=session.client,

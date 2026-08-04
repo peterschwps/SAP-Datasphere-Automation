@@ -9,6 +9,7 @@ from datasphere_cli.cli.screens import (
     DatasphereApp,
     ParamScreen,
     progress_line,
+    progress_status,
 )
 
 
@@ -107,3 +108,47 @@ def test_progress_line_without_outcomes_shows_the_count_alone() -> None:
     )
 
     assert line == "1/2"
+
+
+def test_progress_status_announces_a_started_batch() -> None:
+    """
+    Checks that a batch says it is running before it counted anything.
+    """
+    line = progress_status(
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.STARTED,
+        )
+    )
+
+    # A chain can run for minutes, so the screen must not stay unchanged
+    assert line == "Running task_chains.run_batch..."
+
+
+def test_progress_status_ignores_updates_without_a_count() -> None:
+    """
+    Checks that a phase other than the start adds nothing to the line.
+    """
+    for phase in (
+        CommandProgressPhase.COMPLETED,
+        CommandProgressPhase.CANCELLED,
+    ):
+        update = CommandProgress(command="views.persist_batch", phase=phase)
+        assert progress_status(update) is None
+
+
+def test_progress_status_switches_to_the_counter_once_items_finish() -> None:
+    """
+    Checks that a counted update replaces the announcement.
+    """
+    line = progress_status(
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.ADVANCED,
+            completed_items=1,
+            total_items=3,
+            succeeded_items=1,
+        )
+    )
+
+    assert line == "1/3 · 1 succeeded"
