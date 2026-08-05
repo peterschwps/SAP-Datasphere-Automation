@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
+# Name the file of the opt-in HTTP logging here, because it belongs to no
+# command and sits next to the task and result directories
+HTTP_LOGGING_FILENAME = "http.jsonl"
+
 
 @dataclass(frozen=True, slots=True)
 class FileDefinition:
@@ -187,6 +191,20 @@ def results_path(root: str | Path | None = None) -> Path:
         Path: Directory of the result files.
     """
     return workspace_root(root) / "datasphere" / "results"
+
+
+def http_logging_path(root: str | Path | None = None) -> Path:
+    """
+    Returns the file the opt-in HTTP logging is written to.
+
+    Args:
+        root (str | Path | None, optional): Explicit workspace root.
+                                            Defaults to None.
+
+    Returns:
+        Path: Path of the HTTP log file.
+    """
+    return workspace_root(root) / "datasphere" / HTTP_LOGGING_FILENAME
 
 
 def task_path(command: str, root: str | Path | None = None) -> Path:

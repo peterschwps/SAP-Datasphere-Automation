@@ -15,11 +15,12 @@ def test_tui_import_has_no_settings_or_workspace_side_effects(
     monkeypatch.setattr(settings_module, "settings", None)
     monkeypatch.chdir(tmp_path)
 
-    from datasphere_cli import actions, cli, logging
+    from datasphere_cli import actions, cli, http_logging, logging
     from datasphere_cli.cli import screens, task_chains
     from datasphere_cli.files import storage, workspace
 
     assert callable(cli.main)
+    assert callable(http_logging.configure_http_logging)
     assert callable(task_chains.run)
     assert callable(actions.persist_views_from_file)
     assert callable(workspace.file_setup)

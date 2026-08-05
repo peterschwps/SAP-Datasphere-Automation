@@ -8,6 +8,7 @@ __pycache__/
 
 # Files
 .cookies.json
+datasphere/*.jsonl
 datasphere/exports/*
 datasphere/results/*
 datasphere/tasks/*

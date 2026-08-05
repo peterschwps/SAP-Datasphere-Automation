@@ -11,6 +11,7 @@ from datasphere_core import (
     CommandContext,
     CommandError,
     DatasphereSession,
+    stop_http_logging,
 )
 from datasphere_core.commands.task_chains import run_task_chain
 from datasphere_core.models.task_chains import (
@@ -136,6 +137,11 @@ def run(argv: Sequence[str]) -> int:
     except ValueError as error:
         parser.error(str(error))
 
+    # Log the requests here too, because a scheduler runs this path
+    # unattended and cannot watch what happens
+    from datasphere_cli.http_logging import configure_http_logging
+
+    configure_http_logging()
     try:
         result = asyncio.run(_run_with_session(request))
     except (CommandError, ValueError) as error:
@@ -144,6 +150,8 @@ def run(argv: Sequence[str]) -> int:
     except Exception as error:
         print(f"Unexpected error: {error}", file=sys.stderr)
         return 1
+    finally:
+        stop_http_logging()
 
     _print_result(result, args.output)
     return 0 if result.status == "completed" else 1
