@@ -81,7 +81,7 @@ async def search_repository(
     objects = response.json()["value"]
     logger.log(
         SUCCESS,
-        "Successfully found %s objects of type '%s'.",
+        "Found %s objects of type '%s'.",
         len(objects),
         type_description,
     )
@@ -117,6 +117,6 @@ async def search_analytical_models(
     """
     return await search_repository(
         context,
-        "Analysemodell",
+        "Analytical Model",
         _ANALYTICAL_MODEL_PAGE_SIZE,
     )
