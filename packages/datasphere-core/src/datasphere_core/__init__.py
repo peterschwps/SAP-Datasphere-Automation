@@ -43,3 +43,42 @@ from datasphere_core.session.credentials import (
 
 # Library logger stays silent unless the consumer adds handlers
 getLogger(__name__).addHandler(NullHandler())
+
+# Only for type checking
+__all__ = [
+    "AuthenticationError",
+    "CommandCancelledError",
+    "CommandError",
+    "CommandTimeoutError",
+    "InvalidConfigurationError",
+    "SessionNotAuthenticatedError",
+    "TokenStoreError",
+    "UnexpectedResponseError",
+
+    "SUCCESS",
+
+    "BatchItemResultCallback",
+    "CommandContext",
+    "ProgressCallback",
+
+    "CommandDefinition",
+    "CommandRegistry",
+
+    "BatchReporter",
+    "CommandHandler",
+    "batch_command",
+    "command",
+    "execute_with_concurrency_limit",
+    "run_batch",
+
+    "COMMANDS",
+
+    "DatasphereSession",
+
+    "Browser",
+    "SessionConfig",
+
+    "KeyringTokenStore",
+    "TokenDict",
+    "TokenStore",
+]
