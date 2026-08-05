@@ -14,6 +14,12 @@ from datasphere_core.errors import (
     TokenStoreError,
     UnexpectedResponseError,
 )
+from datasphere_core.http_logging import (
+    http_logging_hooks,
+    is_http_logging,
+    start_http_logging,
+    stop_http_logging,
+)
 from datasphere_core.logging import SUCCESS
 from datasphere_core.runtime.context import (
     BatchItemResultCallback,
@@ -81,4 +87,9 @@ __all__ = [
     "KeyringTokenStore",
     "TokenDict",
     "TokenStore",
+
+    "http_logging_hooks",
+    "is_http_logging",
+    "start_http_logging",
+    "stop_http_logging",
 ]

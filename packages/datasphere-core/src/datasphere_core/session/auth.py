@@ -10,6 +10,7 @@ from datasphere_core.errors import (
     AuthenticationError,
     SessionNotAuthenticatedError,
 )
+from datasphere_core.http_logging import http_logging_hooks
 from datasphere_core.logging import SUCCESS
 from datasphere_core.session.config import DEFAULT_HEADERS, SessionConfig
 from datasphere_core.session.credentials import (
@@ -117,6 +118,8 @@ class DatasphereSession:
                     timeout=self._config.timeout,
                     follow_redirects=True,
                     headers=DEFAULT_HEADERS,
+                    # Add the hooks only while the requests are logged
+                    event_hooks=http_logging_hooks(),
                 )
 
             # Load tokens from the credential store and login

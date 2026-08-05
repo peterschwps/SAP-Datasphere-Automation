@@ -1,12 +1,22 @@
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
 import httpx
 import pytest
-from datasphere_core import CommandContext
+from datasphere_core import CommandContext, stop_http_logging
 
 # Tenant the mocked requests are matched against
 BASE_URL = "https://datasphere.example"
+
+
+@pytest.fixture(autouse=True)
+def stop_logging_after_the_test() -> Iterator[None]:
+    """
+    Closes a log a test left behind. The log is global, so one failed test
+    would otherwise write its successors into a stale file.
+    """
+    yield
+    stop_http_logging()
 
 
 @pytest.fixture
