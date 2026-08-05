@@ -799,6 +799,18 @@ The project uses:
 The program uses logging. Log files are created for each day and saved in the
 `.logs/` folder of the directory where you run the program.
 
+Every unit of work announces its start and reports its outcome, so a long run
+never stays silent. The level says what a line means:
+
+- **DEBUG**: Diagnostics such as the raw response of a failed request.
+             Written to the log file only, never shown.
+- **INFO**: Announcements such as `Starting task chain '...'...`, skipped
+            items and the closing `Results: ...` counts.
+- **SUCCESS**: Successful outcomes, always starting with `Successfully`.
+               These are the only lines shown in green.
+- **WARNING**: The run continues, but not as intended.
+- **ERROR**: Failed and timed out items.
+
 ## Notes
 
 - **Credentials**: OAuth tokens are stored in the operating system credential
