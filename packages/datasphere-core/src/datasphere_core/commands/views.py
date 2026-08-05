@@ -517,6 +517,13 @@ async def find_view_persistence_candidates(
     Returns:
         FindViewPersistenceCandidatesResult: Result of the view analysis.
     """
+    # Announce the analysis, because a batch reaches this command per item
+    logger.info(
+        "Analyzing view '%s' in space '%s'...",
+        request.view,
+        request.space,
+    )
+
     # Run the view analyzer
     try:
         analyzer_log_id, entities = await _run_view_analyzer(
@@ -630,6 +637,12 @@ async def find_view_attribute_matches(
     Returns:
         FindViewAttributeMatchesResult: Result of the attribute search.
     """
+    logger.info(
+        "Searching the attributes of view '%s' in space '%s'...",
+        request.view,
+        request.space,
+    )
+
     # Fetch all attributes of the view
     attributes = await _get_view_attributes(
         context,
@@ -728,6 +741,11 @@ async def create_view_partitioning(
     Returns:
         CreateViewPartitioningResult: Result of the partition creation.
     """
+    logger.info(
+        "Creating partitioning for view '%s' in space '%s'...",
+        request.view,
+        request.space,
+    )
     partitioning = await _get_partitioning(
         context,
         request.view,
@@ -807,6 +825,11 @@ async def delete_view_partitioning(
     Returns:
         DeleteViewPartitioningResult: Result of the partition deletion.
     """
+    logger.info(
+        "Deleting the partitioning of view '%s' in space '%s'...",
+        request.view,
+        request.space,
+    )
     deleted = await _delete_partitioning(
         context,
         request.view,
@@ -870,6 +893,12 @@ async def persist_view(
     Returns:
         PersistViewResult: Result of the persistence run.
     """
+    logger.info(
+        "Persisting view '%s' in space '%s'...",
+        request.view,
+        request.space,
+    )
+
     # Start persistence
     try:
         success, details = await run_persistence(
@@ -957,6 +986,12 @@ async def unpersist_view(
     Returns:
         UnpersistViewResult: Result of the unpersistence run.
     """
+    logger.info(
+        "Removing the persisted data of view '%s' in space '%s'...",
+        request.view,
+        request.space,
+    )
+
     # Start removal of persistence
     try:
         success, details = await run_persistence_removal(
@@ -1125,6 +1160,11 @@ async def lock_view_partitions(
     Returns:
         LockViewPartitionsResult: Result of the partition lock.
     """
+    logger.info(
+        "Locking the partitions of view '%s' in space '%s'...",
+        request.view,
+        request.space,
+    )
     status = await _set_partition_lock(
         context,
         view=request.view,
@@ -1183,6 +1223,11 @@ async def unlock_view_partitions(
     Returns:
         UnlockViewPartitionsResult: Result of the partition unlock.
     """
+    logger.info(
+        "Unlocking the partitions of view '%s' in space '%s'...",
+        request.view,
+        request.space,
+    )
     status = await _set_partition_lock(
         context,
         view=request.view,

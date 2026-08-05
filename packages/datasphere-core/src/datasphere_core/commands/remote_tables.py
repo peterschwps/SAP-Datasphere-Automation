@@ -2,6 +2,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from datasphere_core.logging import SUCCESS
 from datasphere_core.models.remote_tables import (
     ConfigureRemoteTableStatisticsBatchRequest,
     ConfigureRemoteTableStatisticsBatchResult,
@@ -94,7 +95,7 @@ async def _get_all_tables(
     Returns:
         StatisticsDict: Metadata of every table, keyed by table name.
     """
-    logger.debug("Loading all remote tables...")
+    logger.info("Loading all remote tables of space '%s'...", space)
     response = await context.session.get(
         url=f"/dwaas-core/statistics/{space}/remotetables",
         params={"includeBusinessNames": "true"},
@@ -113,6 +114,7 @@ async def _get_all_tables(
                 table.get("statisticsLatestUpdate")
             ),
         }
+    logger.log(SUCCESS, "Successfully loaded %s remote tables.", len(tables))
     return tables
 
 
@@ -216,6 +218,14 @@ async def _configure_statistics_item(
     request, metadata = item
     status: ConfigureRemoteTableStatisticsStatus
 
+    # Announce the item here, because the single command delegates to this
+    # function just like the batch does
+    logger.info(
+        "Configuring statistics for table '%s' in space '%s'...",
+        request.table,
+        request.space,
+    )
+
     # Check metadata of the remote table
     if metadata is None:
         status = ConfigureRemoteTableStatisticsStatus.TABLE_NOT_FOUND
@@ -273,6 +283,14 @@ async def _refresh_statistics_item(
     """
     request, metadata = item
     status: RefreshRemoteTableStatisticsStatus
+
+    # Announce the item here, because the single command delegates to this
+    # function just like the batch does
+    logger.info(
+        "Refreshing statistics for table '%s' in space '%s'...",
+        request.table,
+        request.space,
+    )
 
     # Check metadata of the remote table
     if metadata is None:

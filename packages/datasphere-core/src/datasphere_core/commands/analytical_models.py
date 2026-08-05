@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import suppress
 from dataclasses import replace
 from typing import Any
@@ -61,6 +62,8 @@ MEASURE_VIEW_PERSISTENCE_COMMAND_NAME = (
 MEASURE_VIEW_PERSISTENCE_BATCH_COMMAND_NAME = (
     "analytical_models.measure_view_persistence_batch"
 )
+
+logger = logging.getLogger(__name__)
 
 # Every model is processed together with its metadata and the mapping of view
 # IDs to spaces, so a batch loads both once instead of once per model.
@@ -250,6 +253,14 @@ async def _resolve_dependencies(
         GetAnalyticalModelViewDependenciesResult: Resolved view dependencies.
     """
     (reference, metadata), spaces_by_view_id = item
+
+    # Announce the model here, because a batch resolves every model through
+    # this function instead of the single command
+    logger.info(
+        "Resolving the view dependencies of analytical model '%s'...",
+        reference.name,
+    )
+
     if metadata is None:
         return GetAnalyticalModelViewDependenciesResult(
             analytical_model_name=reference.name,
@@ -661,6 +672,14 @@ async def _measure_view(
     """
     space = dependency.space
     assert space is not None, "Only resolved dependencies can be measured."
+
+    # A shared view is measured once for every model that depends on it, so
+    # the measurement announces itself instead of the model
+    logger.info(
+        "Measuring the persistence runtime of view '%s' in space '%s'...",
+        dependency.view_name,
+        space,
+    )
 
     # Check if the view is already persisted
     previously_persisted = await is_persisted(

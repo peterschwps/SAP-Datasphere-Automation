@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -64,6 +65,32 @@ async def test_run_task_chain_maps_a_completed_run(
 
     # Every request carries its own identifier for the tenant logs
     assert start.calls.last.request.headers["x-request-id"]
+
+
+@respx.mock
+async def test_run_task_chain_announces_its_start(
+    context: Callable[..., CommandContext],
+    caplog,
+) -> None:
+    """
+    Checks that a run announces itself before it waits for the tenant.
+    """
+    respx.post(path=START_PATH).mock(
+        return_value=httpx.Response(202, json={"logId": 123})
+    )
+    respx.get(path=LOGS_PATH).mock(return_value=_log("COMPLETED"))
+
+    with caplog.at_level(logging.DEBUG, logger="datasphere_core"):
+        await run_task_chain(
+            context(),
+            RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
+        )
+
+    # A batch runs this command per item, so every chain reports its start
+    assert caplog.records[0].getMessage() == (
+        "Starting task chain 'CHAIN_A' in space 'SPACE_A'..."
+    )
+    assert caplog.records[0].levelname == "INFO"
 
 
 @respx.mock

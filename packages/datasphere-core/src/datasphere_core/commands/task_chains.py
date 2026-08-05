@@ -168,6 +168,13 @@ async def run_task_chain(
     Returns:
         RunTaskChainResult: Result of the task chain run.
     """
+    # Announce the run, because a batch reaches this command per item
+    logger.info(
+        "Starting task chain '%s' in space '%s'...",
+        request.chain,
+        request.space,
+    )
+
     # Execute task chain
     try:
         success, log_details = await _run_chain(

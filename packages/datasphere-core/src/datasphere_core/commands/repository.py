@@ -2,6 +2,7 @@ import logging
 from typing import Any
 from urllib.parse import quote, urlencode
 
+from datasphere_core.logging import SUCCESS
 from datasphere_core.models.analytical_models import (
     AnalyticalModelsDetailsDict,
 )
@@ -64,7 +65,7 @@ async def search_repository(
 
     # The query is encoded by hand, because httpx would escape the
     # parentheses and asterisks the search syntax is built from
-    logger.debug("Searching the repository for '%s'...", type_description)
+    logger.info("Searching the repository for '%s'...", type_description)
     response = await context.session.get(
         url=(
             "/deepsea/repository/search/$all"
@@ -77,7 +78,14 @@ async def search_repository(
             "Cache-Control": "no-cache",
         },
     )
-    return response.json()["value"]
+    objects = response.json()["value"]
+    logger.log(
+        SUCCESS,
+        "Successfully found %s objects of type '%s'.",
+        len(objects),
+        type_description,
+    )
+    return objects
 
 
 async def search_views(context: CommandContext) -> list[ViewDetailsDict]:
