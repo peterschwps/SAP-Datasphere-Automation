@@ -288,6 +288,9 @@ It contains two workspace directories:
   Existing files are preserved at startup and replaced only when a command
   writes its complete result.
 
+`datasphere/http.jsonl` appears next to them only while the HTTP logging is
+switched on, see [HTTP Logging](#http-logging).
+
 ### Threading
 
 For time-intensive tasks, threads can be used to process multiple tasks in
@@ -810,6 +813,46 @@ never stays silent. The level says what a line means:
                These are the only lines shown in green.
 - **WARNING**: The run continues, but not as intended.
 - **ERROR**: Failed and timed out items.
+
+### HTTP Logging
+
+The program can log every request it sends to the tenant and every response it
+receives. This is switched off by default and is enabled through an
+environment variable:
+
+```bash
+DATASPHERE_HTTP_LOGGING=1 datasphere
+```
+
+The requests are written to `datasphere/http.jsonl`, one JSON object per line.
+Each line is written immediately, so an interrupted run keeps everything that
+was logged until then. The file only contains one run, meaning the next run
+will replace it.
+
+- **`DATASPHERE_HTTP_LOGGING`**: Set it to `1` to enable the logging. Every
+                                 other value leaves it switched off.
+- **`DATASPHERE_HTTP_LOGGING_FILE`**: Writes the file somewhere else than the
+                                      workspace.
+
+Every line carries `version`, `sequence`, `timestamp`, `event` and `run_id`.
+The events are `run_started`, `http_request`, `http_response` and
+`run_finished`, and a response carries the `request_id` of its request. A JSON
+body is embedded as a JSON object, so the file can be queried directly:
+
+```bash
+jq 'select(.event == "http_response" and .status_code >= 400)' datasphere/http.jsonl
+```
+
+Headers and bodies are written exactly as they were sent and received. Nothing
+is masked, because a masked value is usually the one that is needed to
+understand a rejected request. The file therefore contains the session tokens
+next to the tenant payloads. `datasphere/*.jsonl` is covered by `.gitignore`,
+but the file should not be shared.
+
+Two limitations are worth knowing. A request that never receives an answer,
+for example after a connection error, is written without its `http_response`.
+And bodies are logged completely, so a repository search on a large tenant
+produces a correspondingly large line.
 
 ## Notes
 
