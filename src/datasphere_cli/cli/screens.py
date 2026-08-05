@@ -34,6 +34,7 @@ from datasphere_core.models.remote_tables import StatisticsType
 from datasphere_cli import actions
 from datasphere_cli.cli.logo import ASCII_LOGO
 from datasphere_cli.logging import (
+    LEVEL_STREAM,
     LIBRARY_LOGGER_NAME,
     STREAM_FORMAT,
     logger,
@@ -792,6 +793,7 @@ class ExecutionScreen(BaseScreen):
         # datasphere-core library logs)
         handler = LogHandler(log_widget)
         handler.setFormatter(STREAM_FORMAT)
+        handler.setLevel(LEVEL_STREAM)
         library_logger = logging.getLogger(LIBRARY_LOGGER_NAME)
         logger.addHandler(handler)
         library_logger.addHandler(handler)

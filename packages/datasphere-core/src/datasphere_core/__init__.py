@@ -1,6 +1,8 @@
 # ruff: noqa: F401
 
-import logging
+# Imported by name, because importing the module would bind 'logging' to the
+# submodule of this package instead of the standard library one
+from logging import NullHandler, getLogger
 
 from datasphere_core.errors import (
     AuthenticationError,
@@ -12,6 +14,7 @@ from datasphere_core.errors import (
     TokenStoreError,
     UnexpectedResponseError,
 )
+from datasphere_core.logging import SUCCESS
 from datasphere_core.runtime.context import (
     BatchItemResultCallback,
     CommandContext,
@@ -39,4 +42,4 @@ from datasphere_core.session.credentials import (
 )
 
 # Library logger stays silent unless the consumer adds handlers
-logging.getLogger(__name__).addHandler(logging.NullHandler())
+getLogger(__name__).addHandler(NullHandler())

@@ -5,11 +5,15 @@ from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from typing import Any
 
+from datasphere_core.logging import SUCCESS
+from datasphere_core.models.common import Outcome
 from rich import get_console
 
 # Define constants
+# The log file keeps the diagnostics, the console and the TUI only show what
+# the user acts on. Debug is therefore written but never displayed.
 LEVEL_LOGS = logging.DEBUG  # Logging level for output to logs
-LEVEL_STREAM = logging.DEBUG  # Logging level for output to stdout (console)
+LEVEL_STREAM = logging.INFO  # Logging level for the console and the TUI
 
 # Configure path for logs
 PROJECT_PATH = os.getcwd()
@@ -19,12 +23,23 @@ DIRECTORY_LOGS = os.path.join(PROJECT_PATH, ".logs")
 LIBRARY_LOGGER_NAME = "datasphere_core"
 
 # Mapping of the logging levels to the rich colors
+# Green is reserved for the success level, so an announcement or a summary
+# never reads like an outcome
 FORMATS = {
     logging.DEBUG: "#223548",
-    logging.INFO: "#188918",
+    logging.INFO: "#5B738B",
+    SUCCESS: "#188918",
     logging.WARNING: "#C35500",
     logging.ERROR: "#D20A0A",
     logging.CRITICAL: "bold #AA0808",
+}
+
+# Level per outcome for a status that has no message of its own
+LEVEL_BY_OUTCOME = {
+    Outcome.SUCCEEDED: SUCCESS,
+    Outcome.SKIPPED: logging.INFO,
+    Outcome.FAILED: logging.ERROR,
+    Outcome.TIMED_OUT: logging.ERROR,
 }
 
 # Set up the logger
