@@ -116,6 +116,6 @@ async def search_analytical_models(
     """
     return await search_repository(
         context,
-        "Analytical Model",
+        "Analytic Model",
         _ANALYTICAL_MODEL_PAGE_SIZE,
     )
