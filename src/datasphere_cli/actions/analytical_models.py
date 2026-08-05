@@ -1,4 +1,6 @@
+import logging
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
@@ -8,14 +10,21 @@ from datasphere_core.commands.analytical_models import (
     measure_analytical_model_view_persistence_batch,
 )
 from datasphere_core.models.analytical_models import (
+    AnalyticalModelDependenciesStatus,
+    AnalyticalModelPersistenceStatus,
     AnalyticalModelReference,
     GetAnalyticalModelViewDependenciesBatchRequest,
     GetAnalyticalModelViewDependenciesBatchResult,
+    GetAnalyticalModelViewDependenciesResult,
     MeasureAnalyticalModelViewPersistenceBatchRequest,
     MeasureAnalyticalModelViewPersistenceBatchResult,
     MeasureAnalyticalModelViewPersistenceResult,
 )
-from datasphere_core.models.common import BatchItemResult, Outcome
+from datasphere_core.models.common import (
+    BatchItemResult,
+    CommandStatus,
+    Outcome,
+)
 
 from datasphere_cli.files.records import (
     AnalyticalModelDependenciesBatchRecord,
@@ -29,7 +38,7 @@ from datasphere_cli.files.storage import (
     read_task_csv,
     write_result_json,
 )
-from datasphere_cli.logging import logger
+from datasphere_cli.logging import LEVEL_BY_OUTCOME, SUCCESS, logger
 
 _DEPENDENCIES_COMMAND = "analytical_models.get_view_dependencies_batch"
 _MEASURE_COMMAND = "analytical_models.measure_view_persistence_batch"
@@ -38,31 +47,91 @@ type AnalyticalModelBatchResult = (
     | MeasureAnalyticalModelViewPersistenceBatchResult
 )
 
+# Log level and message per status. Both enums need their own mapping: their
+# members compare equal by value, so one shared table would drop entries.
+_DEPENDENCIES_MESSAGES: Mapping[CommandStatus, tuple[int, str]] = {
+    AnalyticalModelDependenciesStatus.COMPLETED: (
+        SUCCESS,
+        "Successfully resolved the view dependencies of analytical model "
+        "'%s'.",
+    ),
+    AnalyticalModelDependenciesStatus.DEPENDENCY_NOT_FOUND: (
+        logging.ERROR,
+        "Unable to resolve all view dependencies of analytical model '%s'.",
+    ),
+    AnalyticalModelDependenciesStatus.ANALYTICAL_MODEL_NOT_FOUND: (
+        logging.INFO,
+        "Analytical model '%s' not found. Skipping...",
+    ),
+}
 
-def _log_summary(
-    command: str,
-    result: AnalyticalModelBatchResult,
-    path: Path,
+_MEASURE_MESSAGES: Mapping[CommandStatus, tuple[int, str]] = {
+    AnalyticalModelPersistenceStatus.COMPLETED: (
+        SUCCESS,
+        "Successfully measured analytical model '%s'.",
+    ),
+    AnalyticalModelPersistenceStatus.FAILED: (
+        logging.ERROR,
+        "Measuring analytical model '%s' failed.",
+    ),
+    AnalyticalModelPersistenceStatus.TIMED_OUT: (
+        logging.ERROR,
+        "Measuring analytical model '%s' timed out. It may still be running.",
+    ),
+    AnalyticalModelPersistenceStatus.ANALYTICAL_MODEL_NOT_FOUND: (
+        logging.INFO,
+        "Analytical model '%s' not found. Skipping...",
+    ),
+}
+
+
+def _log_item(
+    messages: Mapping[CommandStatus, tuple[int, str]],
+    result: (
+        GetAnalyticalModelViewDependenciesResult
+        | MeasureAnalyticalModelViewPersistenceResult
+    ),
 ) -> None:
+    """
+    Logs the outcome of one analytical model.
+
+    Args:
+        messages (Mapping[CommandStatus, tuple[int, str]]): Log level and
+                                                            message per
+                                                            status.
+        result (GetAnalyticalModelViewDependenciesResult | \
+                MeasureAnalyticalModelViewPersistenceResult): Result of one
+                                                              completed model.
+    """
+    # A status added to the Core later would otherwise abort the batch
+    level, message = messages.get(
+        result.status,
+        (
+            LEVEL_BY_OUTCOME[result.status.outcome],
+            f"Analytical model '%s': {result.status}.",
+        ),
+    )
+    logger.log(level, message, result.analytical_model_name)
+
+
+def _log_summary(result: AnalyticalModelBatchResult, path: Path) -> None:
     """
     Logs the outcome counts of a batch and where its result was written.
 
     Args:
-        command (str): Command the results belong to.
         result (AnalyticalModelBatchResult): Completed batch result to
                                              summarize.
         path (Path): Path the result file was written to.
     """
     summary = result.summary
     logger.info(
-        "%s: %s succeeded, %s failed, %s skipped, %s timed out.",
-        command,
+        "Results: %s succeeded, %s failed, %s skipped, %s timed out.",
         summary.succeeded,
         summary.failed,
         summary.skipped,
         summary.timed_out,
     )
-    logger.info("Results saved to '%s'.", path)
+    logger.log(SUCCESS, "Results saved to '%s'.", path)
 
 
 def _summary_record(result: AnalyticalModelBatchResult) -> BatchSummaryRecord:
@@ -191,8 +260,25 @@ async def export_analytical_model_view_dependencies(
         deduplicate_views=deduplicate_views,
         max_concurrency=max_concurrency,
     )
+    async def report(update: BatchItemResult) -> None:
+        """
+        Logs the outcome of one resolved analytical model.
+
+        Args:
+            update (BatchItemResult): Result of one completed model.
+
+        Raises:
+            TypeError: If the item carries an unexpected result type.
+        """
+        if not isinstance(
+            update.result, GetAnalyticalModelViewDependenciesResult
+        ):
+            raise TypeError("Analytical model item has an unexpected result.")
+        _log_item(_DEPENDENCIES_MESSAGES, update.result)
+
+    # Report every model as soon as it is resolved
     result = await get_analytical_model_view_dependencies_batch(
-        context,
+        replace(context, batch_item_result_callback=report),
         request,
     )
 
@@ -228,7 +314,7 @@ async def export_analytical_model_view_dependencies(
     )
 
     # Log outcome counts
-    _log_summary(_DEPENDENCIES_COMMAND, result, path)
+    _log_summary(result, path)
     return result
 
 
@@ -309,6 +395,9 @@ async def measure_analytical_model_view_persistence_from_file(
             root=workspace_root,
         )
 
+        # Report the model once its measurement is safely on disk
+        _log_item(_MEASURE_MESSAGES, item)
+
     # Start the batch measurement with the callback to write results after
     # each completed model
     result = await measure_analytical_model_view_persistence_batch(
@@ -324,5 +413,5 @@ async def measure_analytical_model_view_persistence_from_file(
     )
 
     # Log outcome counts
-    _log_summary(_MEASURE_COMMAND, result, path)
+    _log_summary(result, path)
     return result

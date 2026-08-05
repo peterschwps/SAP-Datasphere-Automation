@@ -1,10 +1,11 @@
 import logging
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
 from datasphere_core import CommandContext
 from datasphere_core.commands.task_chains import run_task_chain_batch
-from datasphere_core.models.common import BatchItemResult
+from datasphere_core.models.common import BatchItemResult, CommandStatus
 from datasphere_core.models.task_chains import (
     RunTaskChainBatchRequest,
     RunTaskChainBatchResult,
@@ -19,17 +20,18 @@ from datasphere_cli.files.storage import (
     read_task_csv,
     write_result_csv,
 )
-from datasphere_cli.logging import logger
+from datasphere_cli.logging import LEVEL_BY_OUTCOME, SUCCESS, logger
 
 _COMMAND = "task_chains.run_batch"
 
-# Log level and message per status. A start the tenant refused is left out:
-# the Core already reports why the request failed.
-_CHAIN_MESSAGES = {
+# Log level and message per status. A status mapped to None stays quiet,
+# because the Core reports it already.
+_CHAIN_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
     TaskChainStatus.COMPLETED: (
-        logging.INFO,
-        "Task chain '%s' completed.",
+        SUCCESS,
+        "Successfully completed task chain '%s'.",
     ),
+    TaskChainStatus.START_FAILED: None,
     TaskChainStatus.FAILED: (
         logging.ERROR,
         "Task chain '%s' failed.",
@@ -54,8 +56,15 @@ async def _report_chain(update: BatchItemResult) -> None:
     if not isinstance(update.result, RunTaskChainResult):
         raise TypeError("Task chain item has an unexpected result.")
 
+    # A status added to the Core later would otherwise go unreported
     item = update.result
-    message = _CHAIN_MESSAGES.get(item.status)
+    message = _CHAIN_MESSAGES.get(
+        item.status,
+        (
+            LEVEL_BY_OUTCOME[item.status.outcome],
+            f"Task chain '%s': {item.status}.",
+        ),
+    )
     if message is None:
         return
     logger.log(message[0], message[1], item.chain)
@@ -122,10 +131,10 @@ async def run_task_chains_from_file(
     # Log outcome counts
     # TaskChainStatus has no skipped outcome, so that counter stays out
     logger.info(
-        "Task chains: %s succeeded, %s failed, %s timed out.",
+        "Results: %s succeeded, %s failed, %s timed out.",
         result.summary.succeeded,
         result.summary.failed,
         result.summary.timed_out,
     )
-    logger.info("Results saved to '%s'.", path)
+    logger.log(SUCCESS, "Results saved to '%s'.", path)
     return result

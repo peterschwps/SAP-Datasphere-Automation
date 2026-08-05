@@ -88,9 +88,24 @@ from datasphere_cli.actions import (
 from datasphere_cli.actions import remote_tables as remote_table_actions
 from datasphere_cli.actions import task_chains as task_chain_actions
 from datasphere_cli.actions import views as view_actions
+from datasphere_cli.actions.analytical_models import (
+    _DEPENDENCIES_MESSAGES,
+    _MEASURE_MESSAGES,
+)
 from datasphere_cli.actions.remote_tables import (
     _CONFIGURE_MESSAGES,
     _REFRESH_MESSAGES,
+)
+from datasphere_cli.actions.task_chains import _CHAIN_MESSAGES
+from datasphere_cli.actions.views import (
+    _ATTRIBUTES_MESSAGES,
+    _CANDIDATES_MESSAGES,
+    _CREATE_MESSAGES,
+    _DELETE_MESSAGES,
+    _LOCK_MESSAGES,
+    _PERSIST_MESSAGES,
+    _UNLOCK_MESSAGES,
+    _UNPERSIST_MESSAGES,
 )
 from datasphere_cli.files.workspace import file_setup, result_path, task_path
 
@@ -250,7 +265,7 @@ async def test_analytical_model_adapters_map_requests_and_json(
         context: CommandContext,
         request: object,
     ) -> object:
-        assert context is command_context
+        assert context.session is command_context.session
         requests.append(request)
         return dependency_result
 
@@ -472,6 +487,49 @@ def test_every_remote_table_status_has_its_own_message() -> None:
         ConfigureRemoteTableStatisticsStatus
     )
     assert set(_REFRESH_MESSAGES) == set(RefreshRemoteTableStatisticsStatus)
+
+
+def test_every_task_chain_status_has_its_own_message() -> None:
+    """
+    Checks that the task chain command names every status it can report.
+    """
+    assert set(_CHAIN_MESSAGES) == set(TaskChainStatus)
+
+    # A start the tenant refused stays quiet: the Core already reports why
+    # the request failed
+    assert _CHAIN_MESSAGES[TaskChainStatus.START_FAILED] is None
+
+
+def test_every_view_status_has_its_own_message() -> None:
+    """
+    Checks that every view command names the statuses it reports itself.
+    """
+    assert set(_CANDIDATES_MESSAGES) == set(
+        FindViewPersistenceCandidatesStatus
+    )
+    assert set(_ATTRIBUTES_MESSAGES) == set(FindViewAttributeMatchesStatus)
+    assert set(_CREATE_MESSAGES) == set(CreateViewPartitioningStatus)
+    assert set(_DELETE_MESSAGES) == set(DeleteViewPartitioningStatus)
+    assert set(_LOCK_MESSAGES) == set(LockViewPartitionsStatus)
+    assert set(_UNLOCK_MESSAGES) == set(UnlockViewPartitionsStatus)
+    assert set(_PERSIST_MESSAGES) == set(PersistViewStatus)
+    assert set(_UNPERSIST_MESSAGES) == set(UnpersistViewStatus)
+
+    # A start the tenant refused stays quiet: the Core already reports why
+    # the request failed
+    assert _PERSIST_MESSAGES[PersistViewStatus.START_FAILED] is None
+    assert _UNPERSIST_MESSAGES[UnpersistViewStatus.START_FAILED] is None
+
+
+def test_every_analytical_model_status_has_its_own_message() -> None:
+    """
+    Checks that both analytical model commands name every status they can
+    report.
+    """
+    assert set(_DEPENDENCIES_MESSAGES) == set(
+        AnalyticalModelDependenciesStatus
+    )
+    assert set(_MEASURE_MESSAGES) == set(AnalyticalModelPersistenceStatus)
 
 
 async def test_task_chain_adapter_writes_exact_result(
@@ -1024,9 +1082,133 @@ async def test_task_chain_adapter_reports_every_chain_while_it_runs(
     assert reported == ["CHAIN_A", "CHAIN_B", "CHAIN_C", "CHAIN_D"]
 
     messages = [record.getMessage() for record in caplog.records]
-    assert "Task chain 'CHAIN_A' completed." in messages
+    assert "Successfully completed task chain 'CHAIN_A'." in messages
     assert "Task chain 'CHAIN_B' failed." in messages
     assert any("CHAIN_C" in m and "timed out" in m for m in messages)
 
     # A refused start is already reported by the Core, so the adapter is quiet
     assert not any("CHAIN_D" in m for m in messages)
+
+
+async def test_view_adapter_reports_every_view_while_it_runs(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+) -> None:
+    """
+    Checks that a finished view is logged before the batch is done.
+    """
+    file_setup(tmp_path)
+    _write_task(
+        "views.persist_batch",
+        tmp_path,
+        {"view": "VIEW_A", "space": "SPACE_A"},
+    )
+
+    def _view(view: str, status: PersistViewStatus) -> PersistViewResult:
+        return PersistViewResult(view=view, space="SPACE_A", status=status)
+
+    async def handler(context: CommandContext, request: object) -> object:
+        # The Core hands every completed item to the adapter, so the log has
+        # to fill up while the batch is still running
+        for index, (view, status) in enumerate(
+            (
+                ("VIEW_A", PersistViewStatus.COMPLETED),
+                ("VIEW_B", PersistViewStatus.FAILED),
+                ("VIEW_C", PersistViewStatus.TIMED_OUT),
+                ("VIEW_D", PersistViewStatus.START_FAILED),
+            )
+        ):
+            await context.report_batch_item_result(
+                BatchItemResult(
+                    command="views.persist_batch",
+                    item_index=index,
+                    total_items=4,
+                    result=_view(view, status),
+                )
+            )
+        return PersistViewBatchResult(
+            results=(_view("VIEW_A", PersistViewStatus.COMPLETED),),
+            summary=_summary(succeeded=1),
+        )
+
+    _patch_command(monkeypatch, "views.persist_batch", handler)
+
+    with caplog.at_level(logging.DEBUG, logger="datasphere_cli.logging"):
+        await view_actions.persist_views_from_file(
+            _context(), workspace_root=tmp_path
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Successfully persisted view 'VIEW_A'." in messages
+    assert "Persisting view 'VIEW_B' failed." in messages
+    assert any("VIEW_C" in m and "timed out" in m for m in messages)
+
+    # A refused start is already reported by the Core, so the adapter is quiet
+    assert not any("VIEW_D" in m for m in messages)
+
+
+async def test_analytical_model_adapter_reports_every_measurement(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+) -> None:
+    """
+    Checks that a measured analytical model is logged with its checkpoint.
+    """
+    file_setup(tmp_path)
+    _write_task(
+        "analytical_models.measure_view_persistence_batch",
+        tmp_path,
+        {"analytical_model": "MODEL_A", "space": "SPACE_A"},
+    )
+
+    def _model(
+        name: str,
+        status: AnalyticalModelPersistenceStatus,
+    ) -> MeasureAnalyticalModelViewPersistenceResult:
+        return MeasureAnalyticalModelViewPersistenceResult(
+            analytical_model_name=name,
+            space="SPACE_A",
+            status=status,
+        )
+
+    async def handler(context: CommandContext, request: object) -> object:
+        for index, (model, status) in enumerate(
+            (
+                ("MODEL_A", AnalyticalModelPersistenceStatus.COMPLETED),
+                ("MODEL_B", AnalyticalModelPersistenceStatus.FAILED),
+            )
+        ):
+            await context.report_batch_item_result(
+                BatchItemResult(
+                    command="analytical_models.measure_view_persistence_batch",
+                    item_index=index,
+                    total_items=2,
+                    result=_model(model, status),
+                )
+            )
+        return MeasureAnalyticalModelViewPersistenceBatchResult(
+            results=(
+                _model("MODEL_A", AnalyticalModelPersistenceStatus.COMPLETED),
+            ),
+            summary=_summary(succeeded=1),
+        )
+
+    _patch_command(
+        monkeypatch,
+        "analytical_models.measure_view_persistence_batch",
+        handler,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="datasphere_cli.logging"):
+        await (
+            analytical_model_actions
+            .measure_analytical_model_view_persistence_from_file(
+                _context(), workspace_root=tmp_path
+            )
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Successfully measured analytical model 'MODEL_A'." in messages
+    assert "Measuring analytical model 'MODEL_B' failed." in messages

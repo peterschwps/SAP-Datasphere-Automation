@@ -8,11 +8,7 @@ from datasphere_core.commands.remote_tables import (
     configure_remote_table_statistics_batch,
     refresh_remote_table_statistics_batch,
 )
-from datasphere_core.models.common import (
-    BatchItemResult,
-    CommandStatus,
-    Outcome,
-)
+from datasphere_core.models.common import BatchItemResult, CommandStatus
 from datasphere_core.models.remote_tables import (
     ConfigureRemoteTableStatisticsBatchRequest,
     ConfigureRemoteTableStatisticsBatchResult,
@@ -30,7 +26,7 @@ from datasphere_cli.files.records import (
     RemoteTableStatisticsResultRecord,
 )
 from datasphere_cli.files.storage import initialize_result, write_result_csv
-from datasphere_cli.logging import logger
+from datasphere_cli.logging import LEVEL_BY_OUTCOME, SUCCESS, logger
 
 _CONFIGURE_COMMAND = "remote_tables.configure_statistics_batch"
 _REFRESH_COMMAND = "remote_tables.refresh_statistics_batch"
@@ -44,12 +40,12 @@ type RemoteTableBatchResult = (
 # members compare equal by value, so one shared table would drop entries.
 _CONFIGURE_MESSAGES: Mapping[CommandStatus, tuple[int, str]] = {
     ConfigureRemoteTableStatisticsStatus.CREATED: (
-        logging.INFO,
-        "Created statistics for table '%s'.",
+        SUCCESS,
+        "Successfully created statistics for table '%s'.",
     ),
     ConfigureRemoteTableStatisticsStatus.UPDATED: (
-        logging.INFO,
-        "Updated statistics for table '%s'.",
+        SUCCESS,
+        "Successfully updated statistics for table '%s'.",
     ),
     ConfigureRemoteTableStatisticsStatus.ALREADY_CONFIGURED: (
         logging.INFO,
@@ -60,11 +56,11 @@ _CONFIGURE_MESSAGES: Mapping[CommandStatus, tuple[int, str]] = {
         "Statistics for table '%s' already exist. Skipping...",
     ),
     ConfigureRemoteTableStatisticsStatus.UNSUPPORTED: (
-        logging.DEBUG,
+        logging.INFO,
         "Table '%s' does not support statistics. Skipping...",
     ),
     ConfigureRemoteTableStatisticsStatus.UNSUPPORTED_TYPE: (
-        logging.DEBUG,
+        logging.INFO,
         "Table '%s' only supports record counts. Skipping...",
     ),
     ConfigureRemoteTableStatisticsStatus.TABLE_NOT_FOUND: (
@@ -79,15 +75,15 @@ _CONFIGURE_MESSAGES: Mapping[CommandStatus, tuple[int, str]] = {
 
 _REFRESH_MESSAGES: Mapping[CommandStatus, tuple[int, str]] = {
     RefreshRemoteTableStatisticsStatus.REFRESHED: (
-        logging.INFO,
-        "Refreshed statistics for table '%s'.",
+        SUCCESS,
+        "Successfully refreshed statistics for table '%s'.",
     ),
     RefreshRemoteTableStatisticsStatus.NO_STATISTICS: (
-        logging.DEBUG,
+        logging.INFO,
         "Table '%s' has no statistics to refresh. Skipping...",
     ),
     RefreshRemoteTableStatisticsStatus.UNSUPPORTED: (
-        logging.DEBUG,
+        logging.INFO,
         "Table '%s' does not support statistics. Skipping...",
     ),
     RefreshRemoteTableStatisticsStatus.TABLE_NOT_FOUND: (
@@ -98,14 +94,6 @@ _REFRESH_MESSAGES: Mapping[CommandStatus, tuple[int, str]] = {
         logging.ERROR,
         "Failed to refresh statistics for table '%s'.",
     ),
-}
-
-# Level per outcome for a status the mapping above does not cover
-_FALLBACK_LEVELS = {
-    Outcome.SUCCEEDED: logging.INFO,
-    Outcome.SKIPPED: logging.DEBUG,
-    Outcome.FAILED: logging.ERROR,
-    Outcome.TIMED_OUT: logging.ERROR,
 }
 
 
@@ -145,7 +133,7 @@ def _table_reporter(
         level, message = messages.get(
             item.status,
             (
-                _FALLBACK_LEVELS[item.status.outcome],
+                LEVEL_BY_OUTCOME[item.status.outcome],
                 f"Table '%s': {item.status}.",
             ),
         )
@@ -154,27 +142,21 @@ def _table_reporter(
     return report
 
 
-def _log_summary(
-    command: str,
-    result: RemoteTableBatchResult,
-    path: Path,
-) -> None:
+def _log_summary(result: RemoteTableBatchResult, path: Path) -> None:
     """
     Logs the outcome counts of a batch and where its result was written.
 
     Args:
-        command (str): Command the results belong to.
         result (RemoteTableBatchResult): Completed batch result to summarize.
         path (Path): Path the result file was written to.
     """
     logger.info(
-        "%s: %s succeeded, %s failed, %s skipped.",
-        command,
+        "Results: %s succeeded, %s failed, %s skipped.",
         result.summary.succeeded,
         result.summary.failed,
         result.summary.skipped,
     )
-    logger.info("Results saved to '%s'.", path)
+    logger.log(SUCCESS, "Results saved to '%s'.", path)
 
 
 async def configure_remote_table_statistics(
@@ -235,7 +217,7 @@ async def configure_remote_table_statistics(
     path = write_result_csv(_CONFIGURE_COMMAND, rows, workspace_root)
 
     # Log outcome counts
-    _log_summary(_CONFIGURE_COMMAND, result, path)
+    _log_summary(result, path)
     return result
 
 
@@ -290,5 +272,5 @@ async def refresh_remote_table_statistics(
     path = write_result_csv(_REFRESH_COMMAND, rows, workspace_root)
 
     # Log outcome counts
-    _log_summary(_REFRESH_COMMAND, result, path)
+    _log_summary(result, path)
     return result

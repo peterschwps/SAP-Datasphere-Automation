@@ -1,3 +1,6 @@
+import logging
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 
 from datasphere_core import CommandContext
@@ -11,29 +14,46 @@ from datasphere_core.commands.views import (
     unlock_view_partitions_batch,
     unpersist_view_batch,
 )
+from datasphere_core.models.common import BatchItemResult, CommandStatus
 from datasphere_core.models.views import (
     CreateViewPartitioningBatchRequest,
     CreateViewPartitioningBatchResult,
     CreateViewPartitioningRequest,
+    CreateViewPartitioningResult,
+    CreateViewPartitioningStatus,
     DeleteViewPartitioningBatchRequest,
     DeleteViewPartitioningBatchResult,
     DeleteViewPartitioningRequest,
+    DeleteViewPartitioningResult,
+    DeleteViewPartitioningStatus,
     FindViewAttributeMatchesBatchRequest,
     FindViewAttributeMatchesBatchResult,
+    FindViewAttributeMatchesResult,
+    FindViewAttributeMatchesStatus,
     FindViewPersistenceCandidatesBatchRequest,
     FindViewPersistenceCandidatesBatchResult,
+    FindViewPersistenceCandidatesResult,
+    FindViewPersistenceCandidatesStatus,
     LockViewPartitionsBatchRequest,
     LockViewPartitionsBatchResult,
     LockViewPartitionsRequest,
+    LockViewPartitionsResult,
+    LockViewPartitionsStatus,
     PersistViewBatchRequest,
     PersistViewBatchResult,
     PersistViewRequest,
+    PersistViewResult,
+    PersistViewStatus,
     UnlockViewPartitionsBatchRequest,
     UnlockViewPartitionsBatchResult,
     UnlockViewPartitionsRequest,
+    UnlockViewPartitionsResult,
+    UnlockViewPartitionsStatus,
     UnpersistViewBatchRequest,
     UnpersistViewBatchResult,
     UnpersistViewRequest,
+    UnpersistViewResult,
+    UnpersistViewStatus,
 )
 
 from datasphere_cli.files.records import (
@@ -48,7 +68,7 @@ from datasphere_cli.files.storage import (
     read_task_csv,
     write_result_csv,
 )
-from datasphere_cli.logging import logger
+from datasphere_cli.logging import LEVEL_BY_OUTCOME, SUCCESS, logger
 
 _CANDIDATES_COMMAND = "views.find_persistence_candidates_batch"
 _ATTRIBUTES_COMMAND = "views.find_attribute_matches_batch"
@@ -70,29 +90,203 @@ type ViewBatchResult = (
     | UnpersistViewBatchResult
 )
 
+# Log level and message per status. Every command needs its own mapping:
+# the status members compare equal by value, so one shared table would drop
+# entries. A status mapped to None stays quiet, because the Core reports it
+# already.
+_CANDIDATES_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
+    FindViewPersistenceCandidatesStatus.COMPLETED: (
+        SUCCESS,
+        "Successfully analyzed view '%s'.",
+    ),
+    FindViewPersistenceCandidatesStatus.FAILED: (
+        logging.ERROR,
+        "Failed to analyze view '%s'.",
+    ),
+    FindViewPersistenceCandidatesStatus.TIMED_OUT: (
+        logging.ERROR,
+        "Analysis of view '%s' timed out. It may still be running.",
+    ),
+}
 
-def _log_summary(
-    command: str,
-    result: ViewBatchResult,
-    path: Path,
-) -> None:
+_ATTRIBUTES_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
+    FindViewAttributeMatchesStatus.COMPLETED: (
+        SUCCESS,
+        "Successfully searched the attributes of view '%s'.",
+    ),
+    FindViewAttributeMatchesStatus.FAILED: (
+        logging.ERROR,
+        "Failed to read the attributes of view '%s'.",
+    ),
+}
+
+_CREATE_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
+    CreateViewPartitioningStatus.CREATED: (
+        SUCCESS,
+        "Successfully created partitioning for view '%s'.",
+    ),
+    CreateViewPartitioningStatus.ALREADY_EXISTS: (
+        logging.INFO,
+        "View '%s' is already partitioned. Skipping...",
+    ),
+    CreateViewPartitioningStatus.INVALID_COLUMN: (
+        logging.ERROR,
+        "Attribute of view '%s' cannot carry a range partitioning.",
+    ),
+    CreateViewPartitioningStatus.FAILED: (
+        logging.ERROR,
+        "Failed to create partitioning for view '%s'.",
+    ),
+}
+
+_DELETE_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
+    DeleteViewPartitioningStatus.DELETED: (
+        SUCCESS,
+        "Successfully deleted the partitioning of view '%s'.",
+    ),
+    DeleteViewPartitioningStatus.FAILED: (
+        logging.ERROR,
+        "Failed to delete the partitioning of view '%s'.",
+    ),
+}
+
+_PERSIST_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
+    PersistViewStatus.COMPLETED: (
+        SUCCESS,
+        "Successfully persisted view '%s'.",
+    ),
+    PersistViewStatus.START_FAILED: None,
+    PersistViewStatus.FAILED: (
+        logging.ERROR,
+        "Persisting view '%s' failed.",
+    ),
+    PersistViewStatus.TIMED_OUT: (
+        logging.ERROR,
+        "Persisting view '%s' timed out. It may still be running.",
+    ),
+}
+
+_UNPERSIST_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
+    UnpersistViewStatus.COMPLETED: (
+        SUCCESS,
+        "Successfully removed the persisted data of view '%s'.",
+    ),
+    UnpersistViewStatus.START_FAILED: None,
+    UnpersistViewStatus.ALREADY_ABSENT: (
+        logging.INFO,
+        "View '%s' has no persisted data. Skipping...",
+    ),
+    UnpersistViewStatus.FAILED: (
+        logging.ERROR,
+        "Removing the persisted data of view '%s' failed.",
+    ),
+    UnpersistViewStatus.TIMED_OUT: (
+        logging.ERROR,
+        "Removing the persisted data of view '%s' timed out. It may still "
+        "be running.",
+    ),
+}
+
+_LOCK_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
+    LockViewPartitionsStatus.LOCKED: (
+        SUCCESS,
+        "Successfully locked the partitions of view '%s'.",
+    ),
+    LockViewPartitionsStatus.NO_PARTITIONS: (
+        logging.INFO,
+        "View '%s' has no partitions to lock. Skipping...",
+    ),
+    LockViewPartitionsStatus.FAILED: (
+        logging.ERROR,
+        "Failed to lock the partitions of view '%s'.",
+    ),
+}
+
+_UNLOCK_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
+    UnlockViewPartitionsStatus.UNLOCKED: (
+        SUCCESS,
+        "Successfully unlocked the partitions of view '%s'.",
+    ),
+    UnlockViewPartitionsStatus.NO_PARTITIONS: (
+        logging.INFO,
+        "View '%s' has no partitions to unlock. Skipping...",
+    ),
+    UnlockViewPartitionsStatus.FAILED: (
+        logging.ERROR,
+        "Failed to unlock the partitions of view '%s'.",
+    ),
+}
+
+
+def _view_reporter(
+    messages: Mapping[CommandStatus, tuple[int, str] | None],
+) -> Callable[[BatchItemResult], Awaitable[None]]:
+    """
+    Builds a callback that logs every view as soon as it is done.
+
+    Args:
+        messages (Mapping[CommandStatus, tuple[int, str] | None]): Log level
+                                                                   and message
+                                                                   per status.
+
+    Returns:
+        Callable[[BatchItemResult], Awaitable[None]]: Callback for the batch.
+    """
+    async def report(update: BatchItemResult) -> None:
+        """
+        Logs the outcome of one view.
+
+        Args:
+            update (BatchItemResult): Result of one completed view.
+
+        Raises:
+            TypeError: If the item carries an unexpected result type.
+        """
+        if not isinstance(
+            update.result,
+            CreateViewPartitioningResult
+            | DeleteViewPartitioningResult
+            | FindViewAttributeMatchesResult
+            | FindViewPersistenceCandidatesResult
+            | LockViewPartitionsResult
+            | PersistViewResult
+            | UnlockViewPartitionsResult
+            | UnpersistViewResult,
+        ):
+            raise TypeError("View item has an unexpected result.")
+
+        # A status added to the Core later would otherwise go unreported
+        item = update.result
+        message = messages.get(
+            item.status,
+            (
+                LEVEL_BY_OUTCOME[item.status.outcome],
+                f"View '%s': {item.status}.",
+            ),
+        )
+        if message is None:
+            return
+        logger.log(message[0], message[1], item.view)
+
+    return report
+
+
+def _log_summary(result: ViewBatchResult, path: Path) -> None:
     """
     Logs the outcome counts of a batch and where its result was written.
 
     Args:
-        command (str): Command the results belong to.
         result (ViewBatchResult): Completed batch result to summarize.
         path (Path): Path the result file was written to.
     """
     logger.info(
-        "%s: %s succeeded, %s failed, %s skipped, %s timed out.",
-        command,
+        "Results: %s succeeded, %s failed, %s skipped, %s timed out.",
         result.summary.succeeded,
         result.summary.failed,
         result.summary.skipped,
         result.summary.timed_out,
     )
-    logger.info("Results saved to '%s'.", path)
+    logger.log(SUCCESS, "Results saved to '%s'.", path)
 
 
 async def export_view_persistence_candidates(
@@ -128,7 +322,14 @@ async def export_view_persistence_candidates(
         timeout_seconds=timeout_seconds,
         max_concurrency=max_concurrency,
     )
-    result = await find_view_persistence_candidates_batch(context, request)
+    # Report every view as soon as it is done
+    result = await find_view_persistence_candidates_batch(
+        replace(
+            context,
+            batch_item_result_callback=_view_reporter(_CANDIDATES_MESSAGES),
+        ),
+        request,
+    )
 
     # Write one row per candidate
     # A view without candidates keeps a row with empty candidate fields
@@ -164,7 +365,7 @@ async def export_view_persistence_candidates(
             for candidate in item.candidates
         )
     path = write_result_csv(_CANDIDATES_COMMAND, rows, workspace_root)
-    _log_summary(_CANDIDATES_COMMAND, result, path)
+    _log_summary(result, path)
     return result
 
 
@@ -199,7 +400,14 @@ async def export_view_attribute_matches(
         case_sensitive=case_sensitive,
         max_concurrency=max_concurrency,
     )
-    result = await find_view_attribute_matches_batch(context, request)
+    # Report every view as soon as it is done
+    result = await find_view_attribute_matches_batch(
+        replace(
+            context,
+            batch_item_result_callback=_view_reporter(_ATTRIBUTES_MESSAGES),
+        ),
+        request,
+    )
     rows: list[ViewAttributeResultRecord] = []
     for item in result.results:
         for attribute in item.attributes:
@@ -213,7 +421,7 @@ async def export_view_attribute_matches(
                 }
             )
     path = write_result_csv(_ATTRIBUTES_COMMAND, rows, workspace_root)
-    _log_summary(_ATTRIBUTES_COMMAND, result, path)
+    _log_summary(result, path)
     return result
 
 
@@ -260,7 +468,14 @@ async def create_view_partitioning_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await create_view_partitioning_batch(context, request)
+    # Report every view as soon as it is done
+    result = await create_view_partitioning_batch(
+        replace(
+            context,
+            batch_item_result_callback=_view_reporter(_CREATE_MESSAGES),
+        ),
+        request,
+    )
     return _write_partitioning_result(
         _CREATE_COMMAND,
         result,
@@ -300,7 +515,14 @@ async def delete_view_partitioning_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await delete_view_partitioning_batch(context, request)
+    # Report every view as soon as it is done
+    result = await delete_view_partitioning_batch(
+        replace(
+            context,
+            batch_item_result_callback=_view_reporter(_DELETE_MESSAGES),
+        ),
+        request,
+    )
     return _write_status_result(
         _DELETE_COMMAND,
         result,
@@ -344,7 +566,14 @@ async def persist_views_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await persist_view_batch(context, request)
+    # Report every view as soon as it is done
+    result = await persist_view_batch(
+        replace(
+            context,
+            batch_item_result_callback=_view_reporter(_PERSIST_MESSAGES),
+        ),
+        request,
+    )
     return _write_persistence_result(
         _PERSIST_COMMAND,
         result,
@@ -388,7 +617,14 @@ async def unpersist_views_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await unpersist_view_batch(context, request)
+    # Report every view as soon as it is done
+    result = await unpersist_view_batch(
+        replace(
+            context,
+            batch_item_result_callback=_view_reporter(_UNPERSIST_MESSAGES),
+        ),
+        request,
+    )
     return _write_persistence_result(
         _UNPERSIST_COMMAND,
         result,
@@ -430,7 +666,14 @@ async def lock_view_partitions_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await lock_view_partitions_batch(context, request)
+    # Report every view as soon as it is done
+    result = await lock_view_partitions_batch(
+        replace(
+            context,
+            batch_item_result_callback=_view_reporter(_LOCK_MESSAGES),
+        ),
+        request,
+    )
     return _write_status_result(
         _LOCK_COMMAND,
         result,
@@ -466,7 +709,14 @@ async def unlock_view_partitions_from_file(
         ),
         max_concurrency=max_concurrency,
     )
-    result = await unlock_view_partitions_batch(context, request)
+    # Report every view as soon as it is done
+    result = await unlock_view_partitions_batch(
+        replace(
+            context,
+            batch_item_result_callback=_view_reporter(_UNLOCK_MESSAGES),
+        ),
+        request,
+    )
     return _write_status_result(
         _UNLOCK_COMMAND,
         result,
@@ -501,7 +751,7 @@ def _write_status_result[ResultT: ViewBatchResult](
         for item in result.results
     ]
     path = write_result_csv(command, rows, workspace_root)
-    _log_summary(command, result, path)
+    _log_summary(result, path)
     return result
 
 
@@ -540,7 +790,7 @@ def _write_partitioning_result(
         for item, record in zip(result.results, records, strict=True)
     ]
     path = write_result_csv(command, rows, workspace_root)
-    _log_summary(command, result, path)
+    _log_summary(result, path)
     return result
 
 
@@ -576,5 +826,5 @@ def _write_persistence_result[
         for item in result.results
     ]
     path = write_result_csv(command, rows, workspace_root)
-    _log_summary(command, result, path)
+    _log_summary(result, path)
     return result
