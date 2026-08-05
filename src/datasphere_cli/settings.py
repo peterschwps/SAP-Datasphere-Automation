@@ -15,7 +15,7 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
-from datasphere_cli.logging import logger
+from datasphere_cli.logging import SUCCESS, logger
 
 # Paths
 _CONFIG_DIR = Path(user_config_dir("Datasphere"))
@@ -131,9 +131,15 @@ def create_settings_file() -> None:
     additional information to the user and exits the program afterwards.
     """
     SETTINGS_FILE.write_text(SETTINGS_TEMPLATE, encoding="utf-8")
-    logger.info("Created new settings file at '%s'.", SETTINGS_FILE)
-    logger.debug("Opening file...")
-    logger.debug("Please fill it and restart the program.")
+    logger.log(
+        SUCCESS,
+        "Successfully created a new settings file at '%s'.",
+        SETTINGS_FILE,
+    )
+
+    # Reported at info level, because the user has to act on both lines
+    logger.info("Opening file...")
+    logger.info("Please fill it and restart the program.")
     with contextlib.suppress(Exception):
         webbrowser.open(f"file://{SETTINGS_FILE}")
     sys.exit()
