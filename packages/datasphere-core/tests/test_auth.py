@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from pathlib import Path
 
 import httpx
@@ -91,6 +92,34 @@ async def test_session_loads_and_replaces_tokens(tmp_path: Path) -> None:
     body = token.calls.last.request.content.decode()
     assert "grant_type=refresh_token" in body
     assert "refresh_token=old-refresh" in body
+
+
+@respx.mock
+async def test_session_reports_a_finished_refresh(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    """
+    Checks that a refresh announces itself and reports its success.
+    """
+    config, store = _store(refresh_token="old-refresh")
+    respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={"access_token": "new-access"})
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="datasphere_core"):
+        async with DatasphereSession(
+            config,
+            token_store=store,
+            lock_directory=tmp_path,
+        ) as session:
+            await session.authenticate(interactive=False)
+
+    # The user has to see that the step is done, not only that it started
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Refreshing session tokens..." in messages
+    assert "Successfully refreshed the session tokens." in messages
+    assert caplog.records[-1].levelname == "SUCCESS"
 
 
 @respx.mock

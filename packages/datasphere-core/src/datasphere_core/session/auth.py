@@ -10,6 +10,7 @@ from datasphere_core.errors import (
     AuthenticationError,
     SessionNotAuthenticatedError,
 )
+from datasphere_core.logging import SUCCESS
 from datasphere_core.session.config import DEFAULT_HEADERS, SessionConfig
 from datasphere_core.session.credentials import (
     KeyringTokenStore,
@@ -173,6 +174,10 @@ class DatasphereSession:
                 # endpoint didn't return a new one
                 new_tokens.setdefault("refresh_token", tokens["refresh_token"])
                 self._apply_tokens(new_tokens)
+                logger.log(
+                    SUCCESS,
+                    "Successfully refreshed the session tokens.",
+                )
                 return new_tokens
             logger.warning(
                 "Unable to refresh session tokens. Starting a new login..."
@@ -186,12 +191,14 @@ class DatasphereSession:
             )
 
         # Start interactive login
-        logger.debug("Opening browser window to log in...")
+        # Reported at info level, because the user has to act on the window
+        logger.info("Opening browser window to log in...")
         new_tokens = await authenticate_interactively(
             config=self._config,
             session=self.client,
         )
         self._apply_tokens(new_tokens)
+        logger.log(SUCCESS, "Successfully logged in.")
         return new_tokens
 
     def _apply_tokens(self, tokens: TokenDict) -> None:
