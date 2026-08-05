@@ -73,8 +73,7 @@ async def search_repository(
         ),
         headers={
             "Accept": "application/json",
-            # The type descriptions above are the German ones
-            "Accept-Language": "de",
+            "Accept-Language": "en",
             "Cache-Control": "no-cache",
         },
     )

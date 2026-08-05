@@ -35,13 +35,13 @@ async def test_search_asks_for_the_requested_type(
 
     views, models = (call.request.url.params for call in search.calls)
 
-    # The tenant describes its types in German, hence the Accept-Language
+    # The tenant describes its types in English, hence the Accept-Language
     assert 'technical_type_description:EQ(S):"View"' in views["$apply"]
     assert (
-        'technical_type_description:EQ(S):"Analysemodell"'
+        'technical_type_description:EQ(S):"Analytical Model"'
         in models["$apply"]
     )
-    assert search.calls[0].request.headers["Accept-Language"] == "de"
+    assert search.calls[0].request.headers["Accept-Language"] == "en"
 
     # Each search keeps the page size it was written with
     assert views["$top"] == "10000"
@@ -94,7 +94,7 @@ async def test_search_keeps_its_headers_out_of_the_session(
     assert headers["Authorization"] == "Bearer access-token"
     assert headers["X-Client-Default"] == "preserved"
     assert headers["Accept"] == "application/json"
-    assert headers["Accept-Language"] == "de"
+    assert headers["Accept-Language"] == "en"
     assert headers["Cache-Control"] == "no-cache"
 
     # The session itself keeps none of them

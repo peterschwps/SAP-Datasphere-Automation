@@ -62,7 +62,9 @@ def _search_route(
     through the same endpoint and differ only in the filter they send.
     """
     def respond(request: httpx.Request) -> httpx.Response:
-        searches_models = "Analysemodell" in request.url.query.decode()
+        # Read through the decoded parameters, because the space of the type
+        # description is percent-encoded in the raw query
+        searches_models = "Analytical Model" in request.url.params["$apply"]
         return httpx.Response(
             200,
             json={"value": models if searches_models else views},
