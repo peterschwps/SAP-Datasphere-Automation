@@ -4,7 +4,6 @@ from pathlib import Path
 from datasphere_core import start_http_logging
 
 from datasphere_cli.files.workspace import http_logging_path
-from datasphere_cli.logging import logger
 
 # Environment variable switching the logging on, and the one overriding the
 # file it is written to
@@ -35,13 +34,5 @@ def configure_http_logging(root: str | Path | None = None) -> Path | None:
     override = os.environ.get(HTTP_LOGGING_FILE_VARIABLE)
     path = start_http_logging(
         Path(override) if override else http_logging_path(root)
-    )
-    logger.info("Logging every request to '%s'.", path)
-
-    # Warn about the session tokens in the file, because nothing in it is
-    # masked
-    logger.warning(
-        "The HTTP log contains credentials and payloads in clear text. "
-        "Do not share it."
     )
     return path
