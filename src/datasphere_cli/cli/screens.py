@@ -821,12 +821,12 @@ class ExecutionScreen(BaseScreen):
                 progress_callback=report_progress,
             )
             await self._action(context, **self._params)
-            status.update("Done. Press Enter or Escape to return to the menu.")
+            status.update("Done. Press Enter or Esc to return to the menu.")
 
         # Stop on any unhandled exceptions
         except Exception as e:
             status.update(
-                f"[b][#AA0808]Error: {e}[/]\nPress Enter or Escape to return."
+                f"[b][#AA0808]Error: {e}[/]\nPress Enter or Esc to return."
             )
 
         # Remove handler to prevent multiple handlers co-existing if this
@@ -847,6 +847,10 @@ class ExecutionScreen(BaseScreen):
         """
         # Pop ExecutionScreen and ParamScreen to return to EntryScreen
         if self._done and event.key in ("enter", "escape"):
+            # Consume the key here, because the app would otherwise match it
+            # against the bindings of the menu below and select an entry
+            event.stop()
+            event.prevent_default()
             self.app.pop_screen()
             self.app.pop_screen()
 
