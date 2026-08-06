@@ -437,8 +437,8 @@ async def create_view_partitioning_from_file(
 
     Args:
         context (CommandContext): Context with the authenticated client.
-        start_year (int): First year included in the partitioning range.
-        end_year (int): Last year included in the partitioning range.
+        start_year (int): First year the partitioning covers.
+        end_year (int): Year the last partition ends below.
         overwrite_existing (bool, optional): Whether to replace existing
                                              partitioning. Defaults to False.
         max_concurrency (int, optional): Maximum amount of concurrent
@@ -642,7 +642,7 @@ async def lock_view_partitions_from_file(
 
     Args:
         context (CommandContext): Context with the authenticated client.
-        until_year (int): Last year whose partitions should be locked.
+        until_year (int): Year the last locked partition ends below.
         max_concurrency (int, optional): Maximum amount of concurrent
                                          operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and

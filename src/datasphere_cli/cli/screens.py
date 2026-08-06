@@ -174,7 +174,7 @@ PARAM_DEFINITIONS: dict[Action, list[ParameterDefinition]] = {
     actions.lock_view_partitions_from_file: [
         ParameterDefinition(
             "until_year",
-            "Year (locked up to and including):",
+            "Lock partitions below year:",
             "int",
         ),
     ],
@@ -539,7 +539,7 @@ class ParamScreen(BaseScreen):
         # Display hint
         hint = "Enter to start" if is_last else "Enter to confirm"
         self.query_one("#param-hint", Static).update(
-            f"{hint} · Escape to go back"
+            f"{hint} · Esc to go back"
         )
 
         # Remove old input widget

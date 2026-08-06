@@ -1105,8 +1105,12 @@ def _yearly_partitioning(
     Returns:
         dict[str, Any]: Payload for the partitioning endpoint.
     """
-    # Each range spans one year, so the last year is only an upper bound
-    years = [str(year) for year in range(request.start_year, request.end_year)]
+    # Each range spans one year and ends below the next one, so the end year
+    # is the upper bound of the last range and needs its own entry
+    years = [
+        str(year)
+        for year in range(request.start_year, request.end_year + 1)
+    ]
     return {
         "remoteSourceName": "",
         "objectName": request.view,
@@ -1182,7 +1186,7 @@ async def lock_view_partitions(
     request: LockViewPartitionsRequest,
 ) -> LockViewPartitionsResult:
     """
-    Locks partitions through a requested year for one view.
+    Locks every partition below a requested year for one view.
 
     Args:
         context (CommandContext): Authenticated client and progress callbacks.
@@ -1196,12 +1200,15 @@ async def lock_view_partitions(
         request.view,
         request.space,
     )
+
+    # A partition ends below the year that follows it, so the last locked
+    # one is the partition the requested year closes
     status = await _set_partition_lock(
         context,
         view=request.view,
         space=request.space,
         locked=lambda partition: (
-            int(partition["low"]["value"]) <= request.until_year
+            int(partition["low"]["value"]) < request.until_year
         ),
         success_status="locked",
     )

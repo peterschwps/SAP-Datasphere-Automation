@@ -661,9 +661,10 @@ Sales2025,SALES_DEPARTMENT,deleted
 <details>
 <summary><strong>4.5 Lock Partitions Up to a Specific Year</strong></summary>
 
-Locks partitions up to and including a specific year (<= year entered).
-Requires that the views already have partitions. Only partitions with yearly
-values can be locked (in Datasphere `STRING(4)`).
+Locks every partition below a specific year, so the last locked partition is
+the one ending at the year entered. Requires that the views already have
+partitions. Only partitions with yearly values can be locked (in Datasphere
+`STRING(4)`).
 
 **Required task file:** `datasphere/tasks/views_lock_partitions.csv`
 
@@ -671,8 +672,8 @@ values can be locked (in Datasphere `STRING(4)`).
 
 **Parameters:**
 
-- **Year**: The year up to which partitions should be locked
-            (the entered year is also locked)
+- **Year** (<): Upper bound of the last locked partition (e.g., `2035` locks
+                every partition up to and including `< 2035`)
 
 **Output file:** `datasphere/results/views_lock_partitions.csv`
 

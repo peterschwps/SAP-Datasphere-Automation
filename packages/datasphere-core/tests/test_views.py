@@ -819,16 +819,19 @@ async def test_create_partitioning_builds_the_requested_year_range(
         ),
     )
 
-    # The last year is only the upper bound of the preceding range
+    # The end year closes the last range instead of starting one, so the
+    # partitioning ends at '< 2023'
     written = json.loads(write.calls.last.request.content)
     ranges = written["ranges"]
     assert [partition["low"]["value"] for partition in ranges] == [
         "2020",
         "2021",
+        "2022",
     ]
     assert [partition["high"]["value"] for partition in ranges] == [
         "2021",
         "2022",
+        "2023",
     ]
     assert written["column"] == "FISCYEAR"
     assert result.status is CreateViewPartitioningStatus.CREATED
@@ -1019,11 +1022,12 @@ async def test_lock_and_unlock_partitions_map_their_outcomes(
     assert unlocked.status is UnlockViewPartitionsStatus.NO_PARTITIONS
     assert unlocked.status.outcome == "skipped"
 
-    # Only the years up to the requested one are locked
+    # The requested year closes the last locked partition, so the one
+    # starting in it stays open
     written = json.loads(write.calls.last.request.content)
     assert [partition["locked"] for partition in written["ranges"]] == [
         True,
-        True,
+        False,
         False,
     ]
 

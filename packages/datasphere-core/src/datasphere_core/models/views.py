@@ -469,7 +469,7 @@ class UnpersistViewBatchResult:
 @dataclass(frozen=True, slots=True)
 class LockViewPartitionsRequest:
     """
-    Input for locking partitions through a requested year for one view.
+    Input for locking every partition below a requested year for one view.
     """
     view: str
     space: str
@@ -479,7 +479,7 @@ class LockViewPartitionsRequest:
 @dataclass(frozen=True, slots=True)
 class LockViewPartitionsResult:
     """
-    Result of locking partitions through a requested year for one view.
+    Result of locking every partition below a requested year for one view.
     """
     view: str
     space: str
