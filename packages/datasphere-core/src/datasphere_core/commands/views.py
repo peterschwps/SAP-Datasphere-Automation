@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from json import JSONDecodeError
 from typing import Any
@@ -15,6 +16,7 @@ from datasphere_core.commands.shared.persistence import (
     run_persistence,
     run_persistence_removal,
 )
+from datasphere_core.commands.shared.task_logs import announce_runtime
 from datasphere_core.errors import CommandCancelledError, CommandTimeoutError
 from datasphere_core.models.views import (
     DEFAULT_VIEW_TIMEOUT_SECONDS,
@@ -453,9 +455,18 @@ async def _run_view_analyzer(
     if not started:
         return None, []
 
+    started = time.monotonic()
+    announced = started
     try:
         async with asyncio.timeout(timeout_seconds):
             while True:
+                # Announce at the top, so the early continue below reports
+                # its wait just like the completed run does
+                announced = announce_runtime(
+                    f"view '{view}'",
+                    started,
+                    announced,
+                )
                 logs = await _get_task_logs(context, view, space)
                 matching = _match_analyzer_log(
                     logs,

@@ -178,6 +178,7 @@ async def run_persistence(
             _get_extended_log,
             log_id=log_id,
             space=space,
+            description=f"view '{view}'",
             timeout_seconds=timeout_seconds,
         )
     except TimeoutError:
@@ -250,6 +251,7 @@ async def run_persistence_removal(
             _get_extended_log,
             log_id=log_id,
             space=space,
+            description=f"view '{view}'",
             timeout_seconds=timeout_seconds,
         )
     except TimeoutError:

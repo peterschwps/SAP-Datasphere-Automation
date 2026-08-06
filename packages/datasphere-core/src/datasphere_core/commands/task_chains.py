@@ -133,6 +133,7 @@ async def _run_chain(
             _get_chain_log,
             log_id=log_id,
             space=space,
+            description=f"task chain '{chain}'",
             timeout_seconds=timeout_seconds,
         )
     except TimeoutError:

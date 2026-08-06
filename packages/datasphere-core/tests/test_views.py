@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -599,6 +600,45 @@ async def test_view_analyzer_waits_for_a_log_that_appears_late(
     )
 
     assert result.log_id == "41"
+
+
+@respx.mock
+async def test_a_running_analysis_reports_its_runtime(
+    context: Callable[..., CommandContext],
+    monkeypatch,
+    caplog,
+) -> None:
+    """
+    Checks that an analysis that keeps running says so while it is waited
+    for.
+    """
+    monkeypatch.setattr(views_commands, "ANALYZER_POLL_INTERVAL_SECONDS", 0)
+
+    # An interval of zero reports on every poll, so the message appears
+    # without waiting for it
+    monkeypatch.setattr(task_logs, "ANNOUNCE_INTERVAL_SECONDS", 0)
+    _task_logs_route(
+        [],
+        [{"status": "RUNNING", "logId": 41}],
+        [{"status": "COMPLETED", "logId": 41}],
+    )
+    _analyzer_start_route(log_id=41)
+    _analyzer_result_route(41, [_entity("VIEW_B")])
+
+    with caplog.at_level(logging.DEBUG, logger="datasphere_core"):
+        await find_view_persistence_candidates(
+            context(),
+            FindViewPersistenceCandidatesRequest(
+                view="VIEW_A",
+                space="SPACE_A",
+            ),
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert (
+        "Waiting for view 'VIEW_A' to finish. Current runtime 00:00:00."
+        in messages
+    )
 
 
 @respx.mock

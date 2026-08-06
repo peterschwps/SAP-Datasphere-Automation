@@ -7,6 +7,7 @@ import httpx
 import pytest
 import respx
 from datasphere_core import CommandCancelledError, CommandContext
+from datasphere_core.commands.shared import task_logs
 from datasphere_core.commands.task_chains import (
     run_task_chain,
     run_task_chain_batch,
@@ -91,6 +92,39 @@ async def test_run_task_chain_announces_its_start(
         "Starting task chain 'CHAIN_A' in space 'SPACE_A'..."
     )
     assert caplog.records[0].levelname == "INFO"
+
+
+@respx.mock
+async def test_a_running_chain_reports_its_runtime(
+    context: Callable[..., CommandContext],
+    monkeypatch,
+    caplog,
+) -> None:
+    """
+    Checks that a chain that keeps running says so while it is waited for.
+    """
+    respx.post(path=START_PATH).mock(
+        return_value=httpx.Response(202, json={"logId": 123})
+    )
+
+    # One running poll before the run completes, and an interval of zero, so
+    # the message appears without waiting for it
+    respx.get(path=LOGS_PATH).mock(
+        side_effect=[_log("RUNNING"), _log("COMPLETED", runTime=1000)]
+    )
+    monkeypatch.setattr(task_logs, "ANNOUNCE_INTERVAL_SECONDS", 0)
+
+    with caplog.at_level(logging.DEBUG, logger="datasphere_core"):
+        await run_task_chain(
+            context(),
+            RunTaskChainRequest(chain="CHAIN_A", space="SPACE_A"),
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert (
+        "Waiting for task chain 'CHAIN_A' to finish. "
+        "Current runtime 00:00:00." in messages
+    )
 
 
 @respx.mock
