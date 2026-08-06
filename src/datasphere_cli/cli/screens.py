@@ -319,7 +319,7 @@ class EntryScreen(BaseScreen):
         for category, content in MENU_OPTIONS.items():
             # Display category
             is_expanded = category in self._expanded
-            prefix = "▼ " if is_expanded else "▶ "
+            prefix = "▾ " if is_expanded else "▸ "
             menu.add_option(
                 Option(
                     prompt=f"{prefix}{category}",
@@ -333,7 +333,7 @@ class EntryScreen(BaseScreen):
                     # Show sub-categories (only for "Views")
                     if isinstance(value, dict):
                         is_sub = f"{category}::{key}" in self._expanded
-                        subprefix = "  ▼ " if is_sub else "  ▶ "
+                        subprefix = "  ▾ " if is_sub else "  ▸ "
                         menu.add_option(
                             Option(
                                 prompt=f"{subprefix}{key}",
