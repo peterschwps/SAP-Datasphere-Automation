@@ -129,10 +129,7 @@ _CREATE_MESSAGES: Mapping[CommandStatus, tuple[int, str] | None] = {
         logging.INFO,
         "View '%s' is already partitioned. Skipping...",
     ),
-    CreateViewPartitioningStatus.INVALID_COLUMN: (
-        logging.ERROR,
-        "Attribute of view '%s' cannot carry a range partitioning.",
-    ),
+    CreateViewPartitioningStatus.INVALID_COLUMN: None,
     CreateViewPartitioningStatus.FAILED: (
         logging.ERROR,
         "Failed to create partitioning for view '%s'.",

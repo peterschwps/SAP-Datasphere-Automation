@@ -515,10 +515,13 @@ def test_every_view_status_has_its_own_message() -> None:
     assert set(_PERSIST_MESSAGES) == set(PersistViewStatus)
     assert set(_UNPERSIST_MESSAGES) == set(UnpersistViewStatus)
 
-    # A start the tenant refused stays quiet: the Core already reports why
-    # the request failed
+    # A refusal the Core already reports stays quiet here, because it names
+    # the attribute or the reason the result cannot carry
     assert _PERSIST_MESSAGES[PersistViewStatus.START_FAILED] is None
     assert _UNPERSIST_MESSAGES[UnpersistViewStatus.START_FAILED] is None
+    assert _CREATE_MESSAGES[CreateViewPartitioningStatus.INVALID_COLUMN] is (
+        None
+    )
 
 
 def test_every_analytical_model_status_has_its_own_message() -> None:

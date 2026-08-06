@@ -903,6 +903,51 @@ async def test_create_partitioning_rejects_a_non_string_column(
 
 
 @respx.mock
+async def test_create_partitioning_rejects_an_unknown_column(
+    context: Callable[..., CommandContext],
+    caplog,
+) -> None:
+    """
+    Checks that a name the view does not know ends as a result instead of
+    an error. The tenant lists its columns under their technical name, so a
+    business name is a mistake that must not abort the whole batch.
+    """
+    respx.get(path=PARTITIONING_PATH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "ranges": [],
+                "partitioningColumns": {
+                    "/BIC/Z5EC02112": {"type": "cds.String"}
+                },
+            },
+        )
+    )
+    write = respx.post(path=PARTITIONING_PATH)
+
+    with caplog.at_level(logging.DEBUG, logger="datasphere_core"):
+        result = await create_view_partitioning(
+            context(),
+            CreateViewPartitioningRequest(
+                view="VIEW_A",
+                space="SPACE_A",
+                attribute="MatJahr",
+                start_year=2020,
+                end_year=2023,
+            ),
+        )
+
+    assert result.status is CreateViewPartitioningStatus.INVALID_COLUMN
+    assert not write.called
+
+    # The result only names the view, so the attribute has to be logged
+    assert (
+        "Attribute 'MatJahr' is not a partitioning column of view 'VIEW_A' "
+        "in 'SPACE_A'." in [record.getMessage() for record in caplog.records]
+    )
+
+
+@respx.mock
 async def test_delete_partitioning_maps_a_refusal_to_a_failure(
     context: Callable[..., CommandContext],
 ) -> None:

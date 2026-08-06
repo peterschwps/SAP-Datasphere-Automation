@@ -763,9 +763,29 @@ async def create_view_partitioning(
         request.space,
     )
 
+    # Look the column up by name, because the tenant lists the columns a
+    # view can be partitioned by under their technical name
+    # Both refusals are reported here, because the result names the view but
+    # not the attribute the caller asked for
+    column = partitioning["partitioningColumns"].get(request.attribute)
+    if column is None:
+        logger.error(
+            "Attribute '%s' is not a partitioning column of view '%s' in "
+            "'%s'.",
+            request.attribute,
+            request.view,
+            request.space,
+        )
+        status = CreateViewPartitioningStatus.INVALID_COLUMN
+
     # Only a string column can carry a range partitioning
-    column = partitioning["partitioningColumns"][request.attribute]
-    if column["type"] != "cds.String":
+    elif column["type"] != "cds.String":
+        logger.error(
+            "Attribute '%s' of view '%s' in '%s' is not a string column.",
+            request.attribute,
+            request.view,
+            request.space,
+        )
         status = CreateViewPartitioningStatus.INVALID_COLUMN
 
     # Keep an existing partitioning unless the caller asked to replace it
