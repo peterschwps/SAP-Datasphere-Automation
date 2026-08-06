@@ -12,16 +12,16 @@ analytical models, remote tables, task chains and views.
 
 ## Table of Contents
 
-- [Overview](#-overview)
-- [Features](#-features)
-- [Prerequisites](#-prerequisites)
-- [Installation](#-installation)
-- [Configuration](#-configuration)
-- [Usage](#-usage)
-- [Detailed Function Overview](#-detailed-function-overview)
-- [Development](#-development)
-- [Notes](#-notes)
-- [Disclaimer](#-disclaimer)
+- [Overview](#overview)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Detailed Function Overview](#detailed-function-overview)
+- [Development](#development)
+- [Notes](#notes)
+- [Disclaimer](#disclaimer)
 
 ## Overview
 
