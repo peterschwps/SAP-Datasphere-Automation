@@ -229,6 +229,7 @@ def _view_reporter(
     Returns:
         Callable[[BatchItemResult], Awaitable[None]]: Callback for the batch.
     """
+
     async def report(update: BatchItemResult) -> None:
         """
         Logs the outcome of one view.
@@ -291,7 +292,7 @@ async def export_view_persistence_candidates(
     context: CommandContext,
     minimum_candidate_score: int | float = 10,
     timeout_seconds: float = 3600.0,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> FindViewPersistenceCandidatesBatchResult:
     """
@@ -305,7 +306,7 @@ async def export_view_persistence_candidates(
         timeout_seconds (float, optional): Maximum runtime for each view.
                                            Defaults to 3600.0 seconds.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for the result
                                                       file. Uses the default
                                                       workspace when None.
@@ -371,7 +372,7 @@ async def export_view_attribute_matches(
     context: CommandContext,
     attribute_substring: str,
     case_sensitive: bool = False,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> FindViewAttributeMatchesBatchResult:
     """
@@ -383,7 +384,7 @@ async def export_view_attribute_matches(
         case_sensitive (bool, optional): Whether matching respects case.
                                          Defaults to False.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for the result
                                                       file. Uses the default
                                                       workspace when None.
@@ -428,7 +429,7 @@ async def create_view_partitioning_from_file(
     start_year: int,
     end_year: int,
     overwrite_existing: bool = False,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> CreateViewPartitioningBatchResult:
     """
@@ -441,7 +442,7 @@ async def create_view_partitioning_from_file(
         overwrite_existing (bool, optional): Whether to replace existing
                                              partitioning. Defaults to False.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when
@@ -484,7 +485,7 @@ async def create_view_partitioning_from_file(
 
 async def delete_view_partitioning_from_file(
     context: CommandContext,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> DeleteViewPartitioningBatchResult:
     """
@@ -493,7 +494,7 @@ async def delete_view_partitioning_from_file(
     Args:
         context (CommandContext): Context with the authenticated client.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when
@@ -531,7 +532,7 @@ async def delete_view_partitioning_from_file(
 async def persist_views_from_file(
     context: CommandContext,
     timeout_seconds: float = 3600.0,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> PersistViewBatchResult:
     """
@@ -543,7 +544,7 @@ async def persist_views_from_file(
         timeout_seconds (float, optional): Maximum runtime for each view.
                                            Defaults to 3600.0 seconds.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when
@@ -582,7 +583,7 @@ async def persist_views_from_file(
 async def unpersist_views_from_file(
     context: CommandContext,
     timeout_seconds: float = 3600.0,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> UnpersistViewBatchResult:
     """
@@ -594,7 +595,7 @@ async def unpersist_views_from_file(
         timeout_seconds (float, optional): Maximum runtime for each view.
                                            Defaults to 3600.0 seconds.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when
@@ -633,7 +634,7 @@ async def unpersist_views_from_file(
 async def lock_view_partitions_from_file(
     context: CommandContext,
     until_year: int,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> LockViewPartitionsBatchResult:
     """
@@ -643,7 +644,7 @@ async def lock_view_partitions_from_file(
         context (CommandContext): Context with the authenticated client.
         until_year (int): Last year whose partitions should be locked.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when
@@ -681,7 +682,7 @@ async def lock_view_partitions_from_file(
 
 async def unlock_view_partitions_from_file(
     context: CommandContext,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> UnlockViewPartitionsBatchResult:
     """
@@ -690,7 +691,7 @@ async def unlock_view_partitions_from_file(
     Args:
         context (CommandContext): Context with the authenticated client.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when

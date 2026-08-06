@@ -111,6 +111,7 @@ def _table_reporter(
     Returns:
         Callable[[BatchItemResult], Awaitable[None]]: Callback for the batch.
     """
+
     async def report(update: BatchItemResult) -> None:
         """
         Logs the outcome of one remote table.
@@ -164,7 +165,7 @@ async def configure_remote_table_statistics(
     context: CommandContext,
     space: str,
     statistics_type: StatisticsType,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> ConfigureRemoteTableStatisticsBatchResult:
     """
@@ -175,7 +176,7 @@ async def configure_remote_table_statistics(
         space (str): Datasphere space containing the remote tables.
         statistics_type (StatisticsType): Statistics type to configure.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for the result
                                                       file. Uses the default
                                                       workspace when None.
@@ -225,7 +226,7 @@ async def configure_remote_table_statistics(
 async def refresh_remote_table_statistics(
     context: CommandContext,
     space: str,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> RefreshRemoteTableStatisticsBatchResult:
     """
@@ -235,7 +236,7 @@ async def refresh_remote_table_statistics(
         context (CommandContext): Context with the authenticated client.
         space (str): Datasphere space containing the remote tables.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for the result
                                                       file. Uses the default
                                                       workspace when None.

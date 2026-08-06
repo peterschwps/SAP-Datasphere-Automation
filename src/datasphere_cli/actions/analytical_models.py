@@ -226,7 +226,7 @@ async def export_analytical_model_view_dependencies(
     context: CommandContext,
     space: str | None = None,
     deduplicate_views: bool = False,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> GetAnalyticalModelViewDependenciesBatchResult:
     """
@@ -239,7 +239,7 @@ async def export_analytical_model_view_dependencies(
         deduplicate_views (bool, optional): Whether to remove duplicate views.
                                             Defaults to False.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when
@@ -261,6 +261,7 @@ async def export_analytical_model_view_dependencies(
         deduplicate_views=deduplicate_views,
         max_concurrency=max_concurrency,
     )
+
     async def report(update: BatchItemResult) -> None:
         """
         Logs the outcome of one resolved analytical model.
@@ -322,7 +323,7 @@ async def export_analytical_model_view_dependencies(
 async def measure_analytical_model_view_persistence_from_file(
     context: CommandContext,
     timeout_seconds: float = 3600.0,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> MeasureAnalyticalModelViewPersistenceBatchResult:
     """
@@ -335,7 +336,7 @@ async def measure_analytical_model_view_persistence_from_file(
         timeout_seconds (float, optional): Maximum runtime for each model.
                                            Defaults to 3600.0 seconds.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when

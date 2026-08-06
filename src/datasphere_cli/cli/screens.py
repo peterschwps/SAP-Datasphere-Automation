@@ -116,7 +116,7 @@ MENU_OPTIONS: dict[str, MenuOption | SubCategory] = {
     },
 }
 
-DEFAULT_MAX_CONCURRENCY = 4
+DEFAULT_MAX_CONCURRENCY = 5
 
 # Method-specific parameter definitions
 PARAM_DEFINITIONS: dict[Action, list[ParameterDefinition]] = {

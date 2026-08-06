@@ -74,7 +74,7 @@ async def _report_chain(update: BatchItemResult) -> None:
 async def run_task_chains_from_file(
     context: CommandContext,
     timeout_seconds: float = 3600.0,
-    max_concurrency: int = 4,
+    max_concurrency: int = 5,
     workspace_root: str | Path | None = None,
 ) -> RunTaskChainBatchResult:
     """
@@ -86,7 +86,7 @@ async def run_task_chains_from_file(
         timeout_seconds (float, optional): Maximum runtime for each task chain.
                                            Defaults to 3600.0 seconds.
         max_concurrency (int, optional): Maximum amount of concurrent
-                                         operations. Defaults to 4.
+                                         operations. Defaults to 5.
         workspace_root (str | Path | None, optional): Root for task and
                                                       result files. Uses the
                                                       default workspace when
