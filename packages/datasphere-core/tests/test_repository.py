@@ -38,7 +38,7 @@ async def test_search_asks_for_the_requested_type(
     # The tenant describes its types in English, hence the Accept-Language
     assert 'technical_type_description:EQ(S):"View"' in views["$apply"]
     assert (
-        'technical_type_description:EQ(S):"Analytical Model"'
+        'technical_type_description:EQ(S):"Analytic Model"'
         in models["$apply"]
     )
     assert search.calls[0].request.headers["Accept-Language"] == "en"
