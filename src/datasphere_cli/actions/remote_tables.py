@@ -134,7 +134,8 @@ def _table_reporter(
             item.status,
             (
                 LEVEL_BY_OUTCOME[item.status.outcome],
-                f"Table '%s': {item.status}.",
+                "Table '%s' finished with an unexpected status. See the "
+                "result file.",
             ),
         )
         logger.log(level, message, item.table)

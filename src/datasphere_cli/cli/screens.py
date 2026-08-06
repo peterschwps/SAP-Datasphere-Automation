@@ -28,7 +28,7 @@ except PackageNotFoundError:
     _APP_VERSION = "dev"
 
 from datasphere_core import CommandContext, DatasphereSession
-from datasphere_core.models.common import CommandProgress, CommandProgressPhase
+from datasphere_core.models.common import CommandProgress
 from datasphere_core.models.remote_tables import StatisticsType
 
 from datasphere_cli import actions
@@ -729,12 +729,10 @@ def progress_status(update: CommandProgress) -> str | None:
         str | None: Line to show, or None if the update carries nothing the
                     status line does not say already.
     """
-    # Only completed items carry a count, so a batch reports its start
-    # without one. Skipping it would leave the screen unchanged until the
-    # first item is done, which can take minutes.
+    # Keep the line the screen starts with until an update carries counts.
+    # It already says that the action is running, and the command name says
+    # nothing to the user.
     if update.completed_items is None:
-        if update.phase is CommandProgressPhase.STARTED:
-            return f"Running {update.command}..."
         return None
     return progress_line(update)
 

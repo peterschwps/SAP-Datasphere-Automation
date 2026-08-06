@@ -108,7 +108,8 @@ def _log_item(
         result.status,
         (
             LEVEL_BY_OUTCOME[result.status.outcome],
-            f"Analytical model '%s': {result.status}.",
+            "Analytical model '%s' finished with an unexpected status. See "
+            "the result file.",
         ),
     )
     logger.log(level, message, result.analytical_model_name)

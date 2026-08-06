@@ -110,26 +110,14 @@ def test_progress_line_without_outcomes_shows_the_count_alone() -> None:
     assert line == "1/2"
 
 
-def test_progress_status_announces_a_started_batch() -> None:
-    """
-    Checks that a batch says it is running before it counted anything.
-    """
-    line = progress_status(
-        CommandProgress(
-            command="task_chains.run_batch",
-            phase=CommandProgressPhase.STARTED,
-        )
-    )
-
-    # A chain can run for minutes, so the screen must not stay unchanged
-    assert line == "Running task_chains.run_batch..."
-
-
 def test_progress_status_ignores_updates_without_a_count() -> None:
     """
-    Checks that a phase other than the start adds nothing to the line.
+    Checks that an update without counters leaves the line alone. The screen
+    already says that the action is running, and the command name is an
+    internal identifier the user has no use for.
     """
     for phase in (
+        CommandProgressPhase.STARTED,
         CommandProgressPhase.COMPLETED,
         CommandProgressPhase.CANCELLED,
     ):

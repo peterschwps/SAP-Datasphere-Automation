@@ -62,7 +62,8 @@ async def _report_chain(update: BatchItemResult) -> None:
         item.status,
         (
             LEVEL_BY_OUTCOME[item.status.outcome],
-            f"Task chain '%s': {item.status}.",
+            "Task chain '%s' finished with an unexpected status. See the "
+            "result file.",
         ),
     )
     if message is None:

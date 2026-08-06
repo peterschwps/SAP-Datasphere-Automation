@@ -261,7 +261,8 @@ def _view_reporter(
             item.status,
             (
                 LEVEL_BY_OUTCOME[item.status.outcome],
-                f"View '%s': {item.status}.",
+                "View '%s' finished with an unexpected status. See the "
+                "result file.",
             ),
         )
         if message is None:
