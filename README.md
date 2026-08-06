@@ -162,26 +162,15 @@ zero only when the run completes successfully. JSON output is written only to
 3. Install the required browsers for Playwright:
 
     ```bash
-    uv run playwright install
+    uv run playwright install chrome msedge
     ```
 
     Docs: <https://playwright.dev/docs/intro>.
 
 ### For Developers
 
-1. Clone the repository and navigate to the project directory
-
-2. Install dev dependencies:
-
-    ```bash
-    uv sync --all-packages --group dev
-    ```
-
-3. Install Playwright:
-
-    ```bash
-    uv run playwright install
-    ```
+See [Developer Setup](docs/SETUP.md) for development dependencies, Git hooks,
+browser installation, and validation commands.
 
 ## Configuration
 
@@ -773,29 +762,10 @@ Sales2025,SALES_DEPARTMENT,completed,COMPLETED,operation-1,37
 
 ## Development
 
-### Code Quality
-
-The project uses:
-
-- **ruff** for linting and code formatting
-- **pyright** for type checking (in basic mode)
-
-### Setting up Development Environment
-
-1. Clone the repository
-
-2. Install development environment:
-
-    ```bash
-    uv sync --all-packages --group dev
-    ```
-
-3. Run pre-commit checks:
-
-    ```bash
-    uv run ruff check .
-    uv run pyright .
-    ```
+See the [Contribution Guide](CONTRIBUTING.md) for branch, commit, pull-request,
+release, and sensitive-data requirements. See
+[Developer Setup](docs/SETUP.md) for the toolchain, environment setup, checks,
+and Textual development workflow.
 
 ### Logging
 
