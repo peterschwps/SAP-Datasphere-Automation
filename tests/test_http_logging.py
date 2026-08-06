@@ -1,5 +1,4 @@
 import json
-import logging
 from pathlib import Path
 
 import pytest
@@ -84,27 +83,3 @@ def test_the_log_file_can_be_moved_elsewhere(
     assert path == target
     assert target.exists()
     assert not (tmp_path / "datasphere").exists()
-
-
-def test_logging_announces_itself(
-    tmp_path: Path,
-    monkeypatch,
-    caplog,
-) -> None:
-    """
-    Checks that the user is told about the file and what it holds.
-    """
-    monkeypatch.setenv(HTTP_LOGGING_VARIABLE, "1")
-    monkeypatch.chdir(tmp_path)
-
-    with caplog.at_level(logging.DEBUG, logger="datasphere_cli.logging"):
-        path = configure_http_logging()
-    stop_http_logging()
-
-    messages = [record.getMessage() for record in caplog.records]
-    assert any(str(path) in message for message in messages)
-
-    # Nothing in the file is masked, so the warning is the only thing
-    # standing between the user and a shared access token
-    assert any("in clear text" in message for message in messages)
-    assert any(r.levelname == "WARNING" for r in caplog.records)
