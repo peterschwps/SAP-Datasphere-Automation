@@ -3,6 +3,7 @@ import os.path
 import textwrap
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 from datasphere_core.logging import SUCCESS
@@ -44,6 +45,17 @@ LEVEL_BY_OUTCOME = {
 
 # Set up the logger
 logger = logging.getLogger(__name__)
+
+
+def log_result_file(path: Path) -> None:
+    """
+    Logs a clickable link to a written result file.
+
+    Args:
+        path (Path): Result file to link.
+    """
+    link = f"[link={path.resolve().as_uri()}][u]file[/u][/link]"
+    logger.log(SUCCESS, "Result saved to %s.", link)
 
 
 # Create formatter class for multiline strings

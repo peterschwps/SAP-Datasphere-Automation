@@ -1,12 +1,18 @@
+from typing import Any, cast
+
+import httpx
+from datasphere_core import CommandContext
 from datasphere_core.models.common import (
     CommandProgress,
     CommandProgressPhase,
 )
-from textual.widgets import Input
+from textual.widgets import Input, Static
 
 from datasphere_cli import actions
+from datasphere_cli.cli import screens
 from datasphere_cli.cli.screens import (
     DatasphereApp,
+    ExecutionScreen,
     ParamScreen,
     _outcome_segment_widths,
     progress_line,
@@ -21,6 +27,63 @@ async def test_app_uses_native_terminal_colors() -> None:
     async with DatasphereApp().run_test() as pilot:
         assert pilot.app.theme == "ansi-dark"
         assert pilot.app.native_ansi_color
+
+
+async def test_completed_execution_keeps_count_and_shows_hint(
+    monkeypatch,
+) -> None:
+    """
+    Checks that completion does not replace the final result counters.
+    """
+
+    class FakeSession:
+        """
+        Session replacement that avoids authentication and network access.
+        """
+
+        def __init__(self, _config: object) -> None:
+            self.client = cast(httpx.AsyncClient, object())
+
+        async def authenticate(self, *, interactive: bool) -> None:
+            _ = interactive
+
+        async def aclose(self) -> None:
+            pass
+
+    async def action(context: CommandContext, **_params: Any) -> object:
+        """
+        Reports one completed item without doing external work.
+        """
+        await context.report(
+            CommandProgress(
+                command="task_chains.run_batch",
+                phase=CommandProgressPhase.COMPLETED,
+                completed_items=1,
+                total_items=1,
+                succeeded_items=1,
+            )
+        )
+        return object()
+
+    monkeypatch.setattr(screens, "build_session_config", object)
+    monkeypatch.setattr(screens, "DatasphereSession", FakeSession)
+    execution = ExecutionScreen(action, {})
+
+    async with DatasphereApp().run_test() as pilot:
+        pilot.app.push_screen(execution)
+        await pilot.pause()
+        await pilot.app.workers.wait_for_complete()
+
+        status = execution.query_one("#result-status", Static)
+        hint = execution.query_one("#execution-hint", Static)
+
+        assert status.content == (
+            "1/1 · 1 succeeded, 0 skipped, 0 failed, 0 timed out"
+        )
+        assert hint.content == (
+            "Done. Press Enter or Esc to return to the menu."
+        )
+        assert not hint.has_class("-hidden")
 
 
 def test_optional_string_none_is_rendered_as_empty_input() -> None:
@@ -83,9 +146,9 @@ async def test_number_with_default_is_pre_filled() -> None:
     assert widget.value == "10"
 
 
-def test_progress_line_lists_only_recorded_outcomes() -> None:
+def test_progress_line_lists_all_outcomes_in_stable_order() -> None:
     """
-    Checks that the status line names the counters that are not zero.
+    Checks that the status line includes every outcome in a stable order.
     """
     line = progress_line(
         CommandProgress(
@@ -100,13 +163,14 @@ def test_progress_line_lists_only_recorded_outcomes() -> None:
         )
     )
 
-    # A zero counter would only pad the line
-    assert line == "34/53 · 30 succeeded, 3 failed, 1 skipped"
+    assert line == (
+        "34/53 · 30 succeeded, 1 skipped, 3 failed, 0 timed out"
+    )
 
 
-def test_progress_line_without_outcomes_shows_the_count_alone() -> None:
+def test_progress_line_without_outcomes_shows_zeroed_counts() -> None:
     """
-    Checks that the status line falls back to the bare item count.
+    Checks that missing outcome counters are displayed as zero.
     """
     line = progress_line(
         CommandProgress(
@@ -117,7 +181,7 @@ def test_progress_line_without_outcomes_shows_the_count_alone() -> None:
         )
     )
 
-    assert line == "1/2"
+    assert line == "1/2 · 0 succeeded, 0 skipped, 0 failed, 0 timed out"
 
 
 def test_progress_status_ignores_updates_without_a_count() -> None:
@@ -149,7 +213,7 @@ def test_progress_status_switches_to_the_counter_once_items_finish() -> None:
         )
     )
 
-    assert line == "1/3 · 1 succeeded"
+    assert line == "1/3 · 1 succeeded, 0 skipped, 0 failed, 0 timed out"
 
 
 def test_progress_status_initializes_a_known_batch() -> None:
@@ -169,7 +233,7 @@ def test_progress_status_initializes_a_known_batch() -> None:
         )
     )
 
-    assert line == "0/1"
+    assert line == "0/1 · 0 succeeded, 0 skipped, 0 failed, 0 timed out"
 
 
 def test_outcome_segments_leave_unknown_progress_unfilled() -> None:

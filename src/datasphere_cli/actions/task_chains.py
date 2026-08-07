@@ -20,7 +20,12 @@ from datasphere_cli.files.storage import (
     read_task_csv,
     write_result_csv,
 )
-from datasphere_cli.logging import LEVEL_BY_OUTCOME, SUCCESS, logger
+from datasphere_cli.logging import (
+    LEVEL_BY_OUTCOME,
+    SUCCESS,
+    log_result_file,
+    logger,
+)
 
 _COMMAND = "task_chains.run_batch"
 
@@ -137,5 +142,5 @@ async def run_task_chains_from_file(
         result.summary.failed,
         result.summary.timed_out,
     )
-    logger.log(SUCCESS, "Results saved to '%s'.", path)
+    log_result_file(path)
     return result

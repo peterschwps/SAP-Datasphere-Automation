@@ -26,7 +26,12 @@ from datasphere_cli.files.records import (
     RemoteTableStatisticsResultRecord,
 )
 from datasphere_cli.files.storage import initialize_result, write_result_csv
-from datasphere_cli.logging import LEVEL_BY_OUTCOME, SUCCESS, logger
+from datasphere_cli.logging import (
+    LEVEL_BY_OUTCOME,
+    SUCCESS,
+    log_result_file,
+    logger,
+)
 
 _CONFIGURE_COMMAND = "remote_tables.configure_statistics_batch"
 _REFRESH_COMMAND = "remote_tables.refresh_statistics_batch"
@@ -158,7 +163,7 @@ def _log_summary(result: RemoteTableBatchResult, path: Path) -> None:
         result.summary.failed,
         result.summary.skipped,
     )
-    logger.log(SUCCESS, "Results saved to '%s'.", path)
+    log_result_file(path)
 
 
 async def configure_remote_table_statistics(

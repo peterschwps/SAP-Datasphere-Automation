@@ -703,19 +703,15 @@ def progress_line(update: CommandProgress) -> str:
         str: Completed items and the outcomes counted so far.
     """
     total = "?" if update.total_items is None else str(update.total_items)
-    counts = {
-        "succeeded": update.succeeded_items,
-        "failed": update.failed_items,
-        "skipped": update.skipped_items,
-        "timed out": update.timed_out_items,
-    }
-
-    # Outcomes that never occurred would only pad the line
-    outcomes = ", ".join(
-        f"{count} {name}" for name, count in counts.items() if count
+    counts = (
+        ("succeeded", update.succeeded_items or 0),
+        ("skipped", update.skipped_items or 0),
+        ("failed", update.failed_items or 0),
+        ("timed out", update.timed_out_items or 0),
     )
+    outcomes = ", ".join(f"{count} {name}" for name, count in counts)
     completed = f"{update.completed_items}/{total}"
-    return f"{completed} · {outcomes}" if outcomes else completed
+    return f"{completed} · {outcomes}"
 
 
 def progress_status(update: CommandProgress) -> str | None:
@@ -853,11 +849,12 @@ class ExecutionScreen(BaseScreen):
         """
         yield Container(
             RichLog(id="log", wrap=True, markup=True),
+            Static("", id="execution-hint", classes="-hidden"),
             Container(
                 Static("Progress", id="progress-heading"),
                 OutcomeProgressBar(id="outcome-progress"),
                 Static(
-                    "Authenticating and preparing tasks...",
+                    "Starting...",
                     id="result-status",
                 ),
                 id="progress-panel",
@@ -878,6 +875,7 @@ class ExecutionScreen(BaseScreen):
         """
         log_widget = self.query_one("#log", RichLog)
         status = self.query_one("#result-status", Static)
+        hint = self.query_one("#execution-hint", Static)
         progress_heading = self.query_one("#progress-heading", Static)
         progress_bar = self.query_one(
             "#outcome-progress",
@@ -921,14 +919,15 @@ class ExecutionScreen(BaseScreen):
             )
             await self._action(context, **self._params)
             progress_heading.update("Completed")
-            status.update("Done. Press Enter or Esc to return to the menu.")
+            hint.update("Done. Press Enter or Esc to return to the menu.")
+            hint.remove_class("-hidden")
 
         # Stop on any unhandled exceptions
         except Exception as e:
             progress_heading.update("Stopped")
-            status.update(
-                f"[b][#AA0808]Error: {e}[/]\nPress Enter or Esc to return."
-            )
+            status.update(f"[b][#AA0808]Error: {e}[/]")
+            hint.update("Press Enter or Esc to return.")
+            hint.remove_class("-hidden")
 
         # Remove handler to prevent multiple handlers co-existing if this
         # screen gets called more than once

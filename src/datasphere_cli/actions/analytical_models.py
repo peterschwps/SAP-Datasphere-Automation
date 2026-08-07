@@ -38,7 +38,12 @@ from datasphere_cli.files.storage import (
     read_task_csv,
     write_result_json,
 )
-from datasphere_cli.logging import LEVEL_BY_OUTCOME, SUCCESS, logger
+from datasphere_cli.logging import (
+    LEVEL_BY_OUTCOME,
+    SUCCESS,
+    log_result_file,
+    logger,
+)
 
 _DEPENDENCIES_COMMAND = "analytical_models.get_view_dependencies_batch"
 _MEASURE_COMMAND = "analytical_models.measure_view_persistence_batch"
@@ -132,7 +137,7 @@ def _log_summary(result: AnalyticalModelBatchResult, path: Path) -> None:
         summary.skipped,
         summary.timed_out,
     )
-    logger.log(SUCCESS, "Results saved to '%s'.", path)
+    log_result_file(path)
 
 
 def _summary_record(result: AnalyticalModelBatchResult) -> BatchSummaryRecord:

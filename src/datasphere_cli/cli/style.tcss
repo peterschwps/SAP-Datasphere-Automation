@@ -50,6 +50,7 @@ Screen {
 #header {
     height: auto;
     padding-bottom: 1;
+    padding-top: 1;
 }
 
 #header-byline {
@@ -73,6 +74,7 @@ Screen {
     background: transparent;
     border: round ansi_default;
     padding: 0 1;
+    min-height: 3;
 }
 
 #menu {
@@ -87,17 +89,32 @@ Screen {
 }
 
 #param-hint {
-    height: 1;
+    margin-top: 1;
     padding-left: 1;
     text-style: dim;
+}
+
+#execution-hint {
+    margin-bottom: 1;
+    height: 1;
+    text-style: dim;
+}
+
+#param-hint {
+    height: 1;
 }
 
 #param-widget-area {
     height: auto;
 }
 
+.-hidden {
+    display: none;
+}
+
 #progress-heading {
     height: 1;
+    margin-top: 1;
     text-style: bold;
 }
 
