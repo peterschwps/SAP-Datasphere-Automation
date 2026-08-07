@@ -68,7 +68,12 @@ from datasphere_cli.files.storage import (
     read_task_csv,
     write_result_csv,
 )
-from datasphere_cli.logging import LEVEL_BY_OUTCOME, SUCCESS, logger
+from datasphere_cli.logging import (
+    LEVEL_BY_OUTCOME,
+    SUCCESS,
+    log_result_file,
+    logger,
+)
 
 _CANDIDATES_COMMAND = "views.find_persistence_candidates_batch"
 _ATTRIBUTES_COMMAND = "views.find_attribute_matches_batch"
@@ -285,7 +290,7 @@ def _log_summary(result: ViewBatchResult, path: Path) -> None:
         result.summary.skipped,
         result.summary.timed_out,
     )
-    logger.log(SUCCESS, "Results saved to '%s'.", path)
+    log_result_file(path)
 
 
 async def export_view_persistence_candidates(

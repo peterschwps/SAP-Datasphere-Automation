@@ -9,7 +9,7 @@ An interactive CLI that uses the internal SAP Datasphere API to automate
 various tasks such as managing analytical models, remote tables, task chains
 and views.
 
-![Preview of the CLI](./docs/images/cli.png)
+![Demo of the CLI](./docs/images/demo.gif)
 
 ## Table of Contents
 

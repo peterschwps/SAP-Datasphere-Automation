@@ -528,6 +528,17 @@ async def run_batch[ItemT, ItemResultT: StatusResult](
         total_items=len(items),
     )
 
+    # Announce the batch size before any item completes, so consumers can
+    # initialize determinate progress immediately.
+    await context.report(
+        _batch_progress(
+            command=command,
+            phase=CommandProgressPhase.STARTED,
+            summary=reporter.summary,
+            total_items=len(items),
+        )
+    )
+
     # Create new context which disables the per-item progress callback.
     # Otherwise each item would report phases like started, failed, etc.
     # During batch processing only 'advanced' is reported for each completed

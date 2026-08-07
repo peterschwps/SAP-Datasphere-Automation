@@ -257,6 +257,7 @@ async def test_run_task_chain_batch_keeps_order_and_reports_progress(
     # One failed chain makes the whole batch end in the failed phase
     assert [update.phase for update in progress] == [
         CommandProgressPhase.STARTED,
+        CommandProgressPhase.STARTED,
         CommandProgressPhase.ADVANCED,
         CommandProgressPhase.ADVANCED,
         CommandProgressPhase.ADVANCED,

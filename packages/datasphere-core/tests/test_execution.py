@@ -207,10 +207,13 @@ async def test_run_batch_keeps_order_and_counts_outcomes() -> None:
         timed_out=1,
     )
 
-    # Every completed item is reported once, with its index
+    # The total is announced before every completed item is reported once
     assert [update.phase for update in progress] == [
-        CommandProgressPhase.ADVANCED
-    ] * 5
+        CommandProgressPhase.STARTED
+    ] + [CommandProgressPhase.ADVANCED] * 5
+    assert progress[0].completed_items == 0
+    assert progress[0].total_items == 5
+    assert progress[0].item_index is None
     assert sorted(update.item_index for update in items) == [0, 1, 2, 3, 4]
     assert all(update.total_items == 5 for update in items)
 
@@ -233,8 +236,10 @@ async def test_run_batch_mutes_the_lifecycle_of_its_items() -> None:
     # A registered command may be used as the item operation. It must not
     # report its own 'started' and terminal phases per item.
     assert [update.phase for update in progress] == [
-        CommandProgressPhase.ADVANCED
-    ] * 2
+        CommandProgressPhase.STARTED,
+        CommandProgressPhase.ADVANCED,
+        CommandProgressPhase.ADVANCED,
+    ]
     assert {update.command for update in progress} == {"example.run_batch"}
 
 
