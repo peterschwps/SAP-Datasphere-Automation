@@ -8,9 +8,19 @@ from datasphere_cli import actions
 from datasphere_cli.cli.screens import (
     DatasphereApp,
     ParamScreen,
+    _outcome_segment_widths,
     progress_line,
     progress_status,
 )
+
+
+async def test_app_uses_native_terminal_colors() -> None:
+    """
+    Checks that ANSI defaults pass through instead of becoming dark RGB.
+    """
+    async with DatasphereApp().run_test() as pilot:
+        assert pilot.app.theme == "ansi-dark"
+        assert pilot.app.native_ansi_color
 
 
 def test_optional_string_none_is_rendered_as_empty_input() -> None:
@@ -140,3 +150,75 @@ def test_progress_status_switches_to_the_counter_once_items_finish() -> None:
     )
 
     assert line == "1/3 · 1 succeeded"
+
+
+def test_progress_status_initializes_a_known_batch() -> None:
+    """
+    Checks that a newly initialized batch displays zero completed items.
+    """
+    line = progress_status(
+        CommandProgress(
+            command="task_chains.run_batch",
+            phase=CommandProgressPhase.STARTED,
+            completed_items=0,
+            total_items=1,
+            succeeded_items=0,
+            failed_items=0,
+            skipped_items=0,
+            timed_out_items=0,
+        )
+    )
+
+    assert line == "0/1"
+
+
+def test_outcome_segments_leave_unknown_progress_unfilled() -> None:
+    """
+    Checks that a batch without a known size renders as entirely pending.
+    """
+    update = CommandProgress(
+        command="views.persist_batch",
+        phase=CommandProgressPhase.STARTED,
+    )
+
+    widths = _outcome_segment_widths(update, 20)
+
+    assert widths == (0, 0, 20, 0)
+
+
+def test_outcome_segments_split_completed_and_pending_items() -> None:
+    """
+    Checks that each outcome receives its proportional part of the bar.
+    """
+    update = CommandProgress(
+        command="views.persist_batch",
+        phase=CommandProgressPhase.ADVANCED,
+        completed_items=7,
+        total_items=10,
+        succeeded_items=3,
+        skipped_items=2,
+        failed_items=1,
+        timed_out_items=1,
+    )
+
+    widths = _outcome_segment_widths(update, 20)
+
+    # Errors stay anchored to the right with pending work before them
+    assert widths == (6, 4, 6, 4)
+
+
+def test_outcome_segments_fill_successful_batch_in_green() -> None:
+    """
+    Checks that an entirely successful batch fills the first segment.
+    """
+    update = CommandProgress(
+        command="task_chains.run_batch",
+        phase=CommandProgressPhase.COMPLETED,
+        completed_items=4,
+        total_items=4,
+        succeeded_items=4,
+    )
+
+    widths = _outcome_segment_widths(update, 20)
+
+    assert widths == (20, 0, 0, 0)

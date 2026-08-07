@@ -3,30 +3,28 @@
 }
 
 App {
-    background: #A9B4BE;
-    color: #223548;
+    background: ansi_default;
+    color: ansi_default;
 }
 
 Screen {
-    background: #A9B4BE;
+    background: ansi_default;
     padding: 0;
-    border: none #223548;
+    border: none;
 }
-
 
 #content {
     align-horizontal: center;
-    border: hkey #223548;
     content-align: center middle;
     height: 1fr;
-    padding: 0 1 0 1;
+    padding: 0 3;
 }
 
 #footer {
     height: 1;
-    # margin: 1 0 0 0;
     min-width: 50;
-    opacity: 80%;
+    opacity: 70%;
+    margin: 0 0 1 0;
     text-wrap: nowrap;
 }
 
@@ -51,7 +49,7 @@ Screen {
 
 #header {
     height: auto;
-    margin-bottom: 1;
+    padding-bottom: 1;
 }
 
 #header-byline {
@@ -60,44 +58,69 @@ Screen {
 }
 
 #header-logo {
-    # border: round white;
     content-align: center middle;
-    # margin: 1 0 1 0;
     min-width: 112;
     text-wrap: nowrap;
 }
 
+#execution-content {
+    height: 1fr;
+    padding: 0 3;
+}
+
 #log {
     height: 1fr;
-    border: round #223548;
-    background: #A9B4BE;
+    background: transparent;
+    border: round ansi_default;
+    padding: 0 1;
 }
 
 #menu {
     height: 1fr;
+    margin-bottom: 1;
 }
 
 #param-error {
-    color: #AA0808;
+    color: ansi_red;
+    height: 1;
     text-style: bold;
 }
 
-#param-form {
-    height: 1fr;
-    padding: 1 2;
+#param-hint {
+    height: 1;
+    padding-left: 1;
+    text-style: dim;
+}
+
+#param-widget-area {
+    height: auto;
+}
+
+#progress-heading {
+    height: 1;
+    text-style: bold;
+}
+
+#progress-panel {
+    height: 5;
+    margin-top: 1;
+    padding: 0 1;
+}
+
+#outcome-progress {
+    height: 1;
+    width: 1fr;
 }
 
 #result-status {
-    height: auto;
-    padding: 1 0 0 0;
-    content-align: center middle;
-    color: #223548;
+    height: 1;
+    content-align: left middle;
 }
 
 #settings-editor {
-    background: #A9B4BE;
-    border: round #223548;
-    color: #223548;
+    background: transparent;
+    border: round ansi_default;
+    color: ansi_default;
     height: 1fr;
 }
 
@@ -109,35 +132,39 @@ Screen {
 
 #settings-status {
     height: auto;
-    content-align: center middle;
-    padding: 1 0 0 0;
+    padding-bottom: 1;
 }
 
 Input {
-    background: #A9B4BE;
-    border: tall #223548;
-    color: #223548;
+    background: transparent;
+    border: tall ansi_default;
+    color: ansi_default;
 }
 
 Input:focus {
-    border: tall #5B738B;
+    border: tall ansi_default;
 }
 
 OptionList, ListView {
-    background: #A9B4BE;
-    border: round #223548;
+    background: transparent;
+    border: none;
+}
+
+#menu {
+    border: round ansi_default;
 }
 
 OptionList > .option-list--option {
-    color: #223548;
+    color: ansi_default;
 }
 
 OptionList > .option-list--option-highlighted {
-    background: #5B738B;
-    color: $text;
-    text-style: bold;
+    background: transparent;
+    color: ansi_default;
+    text-style: bold reverse;
 }
 
 OptionList > .option-list--option-hover {
-    color: #223548;
+    color: ansi_default;
+    text-style: underline;
 }

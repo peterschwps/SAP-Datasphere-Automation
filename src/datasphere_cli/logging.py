@@ -28,10 +28,10 @@ LIBRARY_LOGGER_NAME = "datasphere_core"
 FORMATS = {
     logging.DEBUG: "#223548",
     logging.INFO: "#5B738B",
-    SUCCESS: "#188918",
-    logging.WARNING: "#C35500",
-    logging.ERROR: "#D20A0A",
-    logging.CRITICAL: "bold #AA0808",
+    SUCCESS: "green",
+    logging.WARNING: "yellow",
+    logging.ERROR: "red",
+    logging.CRITICAL: "bold red",
 }
 
 # Level per outcome for a status that has no message of its own

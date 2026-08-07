@@ -9,10 +9,11 @@ from typing import Any, Literal, cast
 from pydantic import ValidationError
 from rich.text import Text
 from textual import events
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, RenderResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import (
     Input,
     OptionList,
@@ -289,7 +290,7 @@ class EntryScreen(BaseScreen):
             ComposeResult: Interactive menu widget.
         """
         yield Container(
-            Static("\nSelect an option:"),
+            Static("\n[b]Select an option:[/b]"),
             OptionList(id="menu"),
             id="content",
         )
@@ -466,8 +467,8 @@ class ParamScreen(BaseScreen):
             Static("", id="step-counter"),
             Static("", id="param-label"),
             Container(id="param-widget-area"),
-            Static("", id="param-error"),
             Static("", id="param-hint"),
+            Static("", id="param-error"),
             id="content",
         )
 
@@ -736,6 +737,90 @@ def progress_status(update: CommandProgress) -> str | None:
     return progress_line(update)
 
 
+def _outcome_segment_widths(
+    update: CommandProgress,
+    width: int,
+) -> tuple[int, int, int, int]:
+    """
+    Allocates a bar width to successful, skipped, pending, and failed items.
+
+    Args:
+        update (CommandProgress): Latest batch counters.
+        width (int): Available terminal cells.
+
+    Returns:
+        tuple[int, int, int, int]: Widths of the four outcome segments.
+    """
+    if width <= 0 or update.total_items is None or update.total_items <= 0:
+        return 0, 0, max(0, width), 0
+
+    succeeded = max(0, update.succeeded_items or 0)
+    skipped = max(0, update.skipped_items or 0)
+    failed = max(0, update.failed_items or 0)
+    timed_out = max(0, update.timed_out_items or 0)
+    errors = failed + timed_out
+    total = max(update.total_items, succeeded + skipped + errors)
+
+    succeeded_end = round(width * succeeded / total)
+    skipped_end = round(width * (succeeded + skipped) / total)
+    error_start = round(width * (total - errors) / total)
+
+    return (
+        succeeded_end,
+        skipped_end - succeeded_end,
+        error_start - skipped_end,
+        width - error_start,
+    )
+
+
+class OutcomeProgressBar(Widget, can_focus=False):
+    """
+    Progress bar split into successful, skipped, pending, and failed items.
+    """
+
+    def __init__(self, *, id: str | None = None) -> None:
+        """
+        Initializes an empty progress bar.
+
+        Args:
+            id (str | None, optional): Textual widget ID. Defaults to None.
+        """
+        super().__init__(id=id)
+        self._progress: CommandProgress | None = None
+
+    def update_progress(self, update: CommandProgress) -> None:
+        """
+        Applies the latest batch counters and schedules a repaint.
+
+        Args:
+            update (CommandProgress): Latest progress update.
+        """
+        self._progress = update
+        self.refresh()
+
+    def render(self) -> RenderResult:
+        """
+        Renders outcome segments using terminal-defined ANSI colors.
+
+        Returns:
+            RenderResult: One full-width progress line.
+        """
+        width = self.size.width
+        if self._progress is None:
+            widths = (0, 0, width, 0)
+        else:
+            widths = _outcome_segment_widths(self._progress, width)
+
+        bar = Text()
+        for segment_width, style in zip(
+            widths,
+            ("green", "yellow", "dim", "red"),
+            strict=True,
+        ):
+            bar.append("━" * segment_width, style=style)
+        return bar
+
+
 class ExecutionScreen(BaseScreen):
     """
     Screen that executes the selected action and shows live log output.
@@ -768,8 +853,16 @@ class ExecutionScreen(BaseScreen):
         """
         yield Container(
             RichLog(id="log", wrap=True, markup=True),
-            Static("Running...", id="result-status"),
-            id="content",
+            Container(
+                Static("Progress", id="progress-heading"),
+                OutcomeProgressBar(id="outcome-progress"),
+                Static(
+                    "Authenticating and preparing tasks...",
+                    id="result-status",
+                ),
+                id="progress-panel",
+            ),
+            id="execution-content",
         )
 
     def on_mount(self) -> None:
@@ -785,6 +878,11 @@ class ExecutionScreen(BaseScreen):
         """
         log_widget = self.query_one("#log", RichLog)
         status = self.query_one("#result-status", Static)
+        progress_heading = self.query_one("#progress-heading", Static)
+        progress_bar = self.query_one(
+            "#outcome-progress",
+            OutcomeProgressBar,
+        )
 
         # Configure LogHandler for RichLog widget (also captures the
         # datasphere-core library logs)
@@ -813,6 +911,8 @@ class ExecutionScreen(BaseScreen):
                 """
                 line = progress_status(update)
                 if line is not None:
+                    progress_heading.update("Progress")
+                    progress_bar.update_progress(update)
                     status.update(line)
 
             context = CommandContext(
@@ -820,10 +920,12 @@ class ExecutionScreen(BaseScreen):
                 progress_callback=report_progress,
             )
             await self._action(context, **self._params)
+            progress_heading.update("Completed")
             status.update("Done. Press Enter or Esc to return to the menu.")
 
         # Stop on any unhandled exceptions
         except Exception as e:
+            progress_heading.update("Stopped")
             status.update(
                 f"[b][#AA0808]Error: {e}[/]\nPress Enter or Esc to return."
             )
@@ -961,4 +1063,5 @@ class DatasphereApp(App):
         """
         Shows the main menu after the app started.
         """
+        self.theme = "ansi-dark"
         self.push_screen(EntryScreen())
