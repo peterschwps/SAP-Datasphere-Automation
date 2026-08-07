@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.5.0...v0.5.1) (2026-08-07)
+
+
+### Features
+
+* **tui:** add clean interface ([#27](https://github.com/peterschwps/SAP-Datasphere-CLI/issues/27)) ([38494f4](https://github.com/peterschwps/SAP-Datasphere-CLI/commit/38494f4509b32a02ea3b8c4138a526c1210e4673))
+
 ## [0.5.0](https://github.com/peterschwps/SAP-Datasphere-CLI/compare/v0.4.0...v0.5.0) (2026-08-07)
 
 
