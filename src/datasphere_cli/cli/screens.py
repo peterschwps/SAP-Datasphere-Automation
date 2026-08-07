@@ -44,7 +44,6 @@ from datasphere_cli.settings import (
     build_session_config,
     reload_settings,
 )
-from datasphere_cli.utils.tokens import TokenStore
 
 # Mapping of all menu categories, sub-categories and its options
 type Action = Callable[..., Awaitable[object]]

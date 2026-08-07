@@ -253,10 +253,7 @@ browser window. After logging in the site will automatically redirect to
 `http://localhost:8080`, fetch the callback code and close the browser window.
 
 This will create a login session which can be refreshed automatically in the
-future. The session tokens are stored as `session.json` in the user data
-directory of `Datasphere`, so other tools built on the
-[Datasphere-API](https://github.com/peterschwps/SAP-Datasphere-API) library
-can share the same session.
+future.
 
 ### Menu Navigation
 
@@ -471,16 +468,9 @@ statistics type are skipped.<br>
   2. Simple Statistics
   3. Histogram
 
-**Output file:** `results.csv` in the run folder
+**Output file:** None
 
-**Example output:**
-
-```csv
-entity,space,success,detail,runtime
-SALES_ORDERS,,True,created,
-CUSTOMERS,,True,skipped_same_type,
-LEGACY_TABLE,,False,skipped_unsupported,
-```
+**Example output:** None
 
 **Reference:** [SAP Datasphere Documentation - Statistics for Remote Tables](https://help.sap.com/docs/SAP_DATASPHERE)
 
@@ -495,15 +485,9 @@ Updates all existing statistics for remote tables.
 
 **Parameters:** None
 
-**Output file:** `results.csv` in the run folder
+**Output file:** None
 
-**Example output:**
-
-```csv
-entity,space,success,detail,runtime
-SALES_ORDERS,,True,refreshed,
-LEGACY_TABLE,,False,skipped_no_statistics,
-```
+**Example output:** None
 
 </details>
 
@@ -771,8 +755,8 @@ and Textual development workflow.
 
 ### Logging
 
-The program uses logging. Log files are created for each day and saved in the
-`.logs/` folder of the directory where you run the program.
+The program uses logging. Log files are created for each day in the `.logs/`
+directory below the current working directory.
 
 Every unit of work announces its start and reports its outcome, so a long run
 never stays silent. The level says what a line means:
