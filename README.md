@@ -5,8 +5,9 @@
 [![CI](https://github.com/peterschwps/SAP-Datasphere-CLI/actions/workflows/ci.yml/badge.svg)](https://github.com/peterschwps/SAP-Datasphere-CLI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.txt)
 
-**Retro-styled CLI for SAP Datasphere** that automates various tasks such as managing
-analytical models, remote tables, task chains and views.
+An interactive CLI that uses the internal SAP Datasphere API to automate
+various tasks such as managing analytical models, remote tables, task chains
+and views.
 
 ![Preview of the CLI](./docs/images/cli.png)
 

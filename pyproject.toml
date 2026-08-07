@@ -1,7 +1,7 @@
 [project]
 name = "Datasphere-CLI"
 version = "0.4.0"
-description = "Unofficial TUI for automating recurring tasks in SAP Datasphere"
+description = "An interactive CLI that uses the internal SAP Datasphere API to automate various tasks such as managing analytical models, remote tables, task chains and views."
 authors = [
     { name = "Peter Schwips" }
 ]
