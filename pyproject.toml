@@ -18,7 +18,7 @@ classifiers = [
 dependencies = [
     "datasphere-core==0.5.1", # x-release-please-version
     "pydantic-settings>=2.6.0",
-    "rich>=14.0.0,<15.0.0",
+    "rich>=14.0.0,<16.0.0",
     "platformdirs>=4.4.0",
     "textual>=8.2.7",
 ]
